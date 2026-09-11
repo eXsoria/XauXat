@@ -1,0 +1,97 @@
+name: XauXat iOS
+
+on:
+  pull_request:
+    branches:
+      - xauxat/main
+    paths:
+      - apps/ios/**
+      - scripts/ios/**
+      - scripts/xauxat/**
+      - .github/workflows/xauxat-ios.yml
+  push:
+    branches:
+      - xauxat/main
+      - xauxat/tor-foundation
+    paths:
+      - apps/ios/**
+      - scripts/ios/**
+      - scripts/xauxat/**
+      - .github/workflows/xauxat-ios.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xauxat-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    name: iOS Simulator
+    runs-on: macos-26-intel
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out fork and submodules
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@786fff0690178f1234e4e1fe9b536e94f5433196
+
+      - name: Restore verified SimpleX archives
+        id: ios-archive-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .xauxat-cache/ios-libs
+          key: xauxat-ios-libs-${{ hashFiles('scripts/xauxat/ios-libs.env') }}
+
+      - name: Download SimpleX archives
+        if: steps.ios-archive-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/xauxat/ios-libs.env
+          mkdir -p .xauxat-cache/ios-libs
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            --output .xauxat-cache/ios-libs/pkg-ios-aarch64-swift-json.zip \
+            "$XAUXAT_IOS_ARM64_URL"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            --output .xauxat-cache/ios-libs/pkg-ios-x86_64-swift-json.zip \
+            "$XAUXAT_IOS_X86_64_URL"
+
+      - name: Build mac2ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          mac2ios_path=$(nix --extra-experimental-features 'nix-command flakes' \
+            build github:zw3rk/mobile-core-tools#mac2ios \
+            --no-link --print-out-paths)
+          echo "$mac2ios_path/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare pinned native libraries
+        run: ./scripts/xauxat/prepare-ios-libs.sh --archive-dir .xauxat-cache/ios-libs
+
+      - name: Build unsigned iOS Simulator app
+        run: |
+          xcodebuild \
+            -project apps/ios/SimpleX.xcodeproj \
+            -scheme "SimpleX (iOS)" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/XauXatDerivedData" \
+            ARCHS=x86_64 \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Upload Simulator app
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: XauXat-iOS-Simulator-${{ github.sha }}
+          path: ${{ runner.temp }}/XauXatDerivedData/Build/Products/Debug-iphonesimulator/*.app
+          if-no-files-found: error
+          retention-days: 14
