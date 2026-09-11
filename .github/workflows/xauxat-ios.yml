@@ -12,7 +12,6 @@ on:
   push:
     branches:
       - xauxat/main
-      - xauxat/tor-foundation
     paths:
       - apps/ios/**
       - scripts/ios/**
