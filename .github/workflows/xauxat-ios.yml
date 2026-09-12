@@ -1,0 +1,117 @@
+name: XauXat iOS
+
+on:
+  pull_request:
+    branches:
+      - xauxat/main
+    paths:
+      - apps/ios/**
+      - scripts/ios/**
+      - scripts/xauxat/**
+      - .github/workflows/xauxat-ios.yml
+  push:
+    branches:
+      - xauxat/main
+    paths:
+      - apps/ios/**
+      - scripts/ios/**
+      - scripts/xauxat/**
+      - .github/workflows/xauxat-ios.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xauxat-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  device:
+    name: Latest iOS device (arm64)
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out fork and submodules
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+
+      - name: Record Apple toolchain
+        run: |
+          test "$(uname -m)" = "arm64"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa
+
+      - name: Restore verified SimpleX archives
+        id: ios-archive-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .xauxat-cache/ios-libs
+          key: xauxat-ios-libs-${{ hashFiles('scripts/xauxat/ios-libs.env') }}
+
+      - name: Download SimpleX archives
+        if: steps.ios-archive-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/xauxat/ios-libs.env
+          mkdir -p .xauxat-cache/ios-libs
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            --output .xauxat-cache/ios-libs/pkg-ios-aarch64-swift-json.zip \
+            "$XAUXAT_IOS_ARM64_URL"
+
+      - name: Build mac2ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          mac2ios_path=$(nix --extra-experimental-features 'nix-command flakes' \
+            build github:zw3rk/mobile-core-tools#mac2ios \
+            --no-link --print-out-paths)
+          echo "$mac2ios_path/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare pinned native libraries
+        run: ./scripts/xauxat/prepare-ios-libs.sh --archive-dir .xauxat-cache/ios-libs --device-only
+
+      - name: Install pinned Tor dependency
+        run: |
+          test "$(pod --version)" = "1.17.0"
+          pod install --project-directory=apps/ios --deployment
+
+      - name: Build unsigned latest iOS device app
+        run: |
+          xcodebuild \
+            -workspace apps/ios/SimpleX.xcworkspace \
+            -scheme "SimpleX (iOS)" \
+            -configuration Debug \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/XauXatDerivedData" \
+            ARCHS=arm64 \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Verify arm64 app and embedded Tor
+        run: |
+          app_path="$RUNNER_TEMP/XauXatDerivedData/Build/Products/Debug-iphoneos/SimpleX.app"
+          test -d "$app_path"
+          test -f "$app_path/SimpleX"
+          test -f "$app_path/Frameworks/Tor.framework/Tor"
+          file "$app_path/SimpleX" | grep -q 'arm64'
+          file "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'arm64'
+          test "$(plutil -extract CFBundleDisplayName raw "$app_path/Info.plist")" = "XauXat"
+          xcrun vtool -show-build "$app_path/SimpleX" | grep -q 'platform IOS'
+          xcrun vtool -show-build "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'platform IOS'
+          otool -L "$app_path/SimpleX" | grep -q '@rpath/Tor.framework/Tor'
+
+      - name: Upload arm64 device app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: XauXat-iOS-Device-arm64-${{ github.sha }}
+          path: ${{ runner.temp }}/XauXatDerivedData/Build/Products/Debug-iphoneos/*.app
+          if-no-files-found: error
+          retention-days: 14

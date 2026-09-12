@@ -30,6 +30,9 @@ struct SimpleXApp: App {
         UserDefaults.standard.register(defaults: appDefaults)
         setGroupDefaults()
         registerGroupDefaults()
+        // A SOCKS port persisted by a previous process is never trusted.
+        // Every launch remains offline until this process boots embedded Tor.
+        setXauXatTorSocksPort(nil)
         setDbContainer()
         BGManager.shared.register()
         NtfManager.shared.registerCategories()
@@ -56,9 +59,13 @@ struct SimpleXApp: App {
                         // It's important, otherwise, user may be locked in undefined state
                         onboardingStageDefault.set(.step1_SimpleXInfo)
                         chatModel.onboardingStage = onboardingStageDefault.get()
-                    } else if kcAppPassword.get() == nil || kcSelfDestructPassword.get() == nil {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                            initChatAndMigrate()
+                    }
+                    startEmbeddedTor(showError: true) {
+                        if chatModel.migrationState == nil &&
+                           (kcAppPassword.get() == nil || kcSelfDestructPassword.get() == nil) {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                initChatAndMigrate()
+                            }
                         }
                     }
                 }
@@ -85,39 +92,63 @@ struct SimpleXApp: App {
                         NtfManager.shared.setNtfBadgeCount(chatModel.totalUnreadCountForAllUsers())
                     case .active:
                         CallController.shared.shouldSuspendChat = false
-                        let appState = AppChatState.shared.value
-
-                        if appState != .stopped {
-                            startChatAndActivate {
-                                if chatModel.chatRunning == true {
-                                    if let ntfResponse = chatModel.notificationResponse {
-                                        chatModel.notificationResponse = nil
-                                        NtfManager.shared.processNotificationResponse(ntfResponse)
-                                    }
-                                    if appState.inactive {
-                                        Task {
-                                            await updateChats()
-                                            if !chatModel.showCallView && !CallController.shared.hasActiveCalls() {
-                                                await updateCallInvitations()
-                                            }
-                                            if let url = chatModel.appOpenUrlLater {
-                                                await MainActor.run {
-                                                    chatModel.appOpenUrlLater = nil
-                                                    chatModel.appOpenUrl = url
-                                                }
-                                            }
-                                        }
-                                    } else if let url = chatModel.appOpenUrlLater {
-                                        chatModel.appOpenUrlLater = nil
-                                        chatModel.appOpenUrl = url
-                                    }
-                                }
-                            }
+                        startEmbeddedTor {
+                            resumeChatAfterTor()
                         }
                     default:
                         break
                     }
                 }
+        }
+    }
+
+    private func startEmbeddedTor(showError: Bool = false, _ completion: @escaping () -> Void) {
+        EmbeddedTorManager.shared.start { result in
+            switch result {
+            case .success:
+                completion()
+            case let .failure(error):
+                if showError {
+                    AlertManager.shared.showAlert(Alert(
+                        title: Text("Private connection unavailable"),
+                        message: Text("XauXat could not establish its private connection. No chat traffic was sent directly.\n\n\(error.localizedDescription)"),
+                        primaryButton: .default(Text("Retry")) {
+                            startEmbeddedTor(showError: true, completion)
+                        },
+                        secondaryButton: .cancel()
+                    ))
+                }
+            }
+        }
+    }
+
+    private func resumeChatAfterTor() {
+        let appState = AppChatState.shared.value
+        guard appState != .stopped else { return }
+
+        startChatAndActivate {
+            guard chatModel.chatRunning == true else { return }
+            if let ntfResponse = chatModel.notificationResponse {
+                chatModel.notificationResponse = nil
+                NtfManager.shared.processNotificationResponse(ntfResponse)
+            }
+            if appState.inactive {
+                Task {
+                    await updateChats()
+                    if !chatModel.showCallView && !CallController.shared.hasActiveCalls() {
+                        await updateCallInvitations()
+                    }
+                    if let url = chatModel.appOpenUrlLater {
+                        await MainActor.run {
+                            chatModel.appOpenUrlLater = nil
+                            chatModel.appOpenUrl = url
+                        }
+                    }
+                }
+            } else if let url = chatModel.appOpenUrlLater {
+                chatModel.appOpenUrlLater = nil
+                chatModel.appOpenUrl = url
+            }
         }
     }
 

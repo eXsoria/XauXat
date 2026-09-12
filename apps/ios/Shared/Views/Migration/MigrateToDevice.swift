@@ -60,7 +60,6 @@ enum MigrationToState: Equatable {
     case passphrase(passphrase: String)
     case migrationConfirmation(status: DBMigrationResult, passphrase: String, useKeychain: Bool)
     case migration(passphrase: String, confirmation: MigrationConfirmation, useKeychain: Bool)
-    case onion(appSettings: AppSettings)
 }
 
 private enum MigrateToDeviceViewAlert: Identifiable {
@@ -130,20 +129,18 @@ struct MigrateToDevice: View {
                 migrationConfirmationView(status, passphrase, useKeychain)
             case let .migration(passphrase, confirmation, useKeychain):
                 migrationView(passphrase, confirmation, useKeychain)
-            case let .onion(appSettings):
-                OnionView(appSettings: appSettings, finishMigration: finishMigration)
             }
         }
         .onAppear {
             backDisabled = switch migrationState {
             case nil, .pasteOrScanLink, .linkDownloading, .downloadProgress, .downloadFailed, .archiveImportFailed: false
-            case .archiveImport, .passphrase, .migrationConfirmation, .migration, .onion: true
+            case .archiveImport, .passphrase, .migrationConfirmation, .migration: true
             }
         }
         .onChange(of: migrationState) { state in
             backDisabled = switch state {
             case nil, .pasteOrScanLink, .linkDownloading, .downloadProgress, .downloadFailed, .archiveImportFailed: false
-            case .archiveImport, .passphrase, .migrationConfirmation, .migration, .onion: true
+            case .archiveImport, .passphrase, .migrationConfirmation, .migration: true
             }
         }
         .onDisappear {
@@ -427,47 +424,6 @@ struct MigrateToDevice: View {
         }
     }
 
-    struct OnionView: View {
-        @EnvironmentObject var theme: AppTheme
-        @State var appSettings: AppSettings
-        @State private var onionHosts: OnionHosts = .no
-        var finishMigration: (AppSettings) -> Void
-
-        var body: some View {
-            List {
-                Section {
-                    Button(action: {
-                        var updated = appSettings.networkConfig!
-                        let (hostMode, requiredHostMode) = onionHosts.hostMode
-                        updated.hostMode = hostMode
-                        updated.requiredHostMode = requiredHostMode
-                        updated.socksProxy = nil
-                        appSettings.networkConfig = updated
-                        finishMigration(appSettings)
-                    }) {
-                        settingsRow("checkmark", color: theme.colors.secondary) {
-                            Text("Apply").foregroundColor(theme.colors.primary)
-                        }
-                    }
-                } header: {
-                    Text("Confirm network settings")
-                        .foregroundColor(theme.colors.secondary)
-                } footer: {
-                    Text("Please confirm that network settings are correct for this device.")
-                        .foregroundColor(theme.colors.secondary)
-                        .font(.callout)
-                }
-
-                Section(header: Text("Network settings").foregroundColor(theme.colors.secondary)) {
-                    Picker("Use .onion hosts", selection: $onionHosts) {
-                        ForEach(OnionHosts.values, id: \.self) { Text($0.text) }
-                    }
-                    .frame(height: 36)
-                }
-            }
-        }
-    }
-
     private func downloadLinkDetails(_ link: String) {
         let archiveTime = Date.now
         let ts = archiveTime.ISO8601Format(Date.ISO8601FormatStyle(timeSeparator: .omitted))
@@ -590,16 +546,13 @@ struct MigrateToDevice: View {
                 resetChatCtrl()
                 try initializeChat(start: false, confirmStart: false, dbKey: passphrase, refreshInvitations: true, confirmMigrations: confirmation)
                 var appSettings = try apiGetAppSettings(settings: AppSettings.current.prepareForExport())
-                let hasOnionConfigured = appSettings.networkConfig?.socksProxy != nil || appSettings.networkConfig?.hostMode == .onionHost
+                // Imported network preferences never override XauXat's managed
+                // Tor route. Migration therefore needs no proxy confirmation UI.
                 appSettings.networkConfig?.socksProxy = nil
                 appSettings.networkConfig?.hostMode = .publicHost
                 appSettings.networkConfig?.requiredHostMode = true
                 await MainActor.run {
-                    if hasOnionConfigured {
-                        migrationState = .onion(appSettings: appSettings)
-                    } else {
-                        finishMigration(appSettings)
-                    }
+                    finishMigration(appSettings)
                 }
             } catch let error {
                 hideView()

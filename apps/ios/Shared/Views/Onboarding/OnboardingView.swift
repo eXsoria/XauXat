@@ -17,8 +17,7 @@ struct OnboardingView: View {
         NavigationView {
             switch onboarding {
             case .step1_SimpleXInfo:
-                SimpleXInfo(onboarding: true)
-                    .modifier(ThemedBackground())
+                XauXatWelcomeView()
             case .step2_CreateProfile:
                 CreateFirstProfile()
                     .modifier(ThemedBackground())

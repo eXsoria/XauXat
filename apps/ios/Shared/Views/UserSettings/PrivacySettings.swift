@@ -204,10 +204,10 @@ struct PrivacySettings: View {
                     .foregroundColor(theme.colors.secondary)
             } footer: {
                 if askToApproveRelays {
-                    Text("The app will ask to confirm downloads from unknown file servers (except .onion).")
+                    Text("Files use XauXat's private connection. The app will ask before downloading from unknown file servers.")
                         .foregroundColor(theme.colors.secondary)
                 } else {
-                    Text("Without Tor or VPN, your IP address will be visible to file servers.")
+                    Text("Files use XauXat's private connection.")
                         .foregroundColor(theme.colors.secondary)
                 }
             }

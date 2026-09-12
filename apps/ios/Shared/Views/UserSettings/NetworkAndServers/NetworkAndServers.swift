@@ -95,13 +95,6 @@ struct NetworkAndServers: View {
                         }
                     }
 
-                    NavigationLink {
-                        AdvancedNetworkSettings()
-                            .navigationTitle("Advanced settings")
-                            .modifier(ThemedBackground(grouped: true))
-                    } label: {
-                        Text("Advanced network settings")
-                    }
                 } header: {
                     Text("Messages & files")
                         .foregroundColor(theme.colors.secondary)

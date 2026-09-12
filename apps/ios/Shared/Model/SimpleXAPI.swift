@@ -883,7 +883,11 @@ func getNetworkConfig() async throws -> NetCfg? {
 }
 
 func setNetworkConfig(_ cfg: NetCfg, ctrl: chat_ctrl? = nil) throws {
-    let r: ChatResponse2 = try chatSendCmdSync(.apiSetNetworkConfig(networkConfig: cfg), ctrl: ctrl)
+    let managedCfg = xauXatManagedTorConfig(cfg)
+    guard isXauXatManagedTorConfig(managedCfg) else {
+        throw RuntimeError("XauXat refused to configure networking before its managed Tor route was ready.")
+    }
+    let r: ChatResponse2 = try chatSendCmdSync(.apiSetNetworkConfig(networkConfig: managedCfg), ctrl: ctrl)
     if case .cmdOk = r { return }
     throw r.unexpected
 }
@@ -2258,6 +2262,9 @@ private func chatInitialized(start: Bool, refreshInvitations: Bool) throws {
 // Spec: spec/architecture.md#startChat
 func startChat(refreshInvitations: Bool = true, onboarding: Bool = false) throws {
     logger.debug("startChat")
+    guard isXauXatTorReady() else {
+        throw RuntimeError("Embedded Tor is not ready")
+    }
     let m = ChatModel.shared
     try setNetworkConfig(getNetCfg())
     let chatRunning = try apiCheckChatRunning()
@@ -2294,6 +2301,9 @@ func startChat(refreshInvitations: Bool = true, onboarding: Bool = false) throws
 
 func startChatWithTemporaryDatabase(ctrl: chat_ctrl) throws -> User? {
     logger.debug("startChatWithTemporaryDatabase")
+    guard isXauXatTorReady() else {
+        throw RuntimeError("Embedded Tor is not ready")
+    }
     let migrationActiveUser = try? apiGetActiveUser(ctrl: ctrl) ?? apiCreateActiveUser(Profile(displayName: "Temp", fullName: ""), ctrl: ctrl)
     try setNetworkConfig(getNetCfg(), ctrl: ctrl)
     try apiSetAppFilePaths(filesFolder: getMigrationTempFilesDirectory().path, tempFolder: getMigrationTempFilesDirectory().path, assetsFolder: getWallpaperDirectory().deletingLastPathComponent().path, ctrl: ctrl)
