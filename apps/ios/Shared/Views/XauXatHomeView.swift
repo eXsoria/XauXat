@@ -750,9 +750,12 @@ private struct XauXatChatDestination: View {
     }
 
     private var destination: some View {
-        NavLinkPlain(chatId: chat.id, selection: $chatModel.chatId) {
+        Button {
+            ItemsModel.shared.loadOpenChat(chat.id)
+        } label: {
             XauXatChatRow(chat: chat, palette: palette, contactStyle: contactStyle)
         }
+        .buttonStyle(.plain)
         .disabled(chatModel.chatRunning != true || chatModel.deletedChats.contains(chat.id))
     }
 }
