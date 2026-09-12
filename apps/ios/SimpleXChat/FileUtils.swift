@@ -63,6 +63,49 @@ func getAppDirectory() -> URL {
     : getDocumentsDirectory()
 }
 
+/// XauXat keeps its live database, settings and received media off device and
+/// iCloud backups. A user-initiated database export is written outside this
+/// private container by the system document picker and is not affected.
+///
+/// Directory exclusions are refreshed at launch because file operations and
+/// restores can reset the resource value.
+@discardableResult
+public func excludeFromSystemBackup(_ url: URL) -> Bool {
+    let fm = FileManager.default
+    guard fm.fileExists(atPath: url.path) else { return true }
+
+    do {
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var excludedURL = url
+        try excludedURL.setResourceValues(values)
+
+        let applied = try excludedURL.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true
+        if !applied {
+            logger.error("Backup exclusion was not applied to private app data")
+        }
+        return applied
+    } catch {
+        logger.error("Unable to exclude private app data from backup: \(error.localizedDescription)")
+        return false
+    }
+}
+
+/// Applies XauXat's no-cloud-backup policy to the complete private app
+/// container. This covers the encrypted chat and agent databases, local media,
+/// shared preferences used by extensions, wallpapers and temporary migration
+/// data. Call this after creating or restoring app storage.
+@discardableResult
+public func protectPrivateAppDataFromSystemBackup() -> Bool {
+    let privateLocations = [
+        getAppDirectory(),
+        getMigrationTempFilesDirectory()
+    ]
+    return privateLocations.reduce(true) { protected, url in
+        excludeFromSystemBackup(url) && protected
+    }
+}
+
 // Spec: spec/database.md#DB_FILE_PREFIX
 let DB_FILE_PREFIX = "simplex_v1"
 
@@ -114,6 +157,7 @@ public func deleteAppFiles() {
     do {
         try fm.removeItem(at: getAppFilesDirectory())
         try fm.createDirectory(at: getAppFilesDirectory(), withIntermediateDirectories: true)
+        _ = protectPrivateAppDataFromSystemBackup()
     } catch {
         logger.error("FileUtils deleteAppFiles error: \(error.localizedDescription)")
     }
@@ -232,9 +276,11 @@ public func saveFile(_ data: Data, _ fileName: String, encrypted: Bool) -> Crypt
     do {
         if encrypted {
             let cfArgs = try writeCryptoFile(path: filePath.path, data: data)
+            _ = excludeFromSystemBackup(filePath)
             return CryptoFile(filePath: fileName, cryptoArgs: cfArgs)
         } else {
             try data.write(to: filePath)
+            _ = excludeFromSystemBackup(filePath)
             return CryptoFile.plain(fileName)
         }
     } catch {

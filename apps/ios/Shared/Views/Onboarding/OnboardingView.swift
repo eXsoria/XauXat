@@ -16,22 +16,13 @@ struct OnboardingView: View {
     var body: some View {
         NavigationView {
             switch onboarding {
-            case .step1_SimpleXInfo:
+            case .step1_SimpleXInfo,
+                 .step2_CreateProfile,
+                 .step3_CreateSimpleXAddress,
+                 .step3_ChooseServerOperators,
+                 .step4_SetNotificationsMode,
+                 .step4_NetworkCommitments:
                 XauXatWelcomeView()
-            case .step2_CreateProfile:
-                CreateFirstProfile()
-                    .modifier(ThemedBackground())
-            case .step3_CreateSimpleXAddress: // deprecated
-                CreateSimpleXAddress()
-            case .step3_ChooseServerOperators,
-                .step4_SetNotificationsMode: // deprecated
-                YourNetworkView()
-                    .navigationBarBackButtonHidden(true)
-                    .modifier(ThemedBackground())
-            case .step4_NetworkCommitments:
-                OnboardingConditionsView(selectedOperatorIds: Set(ChatModel.shared.conditions.serverOperators.filter { $0.enabled }.map { $0.operatorId }))
-                    .navigationBarBackButtonHidden(true)
-                    .modifier(ThemedBackground())
             case .onboardingComplete: EmptyView()
             }
         }

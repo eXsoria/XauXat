@@ -2196,6 +2196,7 @@ func initializeChat(start: Bool, confirmStart: Bool = false, dbKey: String? = ni
     defer { m.ctrlInitInProgress = false }
     (m.chatDbEncrypted, m.chatDbStatus) = chatMigrateInit(dbKey, confirmMigrations: confirmMigrations)
     if  m.chatDbStatus != .ok { return }
+    _ = protectPrivateAppDataFromSystemBackup()
     NetworkObserver.shared.restartMonitor()
     // If we migrated successfully means previous re-encryption process on database level finished successfully too
     if encryptionStartedDefault.get() {

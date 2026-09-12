@@ -105,10 +105,9 @@ final class EmbeddedTorManager: ObservableObject {
                     withIntermediateDirectories: true,
                     attributes: [.posixPermissions: 0o700]
                 )
-                var excludedDirectory = directory
-                var resourceValues = URLResourceValues()
-                resourceValues.isExcludedFromBackup = true
-                try excludedDirectory.setResourceValues(resourceValues)
+                guard excludeFromSystemBackup(directory) else {
+                    throw EmbeddedTorError.backupProtection
+                }
 
                 let config = TorConfiguration()
                 config.ignoreMissingTorrc = true
@@ -262,6 +261,7 @@ final class EmbeddedTorManager: ObservableObject {
 }
 
 private enum EmbeddedTorError: LocalizedError {
+    case backupProtection
     case timeout
     case processStopped
     case missingControlPort
@@ -274,6 +274,7 @@ private enum EmbeddedTorError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .backupProtection: "XauXat could not protect Tor data from system backup."
         case .timeout: "Tor took too long to start."
         case .processStopped: "The embedded Tor process stopped."
         case .missingControlPort: "Tor did not create its control port."

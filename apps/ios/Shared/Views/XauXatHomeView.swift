@@ -76,82 +76,430 @@ private struct XauXatPalette {
     }
 }
 
+private enum XauXatOnboardingField: Hashable {
+    case displayName
+    case pin
+}
+
 struct XauXatWelcomeView: View {
+    @EnvironmentObject private var chatModel: ChatModel
     @Environment(\.colorScheme) private var colorScheme
-    @State private var createProfile = false
+    @State private var step = 0
+    @State private var displayName = ""
+    @State private var pin = ""
+    @State private var isCompleting = false
+    @State private var profileCreated = false
+    @State private var errorMessage: String?
+    @FocusState private var focusedField: XauXatOnboardingField?
 
     private var palette: XauXatPalette { XauXatPalette(colorScheme) }
+    private var compactName: String { displayName.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var validName: Bool { !compactName.isEmpty && mkValidName(compactName) == compactName }
+    private var validPIN: Bool { pin.count == 6 }
 
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                VStack(spacing: 3) {
-                    Text(verbatim: "xauxat")
-                        .font(.custom("Courier", size: 33).weight(.bold))
-                        .tracking(3.3)
-                    Text(verbatim: "X -- X")
-                        .font(.custom("Courier", size: 22).weight(.bold))
-                        .tracking(2.7)
-                }
-                .foregroundStyle(palette.ink)
-                .padding(.top, max(36, geometry.size.height * 0.16))
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("XauXat")
+                onboardingHeader
 
-                (Text("This is ") + Text("your").italic() + Text(" space."))
-                    .font(.custom("Courier", size: 20))
-                    .tracking(2.4)
-                    .foregroundStyle(palette.ink)
-                    .padding(.top, min(78, geometry.size.height * 0.1))
-
-                Text("No phone number.\nNo email.\nNo global identity.")
-                    .font(.custom("Courier", size: 12))
-                    .tracking(1.6)
-                    .lineSpacing(10)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(palette.muted)
-                    .padding(.top, 35)
-
-                Spacer(minLength: 24)
-
-                Text("PRIVATE MESSAGING\nBY DESIGN")
-                    .font(.custom("Courier", size: 8).weight(.bold))
-                    .tracking(2.7)
-                    .lineSpacing(4)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(palette.muted)
-                    .padding(.bottom, 46)
-
-                ZStack {
-                    Button { createProfile = true } label: {
-                        Text("CONTINUE PRIVATELY")
-                            .font(.custom("Courier", size: 13).weight(.bold))
-                            .tracking(0.7)
-                            .foregroundStyle(palette.ivoryInk)
-                            .frame(maxWidth: .infinity, minHeight: 52)
-                            .background(palette.ivory)
-                            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                Group {
+                    switch step {
+                    case 0:
+                        welcomeStep(geometry)
+                    case 1:
+                        nameStep(geometry)
+                    default:
+                        pinStep(geometry)
                     }
-                    .buttonStyle(.plain)
-
-                    NavigationLink(isActive: $createProfile) {
-                        CreateFirstProfile()
-                            .modifier(ThemedBackground())
-                    } label: {
-                        EmptyView()
-                    }
-                    .hidden()
                 }
-                .padding(.bottom, 22)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(.horizontal, 22)
             .frame(maxWidth: 440, minHeight: geometry.size.height)
             .frame(maxWidth: .infinity)
         }
         .background(palette.background.ignoresSafeArea())
         .navigationBarHidden(true)
-        .onAppear { setLastVersionDefault() }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focusedField = nil }
+            }
+        }
+        .onAppear {
+            setLastVersionDefault()
+            profileCreated = chatModel.currentUser != nil
+        }
+        .alert("Unable to finish setup", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
+
+    private var onboardingHeader: some View {
+        HStack {
+            Group {
+                if step > 0 && !isCompleting {
+                    Button {
+                        focusedField = nil
+                        step -= 1
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.left")
+                                .font(.system(size: 15, weight: .medium))
+                            Text("Back")
+                                .font(.custom("Courier", size: 13))
+                        }
+                        .foregroundStyle(palette.muted)
+                        .frame(minWidth: 82, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Back")
+                } else {
+                    Color.clear.frame(width: 82, height: 44)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            VStack(spacing: 0) {
+                Text(verbatim: "xauxat")
+                    .font(.custom("Courier", size: 17).weight(.bold))
+                    .tracking(2)
+                Text(verbatim: "X -- X")
+                    .font(.custom("Courier", size: 15).weight(.bold))
+                    .tracking(1.8)
+            }
+            .foregroundStyle(palette.ink)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("XauXat")
+
+            Spacer(minLength: 0)
+
+            Text("\(step + 1) / 3")
+                .font(.custom("Courier", size: 12))
+                .foregroundStyle(palette.muted)
+                .frame(width: 82, alignment: .trailing)
+                .frame(minHeight: 44)
+                .accessibilityLabel("Step \(step + 1) of 3")
+        }
+        .frame(height: 76)
+        .padding(.horizontal, 22)
+    }
+
+    private func welcomeStep(_ geometry: GeometryProxy) -> some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 3) {
+                Text(verbatim: "xauxat")
+                    .font(.custom("Courier", size: 33).weight(.bold))
+                    .tracking(3.3)
+                Text(verbatim: "X -- X")
+                    .font(.custom("Courier", size: 22).weight(.bold))
+                    .tracking(2.7)
+            }
+            .foregroundStyle(palette.ink)
+            .padding(.top, geometry.size.height < 700 ? 7 : max(28, geometry.size.height * 0.1))
+            .accessibilityHidden(true)
+
+            (Text("This is ") + Text("your").italic() + Text(" space."))
+                .font(.custom("Courier", size: geometry.size.height < 700 ? 18 : 20))
+                .tracking(2.4)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(palette.ink)
+                .padding(.top, geometry.size.height < 700 ? 43 : 78)
+
+            Text("No phone number.\nNo email.\nNo global identity.")
+                .font(.custom("Courier", size: geometry.size.height < 700 ? 11 : 12))
+                .tracking(1.6)
+                .lineSpacing(geometry.size.height < 700 ? 8 : 10)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(palette.muted)
+                .padding(.top, geometry.size.height < 700 ? 22 : 35)
+
+            Spacer(minLength: 20)
+
+            Text("PRIVATE MESSAGING\nBY DESIGN")
+                .font(.custom("Courier", size: 8).weight(.bold))
+                .tracking(2.7)
+                .lineSpacing(4)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(palette.muted)
+                .padding(.bottom, geometry.size.height < 700 ? 31 : 46)
+
+            primaryButton("CONTINUE PRIVATELY", enabled: true) {
+                step = 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    focusedField = .displayName
+                }
+            }
+        }
+        .padding(.horizontal, 22)
+        .padding(.bottom, 22)
+    }
+
+    private func nameStep(_ geometry: GeometryProxy) -> some View {
+        VStack(spacing: 0) {
+            (Text("What should\npeople call ") + Text("you").italic() + Text("?"))
+                .font(.custom("Courier", size: geometry.size.height < 700 ? 22 : 25))
+                .tracking(3.2)
+                .lineSpacing(5)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(palette.ink)
+                .padding(.top, geometry.size.height < 700 ? 24 : min(120, geometry.size.height * 0.18))
+
+            TextField("Display name", text: $displayName)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
+                .focused($focusedField, equals: .displayName)
+                .font(.custom("Courier", size: 14))
+                .foregroundStyle(palette.ink)
+                .tint(palette.ivory)
+                .padding(.horizontal, 20)
+                .frame(height: 54)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 21, style: .continuous)
+                        .stroke(validName || displayName.isEmpty ? palette.muted : palette.danger, lineWidth: 1)
+                }
+                .padding(.top, geometry.size.height < 700 ? 30 : 51)
+                .submitLabel(.continue)
+                .onSubmit { if validName { advanceToPIN() } }
+                .accessibilityLabel("Display name")
+
+            Text(validName || displayName.isEmpty ? "This doesn’t identify you.\nChange it whenever you want." : "Use a name without unsupported characters.")
+                .font(.custom("Courier", size: geometry.size.height < 700 ? 10.5 : 12))
+                .tracking(1.1)
+                .lineSpacing(5)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(validName || displayName.isEmpty ? palette.muted : palette.danger)
+                .padding(.top, geometry.size.height < 700 ? 24 : 44)
+
+            Spacer(minLength: 20)
+
+            primaryButton("Continue", enabled: validName, action: advanceToPIN)
+        }
+        .padding(.horizontal, 22)
+        .padding(.bottom, 21)
+    }
+
+    private func pinStep(_ geometry: GeometryProxy) -> some View {
+        let compact = geometry.size.height < 700
+
+        return VStack(spacing: 0) {
+            Text("Create your\nPIN")
+                .font(.custom("Courier", size: compact ? 22 : 26))
+                .tracking(3.2)
+                .lineSpacing(3)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(palette.ink)
+                .padding(.top, compact ? 12 : min(80, geometry.size.height * 0.1))
+
+            Text("This will protect your XauXat\non this device.")
+                .font(.custom("Courier", size: compact ? 10.5 : 12))
+                .tracking(1.1)
+                .lineSpacing(5)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(palette.muted)
+                .padding(.top, compact ? 24 : 44)
+
+            ZStack {
+                HStack(spacing: compact ? 16 : 20) {
+                    ForEach(0..<6, id: \.self) { index in
+                        Circle()
+                            .fill(index < pin.count ? palette.ivory : Color.clear)
+                            .overlay {
+                                Circle().stroke(palette.ivory, lineWidth: 1)
+                            }
+                            .frame(width: 21, height: 21)
+                    }
+                }
+                .accessibilityHidden(true)
+
+                TextField("", text: $pin)
+                    .keyboardType(.numberPad)
+                    .textContentType(.oneTimeCode)
+                    .focused($focusedField, equals: .pin)
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                    .onChange(of: pin) { newValue in
+                        let sanitized = String(newValue.filter(\.isNumber).prefix(6))
+                        if pin != sanitized {
+                            pin = sanitized
+                        }
+                    }
+                    .accessibilityLabel("Six digit PIN")
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { focusedField = .pin }
+            .padding(.top, compact ? 29 : 61)
+
+            VStack(spacing: 0) {
+                Image(systemName: "lock")
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(palette.ivory)
+
+                Text("Your PIN. Your responsibility.\nIt never leaves your device.\nWe can’t recover it.")
+                    .font(.custom("Courier", size: compact ? 10.5 : 12))
+                    .tracking(1.1)
+                    .lineSpacing(5)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(palette.muted)
+                    .padding(.top, compact ? 7 : 13)
+            }
+            .padding(.top, compact ? 31 : 77)
+
+            Spacer(minLength: 18)
+
+            primaryButton(
+                isCompleting ? "Finishing…" : "Finish",
+                enabled: validPIN && !isCompleting,
+                action: finishOnboarding
+            )
+
+            HStack(spacing: 9) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(index == step ? palette.ivory : palette.line)
+                        .frame(width: 8, height: 8)
+                }
+            }
+            .padding(.top, 20)
+            .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 22)
+        .padding(.bottom, 21)
+        .contentShape(Rectangle())
+        .onTapGesture { focusedField = .pin }
+    }
+
+    private func primaryButton(_ label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.custom("Courier", size: label == "CONTINUE PRIVATELY" ? 13 : 16).weight(.bold))
+                .tracking(0.6)
+                .foregroundStyle(enabled ? palette.ivoryInk : palette.faint)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background(enabled ? palette.ivory : palette.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
+    private func advanceToPIN() {
+        focusedField = nil
+        step = 2
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            focusedField = .pin
+        }
+    }
+
+    private func finishOnboarding() {
+        guard validName, validPIN, !isCompleting else { return }
+        focusedField = nil
+        isCompleting = true
+
+        do {
+            if !profileCreated {
+                AppChatState.shared.set(.active)
+                chatModel.currentUser = try apiCreateActiveUser(Profile(displayName: compactName, fullName: ""))
+                profileCreated = true
+                UserDefaults.standard.set(false, forKey: DEFAULT_PRIVACY_SHOW_FILE_ENCRYPTION)
+                try startChat(onboarding: true)
+            }
+
+            guard kcAppPassword.set(pin) else {
+                throw RuntimeError("The device Keychain did not save the XauXat PIN")
+            }
+            privacyLocalAuthModeDefault.set(.passcode)
+            appLocalAuthEnabledGroupDefault.set(true)
+            UserDefaults.standard.set(true, forKey: DEFAULT_PERFORM_LA)
+            UserDefaults.standard.set(true, forKey: DEFAULT_LA_NOTICE_SHOWN)
+            chatModel.contentViewAccessAuthenticated = true
+
+            applySimpleXOnboardingDefaults()
+        } catch {
+            isCompleting = false
+            errorMessage = responseError(error)
+        }
+    }
+
+    private func applySimpleXOnboardingDefaults() {
+        applyDefaultNotificationMode()
+        let selectedOperatorIds = Set(chatModel.conditions.serverOperators.filter(\.enabled).map(\.operatorId))
+        Task {
+            do {
+                var updatedConditions = chatModel.conditions
+                if !selectedOperatorIds.isEmpty {
+                    updatedConditions = try await acceptConditions(
+                        conditionsId: chatModel.conditions.currentConditions.conditionsId,
+                        operatorIds: Array(selectedOperatorIds)
+                    )
+                    if let operators = xauXatEnabledOperators(updatedConditions.serverOperators, selectedOperatorIds: selectedOperatorIds) {
+                        updatedConditions = try await setServerOperators(operators: operators)
+                    }
+                }
+
+                await MainActor.run {
+                    chatModel.conditions = updatedConditions
+                    onboardingStageDefault.set(.onboardingComplete)
+                    dismissAllSheets(animated: false) {
+                        DispatchQueue.main.async {
+                            chatModel.onboardingStage = .onboardingComplete
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isCompleting = false
+                    errorMessage = responseError(error)
+                }
+            }
+        }
+    }
+
+    private func applyDefaultNotificationMode() {
+        guard let token = chatModel.deviceToken else { return }
+        Task {
+            do {
+                let status = try await apiRegisterToken(token: token, notificationMode: .instant)
+                await MainActor.run {
+                    chatModel.savedToken = token
+                    chatModel.tokenStatus = status
+                    chatModel.notificationMode = .instant
+                }
+            } catch {
+                logger.error("XauXat onboarding could not apply the default notification mode: \(responseError(error))")
+            }
+        }
+    }
+}
+
+private func xauXatEnabledOperators(_ operators: [ServerOperator], selectedOperatorIds: Set<Int64>) -> [ServerOperator]? {
+    var operators = operators
+    guard !operators.isEmpty else { return nil }
+
+    for index in operators.indices {
+        operators[index].enabled = selectedOperatorIds.contains(operators[index].operatorId)
+    }
+
+    let hasSMPStorage = operators.contains { $0.enabled && $0.smpRoles.storage }
+    let hasSMPProxy = operators.contains { $0.enabled && $0.smpRoles.proxy }
+    let hasXFTPStorage = operators.contains { $0.enabled && $0.xftpRoles.storage }
+    let hasXFTPProxy = operators.contains { $0.enabled && $0.xftpRoles.proxy }
+
+    if hasSMPStorage && hasSMPProxy && hasXFTPStorage && hasXFTPProxy {
+        return operators
+    }
+
+    guard let firstEnabledIndex = operators.firstIndex(where: \.enabled) else { return nil }
+    if !hasSMPStorage { operators[firstEnabledIndex].smpRoles.storage = true }
+    if !hasSMPProxy { operators[firstEnabledIndex].smpRoles.proxy = true }
+    if !hasXFTPStorage { operators[firstEnabledIndex].xftpRoles.storage = true }
+    if !hasXFTPProxy { operators[firstEnabledIndex].xftpRoles.proxy = true }
+    return operators
 }
 
 struct XauXatHomeView: View {
