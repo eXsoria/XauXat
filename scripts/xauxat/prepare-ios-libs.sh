@@ -43,33 +43,16 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-MAC2IOS_BIN=${MAC2IOS_BIN:-}
-if [ -z "$MAC2IOS_BIN" ]; then
-  MAC2IOS_BIN=$(command -v mac2ios || true)
-fi
-if [ -z "$MAC2IOS_BIN" ] || [ ! -x "$MAC2IOS_BIN" ]; then
-  echo "Error: mac2ios is required. Set MAC2IOS_BIN or add it to PATH." >&2
-  exit 1
-fi
-
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/xauxat-ios-libs.XXXXXX")
 trap 'rm -rf "$WORK_DIR"' EXIT HUP INT TERM
 
 ARM_ARCHIVE="$WORK_DIR/pkg-ios-aarch64-swift-json.zip"
-X86_ARCHIVE="$WORK_DIR/pkg-ios-x86_64-swift-json.zip"
 
 if [ -n "$ARCHIVE_DIR" ]; then
   cp "$ARCHIVE_DIR/pkg-ios-aarch64-swift-json.zip" "$ARM_ARCHIVE"
-  if [ "$DEVICE_ONLY" = false ]; then
-    cp "$ARCHIVE_DIR/pkg-ios-x86_64-swift-json.zip" "$X86_ARCHIVE"
-  fi
 else
   curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
     --output "$ARM_ARCHIVE" "$XAUXAT_IOS_ARM64_URL"
-  if [ "$DEVICE_ONLY" = false ]; then
-    curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
-      --output "$X86_ARCHIVE" "$XAUXAT_IOS_X86_64_URL"
-  fi
 fi
 
 verify_archive() {
@@ -86,22 +69,15 @@ verify_archive() {
 }
 
 verify_archive "$XAUXAT_IOS_ARM64_SHA256" "$ARM_ARCHIVE"
-if [ "$DEVICE_ONLY" = false ]; then
-  verify_archive "$XAUXAT_IOS_X86_64_SHA256" "$X86_ARCHIVE"
-fi
 
 RAW_ARM="$WORK_DIR/raw-aarch64"
-RAW_X86="$WORK_DIR/raw-x86_64"
 PREPARED="$WORK_DIR/prepared"
 mkdir -p "$RAW_ARM" "$PREPARED/mac-aarch64" "$PREPARED/ios"
 if [ "$DEVICE_ONLY" = false ]; then
-  mkdir -p "$RAW_X86" "$PREPARED/mac-x86_64" "$PREPARED/sim"
+  mkdir -p "$PREPARED/sim"
 fi
 
 unzip -q "$ARM_ARCHIVE" -d "$RAW_ARM"
-if [ "$DEVICE_ONLY" = false ]; then
-  unzip -q "$X86_ARCHIVE" -d "$RAW_X86"
-fi
 
 for raw_dir in "$RAW_ARM"; do
   archive_count=$(find "$raw_dir" -maxdepth 1 -type f -name '*.a' | wc -l | tr -d ' ')
@@ -110,38 +86,18 @@ for raw_dir in "$RAW_ARM"; do
     exit 1
   fi
 done
-if [ "$DEVICE_ONLY" = false ]; then
-  archive_count=$(find "$RAW_X86" -maxdepth 1 -type f -name '*.a' | wc -l | tr -d ' ')
-  if [ "$archive_count" -ne 5 ]; then
-    echo "Error: expected 5 static libraries in $RAW_X86, found $archive_count." >&2
-    exit 1
-  fi
-fi
 
 cp "$RAW_ARM"/*.a "$PREPARED/mac-aarch64/"
 cp "$RAW_ARM"/*.a "$PREPARED/ios/"
 chmod u+w "$PREPARED"/*/*.a
 if [ "$DEVICE_ONLY" = false ]; then
-  cp "$RAW_X86"/*.a "$PREPARED/mac-x86_64/"
-  cp "$RAW_X86"/*.a "$PREPARED/sim/"
-  chmod u+w "$PREPARED/mac-x86_64"/*.a "$PREPARED/sim"/*.a
-fi
-
-MAC2IOS_LOG="$WORK_DIR/mac2ios.log"
-run_mac2ios() {
-  if ! "$@" >>"$MAC2IOS_LOG" 2>&1; then
-    echo "Error: mac2ios failed. Last output:" >&2
-    tail -80 "$MAC2IOS_LOG" >&2
-    exit 1
-  fi
-}
-
-for library in "$PREPARED/ios"/*.a; do
-  run_mac2ios "$MAC2IOS_BIN" "$library"
-done
-if [ "$DEVICE_ONLY" = false ]; then
+  cp "$RAW_ARM"/*.a "$PREPARED/sim/"
+  chmod u+w "$PREPARED/sim"/*.a
+  SIMULATOR_SDK_VERSION=$(xcrun --sdk iphonesimulator --show-sdk-version)
   for library in "$PREPARED/sim"/*.a; do
-    run_mac2ios "$MAC2IOS_BIN" -s "$library"
+    python3 "$SCRIPT_DIR/convert-arm64-simulator-archive.py" \
+      --sdk "$SIMULATOR_SDK_VERSION" \
+      "$library"
   done
 fi
 
@@ -149,7 +105,7 @@ LIBRARIES_DIR="$REPO_ROOT/apps/ios/Libraries"
 mkdir -p "$LIBRARIES_DIR"
 PLATFORM_DIRS="mac-aarch64 ios"
 if [ "$DEVICE_ONLY" = false ]; then
-  PLATFORM_DIRS="$PLATFORM_DIRS mac-x86_64 sim"
+  PLATFORM_DIRS="$PLATFORM_DIRS sim"
 fi
 for platform_dir in $PLATFORM_DIRS; do
   target_dir="$LIBRARIES_DIR/$platform_dir"
