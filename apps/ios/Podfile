@@ -1,0 +1,26 @@
+platform :ios, '15.0'
+use_frameworks!
+
+target 'SimpleX (iOS)' do
+  # Embed Tor in XauXat without installing a VPN or changing the device proxy.
+  # NoLZMA also avoids the case-insensitive Tor.framework / tor.framework clash.
+  pod 'Tor/CTor-NoLZMA', '409.11.2'
+end
+
+# Tor 409.11.2 writes the argv terminator one element past its allocation.
+# Keep this patch bounded and fail dependency installation if upstream changes.
+post_install do |installer|
+  path = installer.sandbox.root + 'Tor/Tor/Classes/CTor/TORThread.m'
+  source = File.read(path)
+  original = 'char *argv[argc];'
+  fixed = 'char *argv[argc + 1];'
+
+  unless source.include?(original) || source.include?(fixed)
+    raise 'TORThread argv layout changed; review the XauXat safety patch.'
+  end
+
+  if source.include?(original)
+    File.chmod(0644, path)
+    File.write(path, source.sub(original, fixed))
+  end
+end

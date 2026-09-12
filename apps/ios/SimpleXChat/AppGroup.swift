@@ -38,6 +38,8 @@ public let GROUP_DEFAULT_PRIVACY_ASK_TO_APPROVE_RELAYS = "privacyAskToApproveRel
 public let GROUP_DEFAULT_PROFILE_IMAGE_CORNER_RADIUS = "profileImageCornerRadius"
 let GROUP_DEFAULT_NTF_BADGE_COUNT = "ntgBadgeCount"
 public let GROUP_DEFAULT_NETWORK_SOCKS_PROXY = "networkSocksProxy"
+public let GROUP_DEFAULT_XAUXAT_TOR_SOCKS_PROXY = "xauxatTorSocksProxy"
+public let GROUP_DEFAULT_XAUXAT_TOR_READY = "xauxatTorReady"
 let GROUP_DEFAULT_NETWORK_USE_ONION_HOSTS = "networkUseOnionHosts"
 let GROUP_DEFAULT_NETWORK_SESSION_MODE = "networkSessionMode"
 let GROUP_DEFAULT_NETWORK_SMP_PROXY_MODE = "networkSMPProxyMode"
@@ -73,6 +75,9 @@ public let groupDefaults = UserDefaults(suiteName: APP_GROUP_NAME)!
 public let groupAppDefaults: [String: Any] = [
     GROUP_DEFAULT_NTF_ENABLE_LOCAL: false,
     GROUP_DEFAULT_NTF_ENABLE_PERIODIC: false,
+    // A closed loopback port is the fail-closed route until embedded Tor is ready.
+    GROUP_DEFAULT_XAUXAT_TOR_SOCKS_PROXY: "127.0.0.1:1",
+    GROUP_DEFAULT_XAUXAT_TOR_READY: false,
     GROUP_DEFAULT_NETWORK_USE_ONION_HOSTS: OnionHosts.no.rawValue,
     GROUP_DEFAULT_NETWORK_SESSION_MODE: TransportSessionMode.session.rawValue,
     GROUP_DEFAULT_NETWORK_SMP_PROXY_MODE: SMPProxyMode.unknown.rawValue,
@@ -358,9 +363,10 @@ public class Default<T> {
 }
 
 public func getNetCfg() -> NetCfg {
-    let socksProxy = groupDefaults.string(forKey: GROUP_DEFAULT_NETWORK_SOCKS_PROXY)
-    let onionHosts = networkUseOnionHostsGroupDefault.get()
-    let (hostMode, requiredHostMode) = onionHosts.hostMode
+    let socksProxy = groupDefaults.string(forKey: GROUP_DEFAULT_XAUXAT_TOR_SOCKS_PROXY) ?? "127.0.0.1:1"
+    // Prefer onion endpoints when a server offers them. Public endpoints still
+    // use the same SOCKS route because NetCfg's SOCKS mode is always-on.
+    let (hostMode, requiredHostMode) = OnionHosts.prefer.hostMode
     let sessionMode = networkSessionModeGroupDefault.get()
     let smpProxyMode = networkSMPProxyModeGroupDefault.get()
     let smpProxyFallback = networkSMPProxyFallbackGroupDefault.get()
@@ -403,7 +409,22 @@ public func getNetCfg() -> NetCfg {
         smpPingInterval: smpPingInterval,
         smpPingCount: smpPingCount,
         logTLSErrors: false
-    )
+    ).withProxyTimeouts
+}
+
+public func setXauXatTorSocksPort(_ port: UInt16?) {
+    if let port, port > 0 {
+        groupDefaults.set("127.0.0.1:\(port)", forKey: GROUP_DEFAULT_XAUXAT_TOR_SOCKS_PROXY)
+        groupDefaults.set(true, forKey: GROUP_DEFAULT_XAUXAT_TOR_READY)
+    } else {
+        groupDefaults.set("127.0.0.1:1", forKey: GROUP_DEFAULT_XAUXAT_TOR_SOCKS_PROXY)
+        groupDefaults.set(false, forKey: GROUP_DEFAULT_XAUXAT_TOR_READY)
+    }
+    groupDefaults.synchronize()
+}
+
+public func isXauXatTorReady() -> Bool {
+    groupDefaults.bool(forKey: GROUP_DEFAULT_XAUXAT_TOR_READY)
 }
 
 public func setNetCfg(_ cfg: NetCfg, networkProxy: NetworkProxy?) {
@@ -411,8 +432,8 @@ public func setNetCfg(_ cfg: NetCfg, networkProxy: NetworkProxy?) {
     networkSessionModeGroupDefault.set(cfg.sessionMode)
     networkSMPProxyModeGroupDefault.set(cfg.smpProxyMode)
     networkSMPProxyFallbackGroupDefault.set(cfg.smpProxyFallback)
-    let socksProxy = networkProxy?.toProxyString()
-    groupDefaults.set(socksProxy, forKey: GROUP_DEFAULT_NETWORK_SOCKS_PROXY)
+    // The embedded Tor endpoint is owned by XauXat and cannot be overwritten
+    // by imported or legacy user settings.
     networkSMPWebPortServersDefault.set(cfg.smpWebPortServers)
     groupDefaults.set(cfg.tcpConnectTimeout.backgroundTimeout, forKey: GROUP_DEFAULT_NETWORK_TCP_CONNECT_TIMEOUT_BACKGROUND)
     groupDefaults.set(cfg.tcpConnectTimeout.interactiveTimeout, forKey: GROUP_DEFAULT_NETWORK_TCP_CONNECT_TIMEOUT_INTERACTIVE)

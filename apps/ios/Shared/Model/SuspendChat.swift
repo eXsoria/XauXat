@@ -108,6 +108,10 @@ func setAppState(_ appState: AppState) {
 
 func activateChat(appState: AppState = .active) {
     logger.debug("DEBUGGING: activateChat")
+    guard isXauXatTorReady() else {
+        logger.error("XauXat: refusing to activate chat before embedded Tor is ready")
+        return
+    }
     suspendLockQueue.sync {
         AppChatState.shared.set(appState)
         if ChatModel.ok { apiActivateChat() }

@@ -116,6 +116,10 @@ class BGManager {
         }
         self.completed = false
         DispatchQueue.main.async {
+            guard isXauXatTorReady() else {
+                completeReceiving("embedded Tor unavailable")
+                return
+            }
             chatLastBackgroundRunGroupDefault.set(Date.now)
             let m = ChatModel.shared
             if (!m.chatInitialized) {

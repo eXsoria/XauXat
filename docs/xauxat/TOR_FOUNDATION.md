@@ -1,6 +1,6 @@
 # XauXat native foundation and embedded Tor milestone
 
-Status: implementation baseline, 2026-09-11.
+Status: iOS implementation in progress, 2026-09-12.
 
 ## Product foundation
 
@@ -92,8 +92,9 @@ IDs, entitlements, APNs credentials and a compatible notification service.
 
 ## Acceptance evidence
 
-The Tor milestone is complete only after all applicable checks pass on both a
-simulator or emulator and real hardware:
+The Tor milestone is complete only after all applicable checks pass on current
+arm64 iPhone hardware and supported Android hardware. Simulators are useful for
+development but never replace real-device evidence:
 
 - Tor bootstrap reaches 100 percent.
 - A Tor check returns `IsTor: true`.
@@ -111,13 +112,15 @@ simulator or emulator and real hardware:
 - `xauxat/main`: protected XauXat integration branch
 - `xauxat/tor-foundation`: first implementation branch
 - pull requests required for integration
-- unsigned iOS Simulator build on every relevant pull request
+- unsigned arm64 iPhone build with the latest hosted Xcode/iOS SDK on every
+  relevant pull request
 - Android Foss debug build added after its native-library supply is pinned
 - signed iOS archive uploaded to internal TestFlight only from an approved
   release revision
 - build metadata records upstream commit, XauXat commit and dependency hashes
 
-GitHub Actions validates source. TestFlight delivers installable iPhone betas.
+GitHub Actions validates the real iPhone architecture. TestFlight delivers
+installable iPhone betas.
 An Ad Hoc IPA is not the default because it still requires signing, registered
 devices and provisioning.
 

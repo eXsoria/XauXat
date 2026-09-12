@@ -27,9 +27,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  simulator:
-    name: iOS Simulator
-    runs-on: macos-26-intel
+  device:
+    name: Latest iOS device (arm64)
+    runs-on: macos-26
     timeout-minutes: 60
 
     steps:
@@ -37,6 +37,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
+
+      - name: Record Apple toolchain
+        run: |
+          test "$(uname -m)" = "arm64"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa
@@ -58,9 +64,6 @@ jobs:
           curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
             --output .xauxat-cache/ios-libs/pkg-ios-aarch64-swift-json.zip \
             "$XAUXAT_IOS_ARM64_URL"
-          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
-            --output .xauxat-cache/ios-libs/pkg-ios-x86_64-swift-json.zip \
-            "$XAUXAT_IOS_X86_64_URL"
 
       - name: Build mac2ios
         shell: bash
@@ -72,25 +75,40 @@ jobs:
           echo "$mac2ios_path/bin" >> "$GITHUB_PATH"
 
       - name: Prepare pinned native libraries
-        run: ./scripts/xauxat/prepare-ios-libs.sh --archive-dir .xauxat-cache/ios-libs
+        run: ./scripts/xauxat/prepare-ios-libs.sh --archive-dir .xauxat-cache/ios-libs --device-only
 
-      - name: Build unsigned iOS Simulator app
+      - name: Install pinned Tor dependency
+        run: |
+          test "$(pod --version)" = "1.17.0"
+          pod install --project-directory=apps/ios --deployment
+
+      - name: Build unsigned latest iOS device app
         run: |
           xcodebuild \
-            -project apps/ios/SimpleX.xcodeproj \
+            -workspace apps/ios/SimpleX.xcworkspace \
             -scheme "SimpleX (iOS)" \
             -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/XauXatDerivedData" \
-            ARCHS=x86_64 \
+            ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Upload Simulator app
+      - name: Verify arm64 app and embedded Tor
+        run: |
+          app_path="$RUNNER_TEMP/XauXatDerivedData/Build/Products/Debug-iphoneos/SimpleX.app"
+          test -d "$app_path"
+          test -f "$app_path/SimpleX"
+          test -f "$app_path/Frameworks/Tor.framework/Tor"
+          file "$app_path/SimpleX" | grep -q 'arm64'
+          file "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'arm64'
+          otool -L "$app_path/SimpleX" | grep -q '@rpath/Tor.framework/Tor'
+
+      - name: Upload arm64 device app
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: XauXat-iOS-Simulator-${{ github.sha }}
-          path: ${{ runner.temp }}/XauXatDerivedData/Build/Products/Debug-iphonesimulator/*.app
+          name: XauXat-iOS-Device-arm64-${{ github.sha }}
+          path: ${{ runner.temp }}/XauXatDerivedData/Build/Products/Debug-iphoneos/*.app
           if-no-files-found: error
           retention-days: 14

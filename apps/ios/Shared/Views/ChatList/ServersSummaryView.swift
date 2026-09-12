@@ -314,8 +314,7 @@ struct ServersSummaryView: View {
     }
 
     private var sessionActiveColor: Color {
-        let onionHosts = networkUseOnionHostsGroupDefault.get()
-        return onionHosts == .require ? .indigo : .accentColor
+        isXauXatTorReady() ? .indigo : .accentColor
     }
 
     private func xftpServersListView(
@@ -414,7 +413,7 @@ struct SubscriptionStatusIndicatorView: View {
     var body: some View {
         let (color, variableValue, opacity) = subscriptionStatusInfo(
             online: m.networkInfo.online,
-            usesProxy: networkUseOnionHostsGroupDefault.get() != .no || groupDefaults.string(forKey: GROUP_DEFAULT_NETWORK_SOCKS_PROXY) != nil,
+            usesProxy: isXauXatTorReady(),
             subs: subs,
             hasSess: hasSess,
             primaryColor: theme.colors.primary

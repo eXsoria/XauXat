@@ -1,8 +1,8 @@
 # XauXat TestFlight delivery
 
-TestFlight is the intended iPhone beta channel. The pull-request workflow only
-produces an unsigned Simulator app, which cannot be installed on a physical
-iPhone.
+TestFlight is the intended iPhone beta channel. The pull-request workflow
+produces an unsigned arm64 device app using the latest hosted iOS SDK. It proves
+the real iPhone build path, but cannot be installed until it is signed.
 
 ## Apple setup required
 
