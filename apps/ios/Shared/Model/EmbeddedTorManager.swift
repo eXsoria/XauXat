@@ -7,12 +7,14 @@
 //
 
 import Foundation
+import Combine
+import Network
 import OSLog
 import SimpleXChat
-import Tor
+@preconcurrency import Tor
 
 @MainActor
-final class EmbeddedTorManager {
+final class EmbeddedTorManager: ObservableObject {
     static let shared = EmbeddedTorManager()
 
     enum State: Equatable {
@@ -23,7 +25,7 @@ final class EmbeddedTorManager {
         case failed(String)
     }
 
-    private(set) var state: State = .stopped
+    @Published private(set) var state: State = .stopped
 
     private var thread: TorThread?
     private var controller: TorController?
@@ -51,6 +53,18 @@ final class EmbeddedTorManager {
         case .stopped, .ready, .failed:
             begin()
         }
+    }
+
+    /// Opens a fresh SOCKS5 tunnel through the exact loopback endpoint used by
+    /// the SimpleX core, then reaches Tor Project through that tunnel. iOS does
+    /// not expose URLSession's SOCKS proxy keys, so the probe speaks SOCKS5
+    /// directly instead of relying on unavailable CFNetwork configuration.
+    func verifyTorRoute() async throws -> Bool {
+        guard case let .ready(port) = state,
+              isXauXatManagedTorConfig(getNetCfg()) else {
+            throw EmbeddedTorError.routeNotReady
+        }
+        return try await TorSOCKSProbe.run(port: port)
     }
 
     private func begin() {
@@ -255,6 +269,8 @@ private enum EmbeddedTorError: LocalizedError {
     case controlTimeout
     case authentication
     case invalidSocksPort
+    case routeNotReady
+    case checkFailed
 
     var errorDescription: String? {
         switch self {
@@ -265,6 +281,146 @@ private enum EmbeddedTorError: LocalizedError {
         case .controlTimeout: "Tor did not open its control port in time."
         case .authentication: "XauXat could not authenticate with Tor locally."
         case .invalidSocksPort: "Tor did not return a valid local SOCKS port."
+        case .routeNotReady: "The managed Tor route is not ready."
+        case .checkFailed: "The Tor SOCKS route could not reach Tor Project."
+        }
+    }
+}
+
+private enum TorSOCKSProbe {
+    private static let queue = DispatchQueue(label: "chat.xauxat.tor-probe", qos: .userInitiated)
+
+    static func run(port: UInt16) async throws -> Bool {
+        guard let endpointPort = NWEndpoint.Port(rawValue: port) else {
+            throw EmbeddedTorError.invalidSocksPort
+        }
+        let connection = NWConnection(host: "127.0.0.1", port: endpointPort, using: .tcp)
+        let timeout = DispatchWorkItem { connection.cancel() }
+        queue.asyncAfter(deadline: .now() + 30, execute: timeout)
+        defer {
+            timeout.cancel()
+            connection.cancel()
+        }
+        try await connect(connection)
+
+        try await send(Data([0x05, 0x01, 0x00]), on: connection)
+        guard try await receiveExactly(2, from: connection) == Data([0x05, 0x00]) else {
+            throw EmbeddedTorError.checkFailed
+        }
+
+        let host = Array("check.torproject.org".utf8)
+        guard host.count <= UInt8.max else { throw EmbeddedTorError.checkFailed }
+        var request = Data([0x05, 0x01, 0x00, 0x03, UInt8(host.count)])
+        request.append(contentsOf: host)
+        request.append(contentsOf: [0x00, 0x50]) // HTTP port 80
+        try await send(request, on: connection)
+
+        let reply = try await receiveExactly(4, from: connection)
+        guard reply[0] == 0x05, reply[1] == 0x00 else {
+            throw EmbeddedTorError.checkFailed
+        }
+        switch reply[3] {
+        case 0x01:
+            _ = try await receiveExactly(6, from: connection)
+        case 0x03:
+            let length = Int(try await receiveExactly(1, from: connection)[0])
+            _ = try await receiveExactly(length + 2, from: connection)
+        case 0x04:
+            _ = try await receiveExactly(18, from: connection)
+        default:
+            throw EmbeddedTorError.checkFailed
+        }
+
+        let http = "GET /api/ip HTTP/1.1\r\nHost: check.torproject.org\r\nConnection: close\r\n\r\n"
+        try await send(Data(http.utf8), on: connection)
+        let response = try await receive(maximum: 2048, from: connection)
+        guard let status = String(data: response, encoding: .utf8), status.hasPrefix("HTTP/") else {
+            throw EmbeddedTorError.checkFailed
+        }
+        return true
+    }
+
+    private static func connect(_ connection: NWConnection) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let completion = ConnectionCompletion(continuation)
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    completion.resume()
+                case let .failed(error):
+                    completion.resume(throwing: error)
+                case .cancelled:
+                    completion.resume(throwing: EmbeddedTorError.checkFailed)
+                default:
+                    break
+                }
+            }
+            connection.start(queue: queue)
+        }
+    }
+
+    private static func send(_ data: Data, on connection: NWConnection) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.send(content: data, completion: .contentProcessed { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            })
+        }
+    }
+
+    private static func receiveExactly(_ count: Int, from connection: NWConnection) async throws -> Data {
+        var data = Data()
+        while data.count < count {
+            let next = try await receive(maximum: count - data.count, from: connection)
+            guard !next.isEmpty else { throw EmbeddedTorError.checkFailed }
+            data.append(next)
+        }
+        return data
+    }
+
+    private static func receive(maximum: Int, from connection: NWConnection) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            connection.receive(minimumIncompleteLength: 1, maximumLength: maximum) { data, _, _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let data {
+                    continuation.resume(returning: data)
+                } else {
+                    continuation.resume(throwing: EmbeddedTorError.checkFailed)
+                }
+            }
+        }
+    }
+
+    /// `NWConnection` state callbacks are `@Sendable`. This one-shot box keeps
+    /// the checked continuation safe if Network.framework emits several
+    /// terminal states, and remains valid when the project moves to Swift 6.
+    private final class ConnectionCompletion: @unchecked Sendable {
+        private let lock = NSLock()
+        private var finished = false
+        private let continuation: CheckedContinuation<Void, Error>
+
+        init(_ continuation: CheckedContinuation<Void, Error>) {
+            self.continuation = continuation
+        }
+
+        func resume(throwing error: Error? = nil) {
+            lock.lock()
+            guard !finished else {
+                lock.unlock()
+                return
+            }
+            finished = true
+            lock.unlock()
+
+            if let error {
+                continuation.resume(throwing: error)
+            } else {
+                continuation.resume()
+            }
         }
     }
 }

@@ -883,7 +883,11 @@ func getNetworkConfig() async throws -> NetCfg? {
 }
 
 func setNetworkConfig(_ cfg: NetCfg, ctrl: chat_ctrl? = nil) throws {
-    let r: ChatResponse2 = try chatSendCmdSync(.apiSetNetworkConfig(networkConfig: cfg), ctrl: ctrl)
+    let managedCfg = xauXatManagedTorConfig(cfg)
+    guard isXauXatManagedTorConfig(managedCfg) else {
+        throw RuntimeError("XauXat refused to configure networking before its managed Tor route was ready.")
+    }
+    let r: ChatResponse2 = try chatSendCmdSync(.apiSetNetworkConfig(networkConfig: managedCfg), ctrl: ctrl)
     if case .cmdOk = r { return }
     throw r.unexpected
 }

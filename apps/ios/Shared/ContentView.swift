@@ -254,7 +254,7 @@ struct ContentView: View {
 
     private func mainView() -> some View {
         ZStack(alignment: .top) {
-            ChatListView(activeUserPickerSheet: $chatListUserPickerSheet)
+            XauXatHomeView(activeUserPickerSheet: $chatListUserPickerSheet)
                 .redacted(reason: appSheetState.redactionReasons(protectScreen))
             .onAppear {
                 // Connect only after the notifications prompt is resolved: the system prompt suspends

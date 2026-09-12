@@ -103,6 +103,9 @@ jobs:
           test -f "$app_path/Frameworks/Tor.framework/Tor"
           file "$app_path/SimpleX" | grep -q 'arm64'
           file "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'arm64'
+          test "$(plutil -extract CFBundleDisplayName raw "$app_path/Info.plist")" = "XauXat"
+          xcrun vtool -show-build "$app_path/SimpleX" | grep -q 'platform IOS'
+          xcrun vtool -show-build "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'platform IOS'
           otool -L "$app_path/SimpleX" | grep -q '@rpath/Tor.framework/Tor'
 
       - name: Upload arm64 device app

@@ -223,6 +223,7 @@
 		8CC956EE2BC0041000412A11 /* NetworkObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CC956ED2BC0041000412A11 /* NetworkObserver.swift */; };
 		8CE848A32C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */; };
 		A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000133D1000100000001 /* EmbeddedTorManager.swift */; };
+		A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000333D2000100000003 /* XauXatHomeView.swift */; };
 		B70A39732D24090D00E80A5F /* TagListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70A39722D24090D00E80A5F /* TagListView.swift */; };
 		B70CE9E62D4BE5930080F36D /* GroupMentions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70CE9E52D4BE5930080F36D /* GroupMentions.swift */; };
 		B728945B2D0C62BF00F7A19A /* ElegantEmojiPicker in Frameworks */ = {isa = PBXBuildFile; productRef = B728945A2D0C62BF00F7A19A /* ElegantEmojiPicker */; };
@@ -605,6 +606,7 @@
 		8CC956ED2BC0041000412A11 /* NetworkObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkObserver.swift; sourceTree = "<group>"; };
 		8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableChatItemToolbars.swift; sourceTree = "<group>"; };
 		A11E000133D1000100000001 /* EmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedTorManager.swift; sourceTree = "<group>"; };
+		A11E000333D2000100000003 /* XauXatHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatHomeView.swift; sourceTree = "<group>"; };
 		B5D5FB384075FF4C67AA7A2A /* Pods_SimpleX__iOS_.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_SimpleX__iOS_.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70A39722D24090D00E80A5F /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
 		B70CE9E52D4BE5930080F36D /* GroupMentions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupMentions.swift; sourceTree = "<group>"; };
@@ -779,6 +781,7 @@
 		5C2E260D27A30E2400F70299 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				A11E000333D2000100000003 /* XauXatHomeView.swift */,
 				B76E6C2F2C5C41C300EC11AA /* Contacts */,
 				5CB0BA8C282711BC00B3292C /* Onboarding */,
 				3C714775281C080100CB4D4B /* Call */,
@@ -1577,6 +1580,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */,
 				A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */,
 				64C06EB52A0A4A7C00792D4D /* ChatItemInfoView.swift in Sources */,
 				8CC317442D4FEB9B00292A20 /* EndlessScrollView.swift in Sources */,
@@ -2152,11 +2156,12 @@
 				GCC_OPTIMIZATION_LEVEL = s;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "SimpleX--iOS--Info.plist";
-				INFOPLIST_KEY_NSCameraUsageDescription = "SimpleX needs camera access to scan QR codes to connect to other users and for video calls.";
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "SimpleX uses Face ID for local authentication";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SimpleX uses local network access to allow using user chat profile via desktop app on the same network.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SimpleX needs microphone access for audio and video calls, and to record voice messages.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SimpleX needs access to Photo Library for saving captured and received media";
+				INFOPLIST_KEY_CFBundleDisplayName = XauXat;
+				INFOPLIST_KEY_NSCameraUsageDescription = "XauXat needs camera access to scan QR codes and capture media.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "XauXat uses Face ID for local authentication.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "XauXat uses local network access when you connect your profile to the desktop app.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "XauXat needs microphone access for audio calls and voice messages.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "XauXat needs Photo Library access when you choose to save captured or received media.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -2206,11 +2211,12 @@
 				ENABLE_PREVIEWS = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "SimpleX--iOS--Info.plist";
-				INFOPLIST_KEY_NSCameraUsageDescription = "SimpleX needs camera access to scan QR codes to connect to other users and for video calls.";
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "SimpleX uses Face ID for local authentication";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "SimpleX uses local network access to allow using user chat profile via desktop app on the same network.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SimpleX needs microphone access for audio and video calls, and to record voice messages.";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SimpleX needs access to Photo Library for saving captured and received media";
+				INFOPLIST_KEY_CFBundleDisplayName = XauXat;
+				INFOPLIST_KEY_NSCameraUsageDescription = "XauXat needs camera access to scan QR codes and capture media.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "XauXat uses Face ID for local authentication.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "XauXat uses local network access when you connect your profile to the desktop app.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "XauXat needs microphone access for audio calls and voice messages.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "XauXat needs Photo Library access when you choose to save captured or received media.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

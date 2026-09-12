@@ -427,6 +427,32 @@ public func isXauXatTorReady() -> Bool {
     groupDefaults.bool(forKey: GROUP_DEFAULT_XAUXAT_TOR_READY)
 }
 
+/// A single, public invariant for the iOS shell and diagnostics. Keeping this
+/// check next to `NetCfg` also lets us inspect the otherwise module-internal
+/// SOCKS mode without widening the protocol API.
+public func isXauXatManagedTorConfig(_ cfg: NetCfg) -> Bool {
+    guard isXauXatTorReady(),
+          let proxy = cfg.socksProxy,
+          proxy.hasPrefix("127.0.0.1:"),
+          proxy != "127.0.0.1:1" else {
+        return false
+    }
+    return cfg.socksMode == .always &&
+        cfg.hostMode == .onionHost &&
+        !cfg.requiredHostMode
+}
+
+/// Retains every tunable network value supplied by upstream UI/code while
+/// replacing only the route fields that XauXat owns.
+public func xauXatManagedTorConfig(_ cfg: NetCfg) -> NetCfg {
+    var managed = cfg
+    managed.socksProxy = groupDefaults.string(forKey: GROUP_DEFAULT_XAUXAT_TOR_SOCKS_PROXY) ?? "127.0.0.1:1"
+    managed.socksMode = .always
+    managed.hostMode = .onionHost
+    managed.requiredHostMode = false
+    return managed.withProxyTimeouts
+}
+
 public func setNetCfg(_ cfg: NetCfg, networkProxy: NetworkProxy?) {
     networkUseOnionHostsGroupDefault.set(OnionHosts(netCfg: cfg))
     networkSessionModeGroupDefault.set(cfg.sessionMode)
