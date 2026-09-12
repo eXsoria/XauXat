@@ -29,7 +29,7 @@ struct ActiveCallView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             ZStack(alignment: .bottom) {
-                if let client = client, call.hasVideo {
+                if let client = client, XauXatProductPolicy.videoCallsEnabled && call.hasVideo {
                     GeometryReader { g in
                         let width = g.size.width * 0.3
                         ZStack(alignment: .topTrailing) {
@@ -61,7 +61,7 @@ struct ActiveCallView: View {
                         }
                     }
                 }
-                if let call = m.activeCall, let client = client, (!pipShown || !call.hasVideo) {
+                if let call = m.activeCall, let client = client, (!pipShown || !XauXatProductPolicy.videoCallsEnabled || !call.hasVideo) {
                     ActiveCallOverlay(call: call, client: client)
                 }
             }
@@ -208,9 +208,9 @@ struct ActiveCallView: View {
             case let .peerMedia(source, enabled):
                 switch source {
                     case .mic: call.peerMediaSources.mic = enabled
-                    case .camera: call.peerMediaSources.camera = enabled
+                    case .camera: call.peerMediaSources.camera = XauXatProductPolicy.videoCallsEnabled && enabled
                     case .screenAudio: call.peerMediaSources.screenAudio = enabled
-                    case .screenVideo: call.peerMediaSources.screenVideo = enabled
+                    case .screenVideo: call.peerMediaSources.screenVideo = XauXatProductPolicy.videoCallsEnabled && enabled
                     case .unknown: ()
                 }
             case .ended:
@@ -262,6 +262,10 @@ struct ActiveCallView: View {
         await MainActor.run {
             call.localMediaSources.mic = mic
         }
+        if !mic {
+            WebRTCClient.showUnauthorizedAlert(for: .audio)
+        }
+        guard XauXatProductPolicy.videoCallsEnabled else { return }
         let cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
         var camera = call.initialCallType == .audio || cameraAuthorized
         if call.initialCallType == .video && !cameraAuthorized {
@@ -272,8 +276,8 @@ struct ActiveCallView: View {
                 }
             }
         }
-        if !mic || !camera {
-            WebRTCClient.showUnauthorizedAlert(for: !mic ? .audio : .video)
+        if !camera {
+            WebRTCClient.showUnauthorizedAlert(for: .video)
         }
     }
 
@@ -293,7 +297,7 @@ struct ActiveCallOverlay: View {
 
     var body: some View {
         VStack {
-            switch call.hasVideo {
+            switch XauXatProductPolicy.videoCallsEnabled && call.hasVideo {
             case true:
                 videoCallInfoView(call)
                 .foregroundColor(.white)
@@ -332,13 +336,15 @@ struct ActiveCallOverlay: View {
                 Spacer()
                 endCallButton()
                 Spacer()
-                if call.localMediaSources.camera {
-                    flipCameraButton()
-                } else {
-                    Color.clear.frame(width: 60, height: 60)
+                if XauXatProductPolicy.videoCallsEnabled {
+                    if call.localMediaSources.camera {
+                        flipCameraButton()
+                    } else {
+                        Color.clear.frame(width: 60, height: 60)
+                    }
+                    Spacer()
+                    toggleCameraButton()
                 }
-                Spacer()
-                toggleCameraButton()
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 16)
@@ -442,7 +448,7 @@ struct ActiveCallOverlay: View {
             let speakerEnabled = current == .builtInSpeaker
             let receiverEnabled = current == .builtInReceiver
             // react automatically only when receiver were selected, otherwise keep an external device selected
-            if !speakerEnabled && hasVideo && receiverEnabled {
+            if XauXatProductPolicy.videoCallsEnabled && !speakerEnabled && hasVideo && receiverEnabled {
                 client.setSpeakerEnabledAndConfigureSession(!speakerEnabled, skipExternalDevice: true)
                 call.speakerEnabled = !speakerEnabled
             }
@@ -483,7 +489,7 @@ struct ActiveCallOverlay: View {
     }
 
     private func controlButton(_ call: Call, _ imageName: String, padding: CGFloat, _ perform: @escaping () -> Void) -> some View {
-        callButton(imageName, call.peerMediaSources.hasVideo ? Color.black.opacity(0.2) : Color.white.opacity(0.2), padding: padding, perform)
+        callButton(imageName, XauXatProductPolicy.videoCallsEnabled && call.peerMediaSources.hasVideo ? Color.black.opacity(0.2) : Color.white.opacity(0.2), padding: padding, perform)
     }
 
     private func audioDevicePickerButton() -> some View {
@@ -492,7 +498,7 @@ struct ActiveCallOverlay: View {
             .scaleEffect(2)
             .padding(10)
             .frame(width: 60, height: 60)
-            .background(call.peerMediaSources.hasVideo ? Color.black.opacity(0.2) : Color.white.opacity(0.2))
+            .background(XauXatProductPolicy.videoCallsEnabled && call.peerMediaSources.hasVideo ? Color.black.opacity(0.2) : Color.white.opacity(0.2))
             .clipShape(.circle)
     }
 

@@ -33,8 +33,8 @@ struct IncomingCallView: View {
                 if m.users.count > 1 {
                     ProfileImage(imageStr: invitation.user.image, size: 24, color: .white)
                 }
-                Image(systemName: invitation.callType.media == .video ? "video.fill" : "phone.fill").foregroundColor(.green)
-                Text(invitation.callTypeText)
+                Image(systemName: "phone.fill").foregroundColor(.green)
+                Text(invitation.sharedKey == nil ? "audio call (not e2e encrypted)" : "**e2e encrypted** audio call")
             }
             HStack {
                 ProfilePreview(profileOf: invitation.contact, color: .white)

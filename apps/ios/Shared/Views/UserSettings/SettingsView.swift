@@ -368,7 +368,7 @@ struct SettingsView: View {
                         .navigationTitle("Your calls")
                         .modifier(ThemedBackground(grouped: true))
                 } label: {
-                    settingsRow("video", color: theme.colors.secondary) { Text("Audio & video calls") }
+                    settingsRow("phone", color: theme.colors.secondary) { Text("Audio calls") }
                 }
                 .disabled(chatModel.chatRunning != true)
 

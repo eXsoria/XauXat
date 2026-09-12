@@ -9,8 +9,17 @@
 import Foundation
 import SimpleXChat
 
+enum XauXatProductPolicy {
+    static let videoCallsEnabled = false
+
+    static func callMedia(_ requested: CallMediaType) -> CallMediaType {
+        videoCallsEnabled ? requested : .audio
+    }
+}
+
 class CallManager {
     func newOutgoingCall(_ contact: Contact, _ media: CallMediaType) -> String {
+        let media = XauXatProductPolicy.callMedia(media)
         let uuid = UUID().uuidString.lowercased()
         let call = Call(direction: .outgoing, contact: contact, callUUID: uuid, callState: .waitCapabilities, initialCallType: media)
         call.speakerEnabled = media == .video
@@ -38,16 +47,17 @@ class CallManager {
 
     func answerIncomingCall(invitation: RcvCallInvitation) {
         let m = ChatModel.shared
+        let media = XauXatProductPolicy.callMedia(invitation.callType.media)
         m.callInvitations.removeValue(forKey: invitation.contact.id)
         let call = Call(
             direction: .incoming,
             contact: invitation.contact,
             callUUID: invitation.callUUID,
             callState: .invitationAccepted,
-            initialCallType: invitation.callType.media,
+            initialCallType: media,
             sharedKey: invitation.sharedKey
         )
-        call.speakerEnabled = invitation.callType.media == .video
+        call.speakerEnabled = media == .video
         let useRelay = UserDefaults.standard.bool(forKey: DEFAULT_WEBRTC_POLICY_RELAY)
         let iceServers = getIceServers()
         logger.debug("answerIncomingCall useRelay: \(useRelay)")
@@ -59,7 +69,7 @@ class CallManager {
 
             Task {
                 await m.callCommand.processCommand(.start(
-                media: invitation.callType.media,
+                media: media,
                 aesKey: invitation.sharedKey,
                 iceServers: iceServers,
                 relay: useRelay

@@ -363,12 +363,11 @@ struct GroupMemberInfoView: View {
 
     func infoActionButtons(_ member: GroupMember) -> some View {
         GeometryReader { g in
-            let buttonWidth = g.size.width / 4
+            let buttonWidth = g.size.width / 2
             HStack(alignment: .center, spacing: 8) {
                 if let chat = knownContactChat, let contact = knownContact {
                     knownDirectChatButton(chat, width: buttonWidth)
                     AudioCallButton(chat: chat, contact: contact, connectionStats: $knownContactConnectionStats, width: buttonWidth) { alert = .someAlert(alert: $0) }
-                    VideoButton(chat: chat, contact: contact, connectionStats: $knownContactConnectionStats, width: buttonWidth) { alert = .someAlert(alert: $0) }
                 } else if groupInfo.fullGroupPreferences.directMessages.on(for: groupInfo.membership) {
                     if let contactId = member.memberContactId {
                         newDirectChatButton(contactId, width: buttonWidth)
@@ -377,14 +376,10 @@ struct GroupMemberInfoView: View {
                     }
                     InfoViewButton(image: "phone.fill", title: "call", disabledLook: true, width: buttonWidth) { showSendMessageToEnableCallsAlert()
                     }
-                    InfoViewButton(image: "video.fill", title: "video", disabledLook: true, width: buttonWidth) { showSendMessageToEnableCallsAlert()
-                    }
                 } else { // no known contact chat && directMessages are off
                     InfoViewButton(image: "message.fill", title: "message", disabledLook: true, width: buttonWidth) { showDirectMessagesProhibitedAlert("Can't message member")
                     }
                     InfoViewButton(image: "phone.fill", title: "call", disabledLook: true, width: buttonWidth) { showDirectMessagesProhibitedAlert("Can't call member")
-                    }
-                    InfoViewButton(image: "video.fill", title: "video", disabledLook: true, width: buttonWidth) { showDirectMessagesProhibitedAlert("Can't call member")
                     }
                 }
             }

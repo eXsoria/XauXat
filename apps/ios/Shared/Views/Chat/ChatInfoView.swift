@@ -155,10 +155,10 @@ struct ChatInfoView: View {
 
                     GeometryReader { g in
                         HStack(alignment: .center, spacing: 8) {
-                            let buttonWidth = g.size.width / 4
+                            let actionCount: CGFloat = chat.chatInfo.nextNtfMode == nil ? 2 : 3
+                            let buttonWidth = g.size.width / actionCount
                             searchButton(width: buttonWidth)
                             AudioCallButton(chat: chat, contact: contact, connectionStats: $connectionStats, width: buttonWidth) { alert = .someAlert(alert: $0) }
-                            VideoButton(chat: chat, contact: contact, connectionStats: $connectionStats, width: buttonWidth) { alert = .someAlert(alert: $0) }
                             if let nextNtfMode = chat.chatInfo.nextNtfMode {
                                 muteButton(width: buttonWidth, nextNtfMode: nextNtfMode)
                             }

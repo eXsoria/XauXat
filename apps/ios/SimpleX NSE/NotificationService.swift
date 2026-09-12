@@ -47,7 +47,7 @@ public enum NSENotificationData {
         case let .contactConnected(user, contact): createContactConnectedNtf(user, contact, badgeCount)
         case let .contactRequest(user, contactRequest): createContactRequestNtf(user, contactRequest, badgeCount)
         case let .messageReceived(user, cInfo, cItem): createMessageReceivedNtf(user, cInfo, cItem, badgeCount)
-        case let .callInvitation(invitation): createCallInvitationNtf(invitation, badgeCount)
+        case let .callInvitation(invitation): createCallInvitationNtf(invitation, badgeCount, mediaOverride: .audio)
         case .msgInfo: UNMutableNotificationContent()
         case .noNtf: UNMutableNotificationContent()
         }
@@ -675,14 +675,14 @@ class NotificationService: UNNotificationServiceExtension {
                         "displayName": callInv.contact.displayName,
                         "contactId": callInv.contact.id,
                         "callUUID": callInv.callUUID ?? "",
-                        "media": callInv.callType.media.rawValue,
+                        "media": CallMediaType.audio.rawValue,
                         "callTs": callInv.callTs.timeIntervalSince1970
                     ]) { error in
                         logger.debug("reportNewIncomingVoIPPushPayload result: \(error)")
-                        handler(error == nil ? UNMutableNotificationContent() : createCallInvitationNtf(callInv, self.badgeCount))
+                        handler(error == nil ? UNMutableNotificationContent() : createCallInvitationNtf(callInv, self.badgeCount, mediaOverride: .audio))
                     }
                 } else {
-                    handler(createCallInvitationNtf(callInv, badgeCount))
+                    handler(createCallInvitationNtf(callInv, badgeCount, mediaOverride: .audio))
                 }
             } else if notificationEntities.isEmpty {
                 handler(serviceNtf)

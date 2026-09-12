@@ -566,21 +566,12 @@ struct ChatView: View {
                     if let call = chatModel.activeCall, call.contact.id == cInfo.id {
                         endCallButton(call)
                     } else if canStartCall {
-                        // Call button always in toolbar; tap opens Audio/Video submenu
-                        Menu {
-                            Button {
-                                CallController.shared.startCall(contact, .audio)
-                            } label: {
-                                Label("Audio call", systemImage: "phone")
-                            }
-                            Button {
-                                CallController.shared.startCall(contact, .video)
-                            } label: {
-                                Label("Video call", systemImage: "video")
-                            }
+                        Button {
+                            CallController.shared.startCall(contact, .audio)
                         } label: {
                             Image(systemName: "phone")
                         }
+                        .accessibilityLabel("Audio call")
                     } else if chatModel.activeCall == nil {
                         // Calls unavailable: show filter button in place of call button
                         contentFilterMenu(withLabel: false)
