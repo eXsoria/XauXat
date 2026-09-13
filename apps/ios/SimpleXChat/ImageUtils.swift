@@ -11,6 +11,7 @@ import SwiftUI
 import AVKit
 import SwiftyGif
 import LinkPresentation
+import ImageIO
 
 public enum XauXatOneTimePhotoPolicy: Equatable {
     case noSave
@@ -79,8 +80,47 @@ public func getLoadedVideo(_ file: CIFile?) -> URL? {
 
 public func saveAnimImage(_ image: UIImage, oneTimeAllowSave: Bool? = nil) -> CryptoFile? {
     let fileName = xauxatPhotoFileName("IMG", "gif", oneTimeAllowSave: oneTimeAllowSave)
-    guard let imageData = image.imageData else { return nil }
-    return saveFile(imageData, fileName, encrypted: privacyEncryptLocalFilesGroupDefault.get())
+    guard let imageData = image.imageData,
+          let sanitizedData = xauxatSanitizeAnimatedImageData(imageData) else { return nil }
+    return saveFile(sanitizedData, fileName, encrypted: privacyEncryptLocalFilesGroupDefault.get())
+}
+
+private func xauxatSanitizeAnimatedImageData(_ data: Data) -> Data? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+    let frameCount = CGImageSourceGetCount(source)
+    guard frameCount > 0 else { return nil }
+
+    let output = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(output, "com.compuserve.gif" as CFString, frameCount, nil) else { return nil }
+
+    if let sourceProperties = CGImageSourceCopyProperties(source, nil) as? [CFString: Any],
+       let gifProperties = sourceProperties[kCGImagePropertyGIFDictionary] as? [CFString: Any],
+       let loopCount = gifProperties[kCGImagePropertyGIFLoopCount] {
+        CGImageDestinationSetProperties(destination, [
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: loopCount]
+        ] as CFDictionary)
+    }
+
+    let safeFramePropertyKeys = [
+        kCGImagePropertyGIFDelayTime,
+        kCGImagePropertyGIFUnclampedDelayTime
+    ]
+    for index in 0..<frameCount {
+        guard let frame = CGImageSourceCreateImageAtIndex(source, index, nil) else { return nil }
+        var safeGIFProperties: [CFString: Any] = [:]
+        if let sourceFrameProperties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+           let gifProperties = sourceFrameProperties[kCGImagePropertyGIFDictionary] as? [CFString: Any] {
+            for key in safeFramePropertyKeys {
+                safeGIFProperties[key] = gifProperties[key]
+            }
+        }
+        let frameProperties: CFDictionary? = safeGIFProperties.isEmpty
+            ? nil
+            : [kCGImagePropertyGIFDictionary: safeGIFProperties] as CFDictionary
+        CGImageDestinationAddImage(destination, frame, frameProperties)
+    }
+
+    return CGImageDestinationFinalize(destination) ? output as Data : nil
 }
 
 public func saveImage(_ uiImage: UIImage, oneTimeAllowSave: Bool? = nil) -> CryptoFile? {
