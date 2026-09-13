@@ -717,7 +717,7 @@ class NotificationService: UNNotificationServiceExtension {
     // unless it is a mention, a reply or some other high priority message marked for notification delivery.
     @inline(__always)
     private func createJointNtf(_ ntfs: [NSENotificationData]) -> UNMutableNotificationContent {
-        let previewMode = ntfPreviewModeGroupDefault.get()
+        let previewMode = xauXatNtfPreviewMode
         logger.debug("NotificationService.createJointNtf ntfs: \(ntfs.count)")
         let (userId, chatsNames) = newMsgsChatsNames(ntfs)
         if !chatsNames.isEmpty, let userId {

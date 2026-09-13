@@ -225,6 +225,11 @@ public let ntfPreviewModeGroupDefault = EnumDefault<NotificationPreviewMode>(
     withDefault: .message
 )
 
+/// XauXat never exposes contact names or message contents in system notifications.
+/// Keep the upstream preference stored for compatibility, but do not use it when
+/// rendering notifications in either the app or its notification service extension.
+public let xauXatNtfPreviewMode: NotificationPreviewMode = .hidden
+
 public let incognitoGroupDefault = BoolDefault(defaults: groupDefaults, forKey: GROUP_DEFAULT_INCOGNITO)
 
 public let appLocalAuthEnabledGroupDefault = BoolDefault(defaults: groupDefaults, forKey: GROUP_DEFAULT_APP_LOCAL_AUTH_ENABLED)

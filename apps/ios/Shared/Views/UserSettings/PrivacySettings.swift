@@ -213,41 +213,6 @@ struct PrivacySettings: View {
             }
 
             Section {
-                NavigationLink {
-                    List {
-                        Section {
-                            SelectionListView(list: NotificationPreviewMode.values, selection: $m.notificationPreview) { previewMode in
-                                ntfPreviewModeGroupDefault.set(previewMode)
-                                m.notificationPreview = previewMode
-                            }
-                        } footer: {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("You can set lock screen notification preview via settings.")
-                                    .foregroundColor(theme.colors.secondary)
-                                Button("Open Settings") {
-                                    DispatchQueue.main.async {
-                                        UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!, options: [:], completionHandler: nil)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .navigationTitle("Show preview")
-                    .modifier(ThemedBackground(grouped: true))
-                    .navigationBarTitleDisplayMode(.inline)
-                } label: {
-                    HStack {
-                        Text("Show preview")
-                        Spacer()
-                        Text(m.notificationPreview.label)
-                    }
-                }
-            } header: {
-                Text("Notifications")
-                    .foregroundColor(theme.colors.secondary)
-            }
-
-            Section {
                 settingsRow("person", color: theme.colors.secondary) {
                     Toggle("Contacts", isOn: $contactReceipts)
                 }
