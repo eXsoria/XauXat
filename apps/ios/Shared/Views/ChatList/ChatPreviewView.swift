@@ -115,7 +115,7 @@ struct ChatPreviewView: View {
             if case .voice = activeContentPreview?.mc, playing == nil {
                 activeContentPreview = nil
             } else if activeContentPreview == nil {
-                if case .image = mc, let ci, let mc, showFullscreenGallery {
+                if mc?.isImage == true, let ci, let mc, showFullscreenGallery {
                     activeContentPreview = ActiveContentPreview(chat: chat, ci: ci, mc: mc)
                 }
                 if case .video = mc, let ci, let mc, showFullscreenGallery {
@@ -333,7 +333,7 @@ struct ChatPreviewView: View {
         func attachment() -> String? {
             switch cItem.content.msgContent {
             case .file: return "doc.fill"
-            case .image: return "photo"
+            case .image, .xauXatImage: return "photo"
             case .video: return "video"
             case .voice: return "play.fill"
             default: return nil
@@ -425,6 +425,10 @@ struct ChatPreviewView: View {
                 }
             }
         case let .image(_, image):
+            smallContentPreview(size: dynamicMediaSize) {
+                CIImageView(chatItem: ci, senderProfile: ciSenderProfile(ci, chat.chatInfo), preview: imageFromBase64(image), maxWidth: dynamicMediaSize, smallView: true, showFullScreenImage: $showFullscreenGallery)
+            }
+        case let .xauXatImage(_, image, _):
             smallContentPreview(size: dynamicMediaSize) {
                 CIImageView(chatItem: ci, senderProfile: ciSenderProfile(ci, chat.chatInfo), preview: imageFromBase64(image), maxWidth: dynamicMediaSize, smallView: true, showFullScreenImage: $showFullscreenGallery)
             }

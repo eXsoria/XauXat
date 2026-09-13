@@ -13,11 +13,11 @@ import SimpleXChat
 private let xauxatConsumedOneTimePhotosKey = "xauxat.consumedOneTimePhotos"
 
 func xauxatIsOneTimePhoto(_ chatItem: ChatItem) -> Bool {
-    xauxatOneTimePhotoPolicy(chatItem.file) != nil
+    xauxatOneTimePhotoPolicy(chatItem) != nil
 }
 
 func xauxatOneTimePhotoExportAllowed(_ chatItem: ChatItem) -> Bool {
-    chatItem.chatDir.sent || xauxatOneTimePhotoPolicy(chatItem.file) != .noSave
+    chatItem.chatDir.sent || xauxatOneTimePhotoPolicy(chatItem) != .noSave
 }
 
 private func xauxatOneTimePhotoConsumed(_ chatItem: ChatItem) -> Bool {
@@ -61,7 +61,7 @@ struct CIImageView: View {
         VStack(alignment: .center, spacing: 6) {
             if receivedOneTime, consumed {
                 oneTimePlaceholder(image: preview, consumed: true)
-            } else if receivedOneTime, let uiImage = getLoadedImage(file) {
+            } else if receivedOneTime, let uiImage = getLoadedXauXatImage(chatItem) {
                 oneTimePlaceholder(image: uiImage, consumed: false)
                     .fullScreenCover(isPresented: $showFullScreenImage, onDismiss: consumeOneTimePhoto) {
                         FullScreenMediaView(
@@ -70,7 +70,7 @@ struct CIImageView: View {
                             image: uiImage,
                             showView: $showFullScreenImage,
                             restrictToCurrentItem: true,
-                            allowSave: xauxatOneTimePhotoPolicy(chatItem.file) == .allowSave,
+                            allowSave: xauxatOneTimePhotoPolicy(chatItem) == .allowSave,
                             onPresented: { xauxatMarkOneTimePhotoConsumed(chatItem) }
                         )
                     }
@@ -79,7 +79,7 @@ struct CIImageView: View {
                         oneTimeRevealing = true
                         showFullScreenImage = true
                     }
-            } else if let uiImage = getLoadedImage(file) {
+            } else if let uiImage = getLoadedXauXatImage(chatItem) {
                 Group { if smallView { smallViewImageView(uiImage) } else { imageView(uiImage) } }
                 .fullScreenCover(isPresented: $showFullScreenImage) {
                     FullScreenMediaView(chatItem: chatItem, scrollToItem: scrollToItem, image: uiImage, showView: $showFullScreenImage)

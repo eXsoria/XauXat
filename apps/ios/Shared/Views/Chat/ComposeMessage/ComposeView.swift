@@ -284,6 +284,8 @@ func chatItemPreview(chatItem: ChatItem) -> ComposePreview {
         return .linkPreview(linkPreview: preview)
     case let .image(_, image):
         return .mediaPreviews(mediaPreviews: [(image, nil)])
+    case let .xauXatImage(_, image, _):
+        return .mediaPreviews(mediaPreviews: [(image, nil)])
     case let .video(_, image, _):
         return .mediaPreviews(mediaPreviews: [(image, nil)])
     case let .voice(_, duration):
@@ -1567,15 +1569,17 @@ struct ComposeView: View {
 
         func mediaContent(_ media: (String, UploadContent?), text: String) -> (CryptoFile?, MsgContent)? {
             let (previewImage, uploadContent) = media
-            return switch uploadContent {
+            switch uploadContent {
             case let .simpleImage(image):
-                (saveImage(image, oneTimeAllowSave: allowOneTimePhotoSave), .image(text: text, image: previewImage))
+                guard let prepared = saveXauXatOneTimeImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
+                return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
             case let .animatedImage(image):
-                (saveAnimImage(image, oneTimeAllowSave: allowOneTimePhotoSave), .image(text: text, image: previewImage))
+                guard let prepared = saveXauXatOneTimeAnimImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
+                return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
             case let .video(_, url, duration):
-                (moveTempFileFromURL(url), .video(text: text, image: previewImage, duration: duration))
+                return (moveTempFileFromURL(url), .video(text: text, image: previewImage, duration: duration))
             case .none:
-                nil
+                return nil
             }
         }
 
@@ -1615,6 +1619,8 @@ struct ComposeView: View {
                 return checkLinkPreview()
             case .image(_, let image):
                 return .image(text: msgText, image: image)
+            case let .xauXatImage(_, image, privacy):
+                return .xauXatImage(text: msgText, image: image, privacy: privacy)
             case .video(_, let image, let duration):
                 return .video(text: msgText, image: image, duration: duration)
             case .voice(_, let duration):

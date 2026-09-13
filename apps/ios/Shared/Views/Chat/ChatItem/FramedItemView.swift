@@ -141,6 +141,17 @@ struct FramedItemView: View {
                 } else {
                     ciMsgContentView(chatItem)
                 }
+            case let .xauXatImage(text, _, _):
+                CIImageView(chatItem: chatItem, senderProfile: ciSenderProfile(chatItem, chat.chatInfo), scrollToItem: scrollToItem, preview: preview, maxWidth: maxWidth, imgWidth: imgWidth, showFullScreenImage: $showFullscreenGallery)
+                    .overlay(DetermineWidth())
+                if text == "" && !chatItem.meta.isLive {
+                    Color.clear
+                        .frame(width: 0, height: 0)
+                        .onAppear { useWhiteMetaColor = true }
+                        .onDisappear { useWhiteMetaColor = false }
+                } else {
+                    ciMsgContentView(chatItem)
+                }
             case let .video(text, _, duration):
                 CIVideoView(chatItem: chatItem, senderProfile: ciSenderProfile(chatItem, chat.chatInfo), preview: preview, duration: duration, maxWidth: maxWidth, videoWidth: videoWidth, showFullscreenPlayer: $showFullscreenGallery)
                 .overlay(DetermineWidth())
@@ -234,6 +245,8 @@ struct FramedItemView: View {
                 } else {
                     ciQuotedMsgView(qi)
                 }
+            case .xauXatImage:
+                ciQuotedMsgView(qi)
             case let .video(_, image, _):
                 if let uiImage = imageFromBase64(image) {
                     ciQuotedMsgView(qi)
@@ -383,6 +396,8 @@ func isRightToLeft(_ s: String) -> Bool {
 
 func onlyImageOrVideo(_ ci: ChatItem) -> Bool {
     if case let .image(text, _) = ci.content.msgContent {
+        return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil && text == ""
+    } else if case let .xauXatImage(text, _, _) = ci.content.msgContent {
         return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil && text == ""
     } else if case let .video(text, _, _) = ci.content.msgContent {
         return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil && text == ""
