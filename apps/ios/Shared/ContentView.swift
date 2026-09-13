@@ -304,7 +304,6 @@ struct ContentView: View {
         }
         .onContinueUserActivity("INStartCallIntent", perform: processUserActivity)
         .onContinueUserActivity("INStartAudioCallIntent", perform: processUserActivity)
-        .onContinueUserActivity("INStartVideoCallIntent", perform: processUserActivity)
         .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { userActivity in
             if let url = userActivity.webpageURL {
                 logger.debug("onContinueUserActivity.NSUserActivityTypeBrowsingWeb: \(url)")
@@ -325,30 +324,22 @@ struct ContentView: View {
     private func processUserActivity(_ activity: NSUserActivity) {
         let intent = activity.interaction?.intent
         if let intent = intent as? INStartCallIntent {
-            callToRecentContact(intent.contacts, intent.callCapability == .videoCall ? .video : .audio)
+            callToRecentContact(intent.contacts)
         } else if let intent = intent as? INStartAudioCallIntent {
-            callToRecentContact(intent.contacts, .audio)
-        } else if let intent = intent as? INStartVideoCallIntent {
-            callToRecentContact(intent.contacts, .video)
+            callToRecentContact(intent.contacts)
         }
     }
 
-    private func callToRecentContact(_ contacts: [INPerson]?, _ mediaType: CallMediaType) {
+    private func callToRecentContact(_ contacts: [INPerson]?) {
         logger.debug("callToRecentContact")
         if let contactId = contacts?.first?.personHandle?.value,
            let chat = chatModel.getChat(contactId),
            case let .direct(contact) = chat.chatInfo {
             let activeCall = chatModel.activeCall
-            // This line works when a user clicks on a video button in CallKit UI while in call.
-            // The app tries to make another call to the same contact and overwite activeCall instance making its state broken
-            if let activeCall, contactId == activeCall.contact.id, mediaType == .video, !activeCall.hasVideo {
-                Task {
-                    await chatModel.callCommand.processCommand(.media(source: .camera, enable: true))
-                }
-            } else if activeCall == nil {
+            if activeCall == nil {
                 logger.debug("callToRecentContact: schedule call")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    CallController.shared.startCall(contact, mediaType)
+                    CallController.shared.startCall(contact, .audio)
                 }
             }
         }

@@ -83,8 +83,8 @@ public func createMessageReceivedNtf(_ user: any UserLike, _ cInfo: ChatInfo, _ 
 }
 
 // Spec: spec/services/notifications.md#createCallInvitationNtf
-public func createCallInvitationNtf(_ invitation: RcvCallInvitation, _ badgeCount: Int) -> UNMutableNotificationContent {
-    let text = invitation.callType.media == .video
+public func createCallInvitationNtf(_ invitation: RcvCallInvitation, _ badgeCount: Int, mediaOverride: CallMediaType? = nil) -> UNMutableNotificationContent {
+    let text = (mediaOverride ?? invitation.callType.media) == .video
                 ? NSLocalizedString("Incoming video call", comment: "notification")
                 : NSLocalizedString("Incoming audio call", comment: "notification")
     let hideContent = ntfPreviewModeGroupDefault.get() == .hidden

@@ -260,7 +260,7 @@ class NtfManager: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
     // Spec: spec/services/notifications.md#notifyCallInvitation
     func notifyCallInvitation(_ invitation: RcvCallInvitation) {
         logger.debug("NtfManager.notifyCallInvitation")
-        addNotification(createCallInvitationNtf(invitation, 0))
+        addNotification(createCallInvitationNtf(invitation, 0, mediaOverride: .audio))
     }
 
     // Spec: spec/services/notifications.md#setNtfBadgeCount

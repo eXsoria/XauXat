@@ -23,7 +23,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
 
     private let provider = CXProvider(configuration: {
         let configuration = CXProviderConfiguration()
-        configuration.supportsVideo = true
+        configuration.supportsVideo = XauXatProductPolicy.videoCallsEnabled
         configuration.supportedHandleTypes = [.generic]
         configuration.includesCallsInRecents = UserDefaults.standard.bool(forKey: DEFAULT_CALL_KIT_CALLS_IN_RECENTS)
         configuration.maximumCallGroups = 1
@@ -279,7 +279,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
         let displayName = payload.dictionaryPayload["displayName"] as? String
         let media = payload.dictionaryPayload["media"] as? String
         update.localizedCallerName = displayName ?? NSLocalizedString("Unknown caller", comment: "callkit banner")
-        update.hasVideo = media == CallMediaType.video.rawValue
+        update.hasVideo = false
         reportExpiredCall(update: update, completion)
     }
 
@@ -302,7 +302,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
     private func cxCallUpdate(invitation: RcvCallInvitation) -> CXCallUpdate {
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: invitation.contact.id)
-        update.hasVideo = invitation.callType.media == .video
+        update.hasVideo = false
         update.localizedCallerName = invitation.contact.displayName
         return update
     }
@@ -310,7 +310,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
     private func cxCallUpdate(_ contactId: String, _ displayName: String, _ media: CallMediaType) -> CXCallUpdate {
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: contactId)
-        update.hasVideo = media == .video
+        update.hasVideo = false
         update.localizedCallerName = displayName
         return update
     }
@@ -350,6 +350,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
 
     func startCall(_ contact: Contact, _ media: CallMediaType) {
         logger.debug("CallController.startCall")
+        let media = XauXatProductPolicy.callMedia(media)
         let callUUID = callManager.newOutgoingCall(contact, media)
         guard let uuid = UUID(uuidString: callUUID) else {
             return
@@ -361,7 +362,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
             requestTransaction(with: action) {
                 let update = CXCallUpdate()
                 update.remoteHandle = CXHandle(type: .generic, value: contact.id)
-                update.hasVideo = media == .video
+                update.hasVideo = false
                 update.localizedCallerName = contact.displayName
                 self.provider.reportCall(with: uuid, updated: update)
             }
