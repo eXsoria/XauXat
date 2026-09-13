@@ -10,6 +10,35 @@
 import SwiftUI
 import SimpleXChat
 
+private let xauxatConsumedOneTimePhotosKey = "xauxat.consumedOneTimePhotos"
+
+func xauxatIsOneTimePhoto(_ chatItem: ChatItem) -> Bool {
+    xauxatOneTimePhotoPolicy(chatItem.file) != nil
+}
+
+func xauxatOneTimePhotoExportAllowed(_ chatItem: ChatItem) -> Bool {
+    chatItem.chatDir.sent || xauxatOneTimePhotoPolicy(chatItem.file) != .noSave
+}
+
+private func xauxatOneTimePhotoConsumed(_ chatItem: ChatItem) -> Bool {
+    guard !chatItem.chatDir.sent, let fileName = chatItem.file?.fileName else { return false }
+    return Set(UserDefaults.standard.stringArray(forKey: xauxatConsumedOneTimePhotosKey) ?? []).contains(fileName)
+}
+
+private func xauxatMarkOneTimePhotoConsumed(_ chatItem: ChatItem) {
+    guard let fileName = chatItem.file?.fileName else { return }
+    var consumed = Set(UserDefaults.standard.stringArray(forKey: xauxatConsumedOneTimePhotosKey) ?? [])
+    consumed.insert(fileName)
+    UserDefaults.standard.set(Array(consumed), forKey: xauxatConsumedOneTimePhotosKey)
+}
+
+private func xauxatRemoveConsumedPhotoFile(_ chatItem: ChatItem) {
+    if let filePath = chatItem.file?.fileSource?.filePath,
+       FileManager.default.fileExists(atPath: getAppFilePath(filePath).path) {
+        removeFile(filePath)
+    }
+}
+
 // Spec: spec/client/chat-view.md#CIImageView
 struct CIImageView: View {
     @EnvironmentObject var m: ChatModel
@@ -22,11 +51,35 @@ struct CIImageView: View {
     var smallView: Bool = false
     @Binding var showFullScreenImage: Bool
     @State private var blurred: Bool = UserDefaults.standard.integer(forKey: DEFAULT_PRIVACY_MEDIA_BLUR_RADIUS) > 0
+    @State private var oneTimeConsumed = false
+    @State private var oneTimeRevealing = false
 
     var body: some View {
         let file = chatItem.file
+        let receivedOneTime = !chatItem.chatDir.sent && xauxatIsOneTimePhoto(chatItem)
+        let consumed = !oneTimeRevealing && (oneTimeConsumed || xauxatOneTimePhotoConsumed(chatItem))
         VStack(alignment: .center, spacing: 6) {
-            if let uiImage = getLoadedImage(file) {
+            if receivedOneTime, consumed {
+                oneTimePlaceholder(image: preview, consumed: true)
+            } else if receivedOneTime, let uiImage = getLoadedImage(file) {
+                oneTimePlaceholder(image: uiImage, consumed: false)
+                    .fullScreenCover(isPresented: $showFullScreenImage, onDismiss: consumeOneTimePhoto) {
+                        FullScreenMediaView(
+                            chatItem: chatItem,
+                            scrollToItem: nil,
+                            image: uiImage,
+                            showView: $showFullScreenImage,
+                            restrictToCurrentItem: true,
+                            allowSave: xauxatOneTimePhotoPolicy(chatItem.file) == .allowSave,
+                            onPresented: { xauxatMarkOneTimePhotoConsumed(chatItem) }
+                        )
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        oneTimeRevealing = true
+                        showFullScreenImage = true
+                    }
+            } else if let uiImage = getLoadedImage(file) {
                 Group { if smallView { smallViewImageView(uiImage) } else { imageView(uiImage) } }
                 .fullScreenCover(isPresented: $showFullScreenImage) {
                     FullScreenMediaView(chatItem: chatItem, scrollToItem: scrollToItem, image: uiImage, showView: $showFullScreenImage)
@@ -42,62 +95,84 @@ struct CIImageView: View {
                 }
             } else if let preview {
                 Group {
-                    if smallView {
+                    if receivedOneTime {
+                        oneTimePlaceholder(image: preview, consumed: false)
+                    } else if smallView {
                         smallViewImageView(preview)
                     } else {
                         imageView(preview).modifier(PrivacyBlur(blurred: $blurred))
                     }
                 }
-                    .simultaneousGesture(TapGesture().onEnded {
-                        if let file = file {
-                            switch file.fileStatus {
-                            case .rcvInvitation, .rcvAborted:
-                                if fileSizeValid(file, senderProfile) {
-                                    Task {
-                                        if let user = m.currentUser {
-                                            await receiveFile(user: user, fileId: file.fileId)
-                                        }
-                                    }
-                                } else {
-                                    let prettyMaxFileSize = ByteCountFormatter.string(fromByteCount: getMaxFileSize(file.fileProtocol, senderProfile), countStyle: .binary)
-                                    AlertManager.shared.showAlertMsg(
-                                        title: "Large file!",
-                                        message: "Your contact sent a file that is larger than currently supported maximum size (\(prettyMaxFileSize))."
-                                    )
-                                }
-                            case .rcvAccepted:
-                                switch file.fileProtocol {
-                                case .xftp:
-                                    AlertManager.shared.showAlertMsg(
-                                        title: "Waiting for image",
-                                        message: "Image will be received when your contact completes uploading it."
-                                    )
-                                case .smp:
-                                    AlertManager.shared.showAlertMsg(
-                                        title: "Waiting for image",
-                                        message: "Image will be received when your contact is online, please wait or check later!"
-                                    )
-                                case .local: ()
-                                }
-                            case .rcvTransfer: () // ?
-                            case .rcvComplete: () // ?
-                            case .rcvCancelled: () // TODO
-                            case let .rcvError(rcvFileError):
-                                showFileErrorAlert(rcvFileError)
-                            case let .rcvWarning(rcvFileError):
-                                showFileErrorAlert(rcvFileError, temporary: true)
-                            case let .sndError(sndFileError):
-                                showFileErrorAlert(sndFileError)
-                            case let .sndWarning(sndFileError):
-                                showFileErrorAlert(sndFileError, temporary: true)
-                            default: ()
-                            }
-                        }
-                    })
+                    .simultaneousGesture(TapGesture().onEnded { handleUnloadedImage(file) })
+            }
+        }
+        .onAppear {
+            if receivedOneTime && consumed {
+                xauxatRemoveConsumedPhotoFile(chatItem)
             }
         }
         .onDisappear {
             showFullScreenImage = false
+        }
+    }
+
+    private func consumeOneTimePhoto() {
+        xauxatRemoveConsumedPhotoFile(chatItem)
+        oneTimeConsumed = true
+        oneTimeRevealing = false
+    }
+
+    private func oneTimePlaceholder(image: UIImage?, consumed: Bool) -> some View {
+        let size = image?.size ?? CGSize(width: 4, height: 3)
+        let width = smallView ? maxWidth : (size.width <= size.height ? maxWidth * 0.75 : maxWidth)
+        let height = smallView ? maxWidth : width * heightRatio(size)
+        return ZStack {
+            Color.black.opacity(0.88)
+            VStack(spacing: 7) {
+                Image(systemName: consumed ? "eye.slash" : "eye")
+                    .font(.system(size: smallView ? 18 : 25, weight: .medium))
+                if !smallView {
+                    Text(consumed ? "Photo expired" : "Tap to view once")
+                        .font(.subheadline.weight(.medium))
+                }
+            }
+            .foregroundColor(.white)
+        }
+        .frame(width: width, height: height)
+        .clipped()
+        .accessibilityLabel(consumed ? "One-time photo expired" : "One-time photo. Tap to view")
+    }
+
+    private func handleUnloadedImage(_ file: CIFile?) {
+        guard let file else { return }
+        switch file.fileStatus {
+        case .rcvInvitation, .rcvAborted:
+            if fileSizeValid(file, senderProfile) {
+                Task {
+                    if let user = m.currentUser {
+                        await receiveFile(user: user, fileId: file.fileId)
+                    }
+                }
+            } else {
+                let prettyMaxFileSize = ByteCountFormatter.string(fromByteCount: getMaxFileSize(file.fileProtocol, senderProfile), countStyle: .binary)
+                AlertManager.shared.showAlertMsg(
+                    title: "Large file!",
+                    message: "Your contact sent a file that is larger than currently supported maximum size (\(prettyMaxFileSize))."
+                )
+            }
+        case .rcvAccepted:
+            switch file.fileProtocol {
+            case .xftp:
+                AlertManager.shared.showAlertMsg(title: "Waiting for image", message: "Image will be received when your contact completes uploading it.")
+            case .smp:
+                AlertManager.shared.showAlertMsg(title: "Waiting for image", message: "Image will be received when your contact is online, please wait or check later!")
+            case .local: ()
+            }
+        case let .rcvError(error): showFileErrorAlert(error)
+        case let .rcvWarning(error): showFileErrorAlert(error, temporary: true)
+        case let .sndError(error): showFileErrorAlert(error)
+        case let .sndWarning(error): showFileErrorAlert(error, temporary: true)
+        default: ()
         }
     }
 

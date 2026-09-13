@@ -21,6 +21,10 @@ struct FullScreenMediaView: View {
     @State var player: AVPlayer? = nil
     @State var url: URL? = nil
     @Binding var showView: Bool
+    var restrictToCurrentItem = false
+    var allowSave = false
+    var onPresented: (() -> Void)? = nil
+    @State private var saved = false
     @State private var showNext = false
     @State private var nextImage: UIImage?
     @State private var nextPlayer: AVPlayer?
@@ -60,7 +64,23 @@ struct FullScreenMediaView: View {
                 }
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if allowSave, let image {
+                Button {
+                    UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+                    saved = true
+                } label: {
+                    Label(saved ? "Saved" : "Save", systemImage: saved ? "checkmark" : "square.and.arrow.down")
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.white)
+                }
+                .disabled(saved)
+                .padding(.top, 18)
+                .padding(.trailing, 18)
+            }
+        }
         .onAppear {
+            onPresented?()
             startPlayerAndNotify()
         }
         .onDisappear {
@@ -74,7 +94,7 @@ struct FullScreenMediaView: View {
                 if t.height > 60 && t.height > w * 2  {
                     showView = false
                     scrollToItem?(chatItem.id)
-                } else if w > 60 && w > abs(t.height) * 2 && !scrolling {
+                } else if !restrictToCurrentItem && w > 60 && w > abs(t.height) * 2 && !scrolling {
                     let previous = t.width > 0
                     scrolling = true
                     if let item = m.nextChatItemData(chatItem.id, previous: previous, map: chatItemImage) {
