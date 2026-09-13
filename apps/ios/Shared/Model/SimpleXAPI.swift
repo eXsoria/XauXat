@@ -2142,6 +2142,12 @@ func apiUpdateGroup(_ groupId: Int64, _ groupProfile: GroupProfile) async throws
     throw r.unexpected
 }
 
+func apiSetGroupInviteRole(_ groupId: Int64, _ inviteRole: GroupMemberRole) async throws -> GroupInfo {
+    let r: ChatResponse2 = try await chatSendCmd(.apiSetGroupInviteRole(groupId: groupId, inviteRole: inviteRole))
+    if case let .groupUpdated(_, toGroup) = r { return toGroup }
+    throw r.unexpected
+}
+
 func apiSetPublicGroupAccess(_ groupId: Int64, access: PublicGroupAccess) async throws -> GroupInfo {
     let r: APIResult<ChatResponse2> = await chatApiSendCmd(.apiSetPublicGroupAccess(groupId: groupId, access: access))
     if case let .result(.groupUpdated(_, toGroup)) = r { return toGroup }

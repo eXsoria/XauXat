@@ -6,6 +6,12 @@ on:
       - xauxat/main
     paths:
       - apps/ios/**
+      - src/**
+      - simplex-chat.cabal
+      - cabal.project
+      - flake.nix
+      - flake.lock
+      - scripts/nix/**
       - scripts/ios/**
       - scripts/xauxat/**
       - .github/workflows/xauxat-ios.yml
@@ -14,6 +20,12 @@ on:
       - xauxat/main
     paths:
       - apps/ios/**
+      - src/**
+      - simplex-chat.cabal
+      - cabal.project
+      - flake.nix
+      - flake.lock
+      - scripts/nix/**
       - scripts/ios/**
       - scripts/xauxat/**
       - .github/workflows/xauxat-ios.yml
@@ -27,10 +39,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native-core:
+    name: XauXat native core (arm64)
+    runs-on: macos-26
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out fork and submodules
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+
+      - name: Restore XauXat native core archive
+        id: native-core-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .xauxat-cache/native-core
+          key: xauxat-ios-native-core-${{ hashFiles('src/**', 'simplex-chat.cabal', 'cabal.project', 'flake.nix', 'flake.lock', 'scripts/nix/**') }}
+
+      - name: Install Nix
+        if: steps.native-core-cache.outputs.cache-hit != 'true'
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa
+        with:
+          extra-conf: |
+            extra-substituters = https://cache.iog.io
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+
+      - name: Build native core from this fork
+        if: steps.native-core-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+          nix --extra-experimental-features 'nix-command flakes' build \
+            '.#hydraJobs.aarch64-darwin."aarch64-darwin-ios:lib:simplex-chat"' \
+            --accept-flake-config \
+            --out-link result-ios-core
+          mkdir -p .xauxat-cache/native-core
+          cp result-ios-core/pkg-ios-aarch64-swift-json.zip .xauxat-cache/native-core/
+          unzip -tq .xauxat-cache/native-core/pkg-ios-aarch64-swift-json.zip
+
+      - name: Upload native core archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: XauXat-iOS-Native-Core-${{ github.sha }}
+          path: .xauxat-cache/native-core/pkg-ios-aarch64-swift-json.zip
+          if-no-files-found: error
+          retention-days: 14
+
   device:
     name: Latest iOS device (arm64)
     runs-on: macos-26
     timeout-minutes: 60
+    needs: native-core
 
     steps:
       - name: Check out fork and submodules
@@ -44,26 +105,14 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
-      - name: Restore verified SimpleX archives
-        id: ios-archive-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      - name: Download XauXat native core archive
+        uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
         with:
+          name: XauXat-iOS-Native-Core-${{ github.sha }}
           path: .xauxat-cache/ios-libs
-          key: xauxat-ios-libs-${{ hashFiles('scripts/xauxat/ios-libs.env') }}
 
-      - name: Download SimpleX archives
-        if: steps.ios-archive-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          source scripts/xauxat/ios-libs.env
-          mkdir -p .xauxat-cache/ios-libs
-          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
-            --output .xauxat-cache/ios-libs/pkg-ios-aarch64-swift-json.zip \
-            "$XAUXAT_IOS_ARM64_URL"
-
-      - name: Prepare pinned native libraries
-        run: ./scripts/xauxat/prepare-ios-libs.sh --archive-dir .xauxat-cache/ios-libs --device-only
+      - name: Prepare native libraries
+        run: ./scripts/xauxat/prepare-ios-libs.sh --archive-dir .xauxat-cache/ios-libs --device-only --local-build
 
       - name: Install pinned Tor dependency
         run: |
@@ -108,6 +157,7 @@ jobs:
     name: Latest iOS Simulator (arm64 launch)
     runs-on: macos-26
     timeout-minutes: 75
+    needs: native-core
 
     steps:
       - name: Check out fork and submodules
@@ -121,26 +171,14 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphonesimulator --show-sdk-version
 
-      - name: Restore verified SimpleX archives
-        id: ios-archive-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      - name: Download XauXat native core archive
+        uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
         with:
+          name: XauXat-iOS-Native-Core-${{ github.sha }}
           path: .xauxat-cache/ios-libs
-          key: xauxat-ios-libs-${{ hashFiles('scripts/xauxat/ios-libs.env') }}
-
-      - name: Download SimpleX archives
-        if: steps.ios-archive-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          source scripts/xauxat/ios-libs.env
-          mkdir -p .xauxat-cache/ios-libs
-          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
-            --output .xauxat-cache/ios-libs/pkg-ios-aarch64-swift-json.zip \
-            "$XAUXAT_IOS_ARM64_URL"
 
       - name: Prepare pinned arm64 simulator libraries
-        run: ./scripts/xauxat/prepare-ios-libs.sh --archive-dir .xauxat-cache/ios-libs
+        run: ./scripts/xauxat/prepare-ios-libs.sh --archive-dir .xauxat-cache/ios-libs --local-build
 
       - name: Install pinned Tor dependency
         run: |

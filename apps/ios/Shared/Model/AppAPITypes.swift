@@ -85,6 +85,7 @@ enum ChatCommand: ChatCmdProtocol {
     case apiLeaveGroup(groupId: Int64)
     case apiListMembers(groupId: Int64)
     case apiUpdateGroupProfile(groupId: Int64, groupProfile: GroupProfile)
+    case apiSetGroupInviteRole(groupId: Int64, inviteRole: GroupMemberRole)
     case apiSetPublicGroupAccess(groupId: Int64, access: PublicGroupAccess)
     case apiCreateGroupLink(groupId: Int64, memberRole: GroupMemberRole)
     case apiGroupLinkMemberRole(groupId: Int64, memberRole: GroupMemberRole)
@@ -295,6 +296,7 @@ enum ChatCommand: ChatCmdProtocol {
             case let .apiLeaveGroup(groupId): return "/_leave #\(groupId)"
             case let .apiListMembers(groupId): return "/_members #\(groupId)"
             case let .apiUpdateGroupProfile(groupId, groupProfile): return "/_group_profile #\(groupId) \(encodeJSON(groupProfile))"
+            case let .apiSetGroupInviteRole(groupId, inviteRole): return "/_group_invite_role #\(groupId) \(inviteRole.rawValue)"
             case let .apiCreateGroupLink(groupId, memberRole): return "/_create link #\(groupId) \(memberRole)"
             case let .apiGroupLinkMemberRole(groupId, memberRole): return "/_set link role #\(groupId) \(memberRole)"
             case let .apiDeleteGroupLink(groupId): return "/_delete link #\(groupId)"
@@ -495,6 +497,7 @@ enum ChatCommand: ChatCmdProtocol {
             case .apiLeaveGroup: return "apiLeaveGroup"
             case .apiListMembers: return "apiListMembers"
             case .apiUpdateGroupProfile: return "apiUpdateGroupProfile"
+            case .apiSetGroupInviteRole: return "apiSetGroupInviteRole"
             case .apiSetPublicGroupAccess: return "apiSetPublicGroupAccess"
             case .apiCreateGroupLink: return "apiCreateGroupLink"
             case .apiGroupLinkMemberRole: return "apiGroupLinkMemberRole"

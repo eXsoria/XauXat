@@ -1,5 +1,9 @@
 {
   description = "nix flake for simplex-chat";
+  nixConfig = {
+    extra-substituters = [ "https://cache.iog.io" ];
+    extra-trusted-public-keys = [ "hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=" ];
+  };
   inputs.haskellNix.url = "github:input-output-hk/haskell.nix/armv7a";
   inputs.nixpkgs.follows = "haskellNix/nixpkgs-2305";
   inputs.mac2ios.url = "github:zw3rk/mobile-core-tools";

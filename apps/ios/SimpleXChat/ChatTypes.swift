@@ -2615,6 +2615,10 @@ public struct GroupInfo: Identifiable, Decodable, NamedChat, Hashable {
     }
 
     public var canAddMembers: Bool {
+        return membership.memberRole >= groupProfile.memberAdmission_.inviteRole_ && membership.memberActive
+    }
+
+    public var canManageInvitePermissions: Bool {
         return membership.memberRole >= .admin && membership.memberActive
     }
 
@@ -2773,15 +2777,21 @@ public struct GroupProfile: Codable, NamedChat, Hashable {
 
 public struct GroupMemberAdmission: Codable, Hashable {
     public var review: MemberCriteria?
+    public var inviteRole: GroupMemberRole?
 
     public init(
-        review: MemberCriteria? = nil
+        review: MemberCriteria? = nil,
+        inviteRole: GroupMemberRole? = nil
     ) {
         self.review = review
+        self.inviteRole = inviteRole
     }
 
+    public var inviteRole_: GroupMemberRole { inviteRole ?? .admin }
+
     public static let sampleData = GroupMemberAdmission(
-        review: .all
+        review: .all,
+        inviteRole: .admin
     )
 }
 
