@@ -58,13 +58,16 @@ struct ContentView: View {
     }
 
     var body: some View {
-        if #available(iOS 16.0, *) {
-            allViews()
-                .scrollContentBackground(.hidden)
-        } else {
-            // on iOS 15 scroll view background disabled in SceneDelegate
-            allViews()
+        Group {
+            if #available(iOS 16.0, *) {
+                allViews()
+                    .scrollContentBackground(.hidden)
+            } else {
+                // on iOS 15 scroll view background disabled in SceneDelegate
+                allViews()
+            }
         }
+        .modifier(XauXatAppSwitcherProtection())
     }
 
     func allViews() -> some View {
