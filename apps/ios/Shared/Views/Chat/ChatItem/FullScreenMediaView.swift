@@ -15,6 +15,7 @@ import AVKit
 // Spec: spec/client/chat-view.md#FullScreenMediaView
 struct FullScreenMediaView: View {
     @EnvironmentObject var m: ChatModel
+    @Environment(\.scenePhase) private var scenePhase
     @State var chatItem: ChatItem
     var scrollToItem: ((ChatItem.ID) -> Void)?
     @State var image: UIImage?
@@ -32,6 +33,7 @@ struct FullScreenMediaView: View {
     @State private var scrolling = false
     @State private var offset: CGFloat = 0
     @State private var nextOffset: CGFloat = 0
+    @State private var screenCaptured = UIScreen.main.isCaptured
 
     var body: some View {
         GeometryReader(content: mediaScrollView)
@@ -79,12 +81,42 @@ struct FullScreenMediaView: View {
                 .padding(.trailing, 18)
             }
         }
+        .overlay {
+            if restrictToCurrentItem && (screenCaptured || scenePhase != .active) {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    VStack(spacing: 10) {
+                        Image(systemName: "eye.slash")
+                            .font(.system(size: 30, weight: .medium))
+                        Text("Protected content")
+                            .font(.headline)
+                        Text("Screen capture is not available for this photo.")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.72))
+                    }
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(28)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
         .onAppear {
+            screenCaptured = UIScreen.main.isCaptured
             onPresented?()
             startPlayerAndNotify()
         }
         .onDisappear {
             player?.pause()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
+            screenCaptured = UIScreen.main.isCaptured
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+            if restrictToCurrentItem {
+                image = nil
+                showView = false
+            }
         }
         .gesture(
             DragGesture(minimumDistance: 80)
