@@ -31,14 +31,6 @@ struct GroupPreferencesView: View {
         VStack {
             List {
                 if !groupInfo.useRelays {
-                    Section {
-                        MemberAdmissionButton(
-                            groupInfo: $groupInfo,
-                            admission: groupInfo.groupProfile.memberAdmission_,
-                            currentAdmission: groupInfo.groupProfile.memberAdmission_,
-                            creatingGroup: creatingGroup
-                        )
-                    }
                     featureSection(.timedMessages, $preferences.timedMessages.enable)
                     featureSection(.fullDelete, $preferences.fullDelete.enable)
                     featureSection(.directMessages, $preferences.directMessages.enable, $preferences.directMessages.role)

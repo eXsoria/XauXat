@@ -15,6 +15,7 @@ struct ContextPendingMemberActionsView: View {
     var groupInfo: GroupInfo
     var member: GroupMember
     @UserDefault(DEFAULT_TOOLBAR_MATERIAL) private var toolbarMaterial = ToolbarMaterial.defaultMaterial
+    @State private var freeCapacity: XauXatFreeGroupCapacity?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -28,19 +29,29 @@ struct ContextPendingMemberActionsView: View {
                 showRejectMemberAlert(groupInfo, member, dismiss: dismiss)
             }
 
-            ZStack {
-                Text("Accept")
-                    .foregroundColor(theme.colors.primary)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                showAcceptMemberAlert(groupInfo, member, dismiss: dismiss)
+            if let freeCapacity {
+                ZStack {
+                    Text(freeCapacity.isFull ? "Free limit reached" : "Accept")
+                        .foregroundColor(freeCapacity.isFull ? theme.colors.secondary : theme.colors.primary)
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if !freeCapacity.isFull {
+                        showAcceptMemberAlert(groupInfo, member, dismiss: dismiss)
+                    }
+                }
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
             }
         }
         .frame(minHeight: 54)
         .frame(maxWidth: .infinity)
         .background(ToolbarMaterial.material(toolbarMaterial))
+        .task {
+            freeCapacity = try? await apiXauXatFreeGroupCapacity(groupInfo.groupId)
+        }
     }
 }
 

@@ -26,6 +26,8 @@ struct GroupLinkView: View {
     @State private var creatingLink = false
     @State private var alert: GroupLinkAlert?
     @State private var shouldCreate = true
+    @State private var freeCapacity: XauXatFreeGroupCapacity?
+    @State private var loadingFreeCapacity = false
 
     private enum GroupLinkAlert: Identifiable {
         case deleteLink
@@ -72,7 +74,7 @@ struct GroupLinkView: View {
                 if isChannel {
                     Text("You can share a link or a QR code - anybody will be able to join the channel.")
                 } else {
-                    Text("You can share a link or a QR code - anybody will be able to join the group. You won't lose members of the group if you later delete it.")
+                    Text("Share a link or QR code to request access. New members are reviewed before joining, and XauXat Free groups support up to 20 members.")
                 }
             }
             .listRowBackground(Color.clear)
@@ -80,8 +82,25 @@ struct GroupLinkView: View {
             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
 
             Section {
+                if !isChannel {
+                    if loadingFreeCapacity {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Checking group capacity…")
+                                .foregroundColor(theme.colors.secondary)
+                        }
+                    } else if let freeCapacity {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(freeCapacity.occupied) of \(XAUXAT_FREE_GROUP_MEMBER_LIMIT) member spots used")
+                            if freeCapacity.isFull {
+                                Text("This group is full on XauXat Free. Existing members and larger imported groups are not changed.")
+                                    .foregroundColor(theme.colors.secondary)
+                            }
+                        }
+                    }
+                }
                 if let groupLink = groupLink {
-                    if !isChannel {
+                    if !isChannel && canOfferGroupAccess {
                         Picker("Initial role", selection: $groupLinkMemberRole) {
                             ForEach([GroupMemberRole.member, GroupMemberRole.observer]) { role in
                                 Text(role.text(isChannel: isChannel))
@@ -89,27 +108,29 @@ struct GroupLinkView: View {
                         }
                         .frame(height: 36)
                     }
-                    SimpleXCreatedLinkQRCode(link: groupLink.connLinkContact, short: $showShortLink)
-                        .id("simplex-qrcode-view-for-\(groupLink.connLinkContact.simplexChatUri(short: showShortLink))")
-                    if !isChannel && groupLink.shouldBeUpgraded {
-                        Button {
-                            upgradeAndShareLinkAlert()
-                        } label: {
-                            Label("Upgrade link", systemImage: "arrow.up")
-                        }
-                    }
-                    Button {
+                    if canOfferGroupAccess {
+                        SimpleXCreatedLinkQRCode(link: groupLink.connLinkContact, short: $showShortLink)
+                            .id("simplex-qrcode-view-for-\(groupLink.connLinkContact.simplexChatUri(short: showShortLink))")
                         if !isChannel && groupLink.shouldBeUpgraded {
-                            upgradeAndShareLinkAlert(groupLink: groupLink)
-                        } else {
-                            groupLink.shareAddress(short: showShortLink)
+                            Button {
+                                upgradeAndShareLinkAlert()
+                            } label: {
+                                Label("Upgrade link", systemImage: "arrow.up")
+                            }
                         }
-                    } label: {
-                        Label("Share link", systemImage: "square.and.arrow.up")
-                    }
-                    if groupInfo?.groupProfile.publicGroup != nil {
-                        Button { showSharePicker = true } label: {
-                            Label("Share via chat", systemImage: "arrowshape.turn.up.forward")
+                        Button {
+                            if !isChannel && groupLink.shouldBeUpgraded {
+                                upgradeAndShareLinkAlert(groupLink: groupLink)
+                            } else {
+                                shareGroupLink(groupLink)
+                            }
+                        } label: {
+                            Label("Share link", systemImage: "square.and.arrow.up")
+                        }
+                        if groupInfo?.groupProfile.publicGroup != nil {
+                            Button { shareGroupLinkViaChat() } label: {
+                                Label("Share via chat", systemImage: "arrowshape.turn.up.forward")
+                            }
                         }
                     }
 
@@ -122,7 +143,7 @@ struct GroupLinkView: View {
                     Button(action: createGroupLink) {
                         Label("Create link", systemImage: "link.badge.plus")
                     }
-                    .disabled(creatingLink)
+                    .disabled(creatingLink || (!isChannel && !canOfferGroupAccess))
                 }
             } header: {
                 if !isChannel, let groupLink, groupLink.connLinkContact.connShortLink != nil {
@@ -161,11 +182,8 @@ struct GroupLinkView: View {
                     }
                 }
             }
-            .onAppear {
-                if groupLink == nil && !creatingLink && shouldCreate {
-                    createGroupLink()
-                }
-                shouldCreate = false
+            .task {
+                await prepareGroupLinkView()
             }
         }
         .modifier(ThemedBackground(grouped: true))
@@ -176,11 +194,48 @@ struct GroupLinkView: View {
         }
     }
 
+    private var canOfferGroupAccess: Bool {
+        isChannel || freeCapacity?.isFull == false
+    }
+
+    private func prepareGroupLinkView() async {
+        if isChannel {
+            await MainActor.run {
+                if groupLink == nil && !creatingLink && shouldCreate { createGroupLink() }
+                shouldCreate = false
+            }
+            return
+        }
+
+        await MainActor.run { loadingFreeCapacity = true }
+        do {
+            if let groupInfo {
+                let updated = try await apiEnsureXauXatFreeGroupAdmission(groupInfo)
+                await MainActor.run { ChatModel.shared.updateGroup(updated) }
+            }
+            let capacity = try await apiXauXatFreeGroupCapacity(groupId)
+            await MainActor.run {
+                freeCapacity = capacity
+                loadingFreeCapacity = false
+                if groupLink == nil && !creatingLink && shouldCreate && !capacity.isFull {
+                    createGroupLink()
+                }
+                shouldCreate = false
+            }
+        } catch {
+            await MainActor.run {
+                loadingFreeCapacity = false
+                shouldCreate = false
+                showErrorAlert(error, NSLocalizedString("Couldn't prepare group access", comment: ""))
+            }
+        }
+    }
+
     private func createGroupLink() {
         Task {
             do {
                 creatingLink = true
-                let gLink = try await apiCreateGroupLink(groupId)
+                let gLink = try await apiCreateGroupLink(groupId, enforceFreeGroupLimit: !isChannel)
                 await MainActor.run {
                     creatingLink = false
                     groupLink = gLink
@@ -205,7 +260,7 @@ struct GroupLinkView: View {
                 }]
                 if let groupLink {
                     actions.append(UIAlertAction(title: NSLocalizedString("Share old link", comment: "alert button"), style: .default) { _ in
-                        groupLink.shareAddress(short: showShortLink)
+                        shareGroupLink(groupLink)
                     })
                 }
                 actions.append(cancelAlertAction)
@@ -217,13 +272,16 @@ struct GroupLinkView: View {
     private func addShortLink(shareOnCompletion: Bool = false) {
         Task {
             do {
+                if !isChannel {
+                    _ = try await apiRequireXauXatFreeGroupCapacity(groupId)
+                }
                 creatingLink = true
                 let gLink = try await apiAddGroupShortLink(groupId)
                 await MainActor.run {
                     creatingLink = false
                     groupLink = gLink
                     if shareOnCompletion, let gLink {
-                        gLink.shareAddress(short: showShortLink)
+                        shareGroupLink(gLink)
                     }
                 }
             } catch let error {
@@ -231,6 +289,36 @@ struct GroupLinkView: View {
                 await MainActor.run {
                     creatingLink = false
                     showErrorAlert(error, NSLocalizedString("Error adding short link", comment: ""))
+                }
+            }
+        }
+    }
+
+    private func shareGroupLink(_ link: GroupLink) {
+        Task {
+            do {
+                if !isChannel {
+                    freeCapacity = try await apiRequireXauXatFreeGroupCapacity(groupId)
+                }
+                await MainActor.run { link.shareAddress(short: showShortLink) }
+            } catch {
+                await MainActor.run {
+                    showErrorAlert(error, NSLocalizedString("Group link unavailable", comment: ""))
+                }
+            }
+        }
+    }
+
+    private func shareGroupLinkViaChat() {
+        Task {
+            do {
+                if !isChannel {
+                    freeCapacity = try await apiRequireXauXatFreeGroupCapacity(groupId)
+                }
+                await MainActor.run { showSharePicker = true }
+            } catch {
+                await MainActor.run {
+                    showErrorAlert(error, NSLocalizedString("Group link unavailable", comment: ""))
                 }
             }
         }
