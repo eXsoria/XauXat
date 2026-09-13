@@ -97,7 +97,7 @@ struct UserPickerSheetView: View {
                             currentPreferences: currentUser.fullPreferences
                         )
                     case .chatProfiles:
-                        UserProfilesView()
+                        UserProfile()
                     case .currentProfile:
                         UserProfile()
                     case .useFromDesktop:

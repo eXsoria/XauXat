@@ -29,11 +29,7 @@ struct UserPicker: View {
     private let sectionShape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
     var body: some View {
-        let otherUsers: [UserInfo] = m.users
-            .filter { u in !u.user.hidden && u.user.userId != m.currentUser?.userId }
-            .sorted(using: KeyPathComparator<UserInfo>(\.user.activeOrder, order: .reverse))
         let sectionWidth = max(frameWidth - sectionHorizontalPadding * 2, 0)
-        let currentUserWidth = max(frameWidth - sectionHorizontalPadding - rowPadding * 2 - 14 - imageSize, 0)
         let stopped = m.chatRunning != true
         VStack(spacing: sectionSpacing) {
             if let user = m.currentUser {
@@ -45,18 +41,11 @@ struct UserPicker: View {
                             profileName(user).lineLimit(1)
                         }
                         .padding(rowPadding)
-                        .frame(width: otherUsers.isEmpty ? sectionWidth : currentUserWidth, alignment: .leading)
+                        .frame(width: sectionWidth, alignment: .leading)
                         .modifier(ListRow { activeSheet = .currentProfile })
                         .clipShape(sectionShape)
                         .disabled(stopped)
                         .opacity(stopped ? 0.4 : 1)
-                        ForEach(otherUsers) { u in
-                            userView(u, size: imageSize)
-                                .frame(maxWidth: sectionWidth * 0.618)
-                                .fixedSize()
-                                .disabled(stopped)
-                                .opacity(stopped ? 0.4 : 1)
-                        }
                     }
                     .padding(.horizontal, sectionHorizontalPadding)
                 }
@@ -68,7 +57,6 @@ struct UserPicker: View {
             VStack(spacing: 0) {
                 openSheetOnTap("qrcode", title: m.userAddress == nil ? "Create SimpleX address" : "Your SimpleX address", sheet: .address, disabled: stopped)
                 openSheetOnTap("switch.2", title: "Chat preferences", sheet: .chatPreferences, disabled: stopped)
-                openSheetOnTap("person.crop.rectangle.stack", title: "Your chat profiles", sheet: .chatProfiles, disabled: stopped)
                 openSheetOnTap("desktopcomputer", title: "Use from desktop", sheet: .useFromDesktop, disabled: stopped)
                 ZStack(alignment: .trailing) {
                     openSheetOnTap("gearshape", title: "Settings", sheet: .settings, showDivider: false)

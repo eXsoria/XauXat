@@ -253,14 +253,22 @@ func apiGetActiveUser(ctrl: chat_ctrl? = nil) throws -> User? {
     }
 }
 
-func apiCreateActiveUser(_ p: Profile?, pastTimestamp: Bool = false, ctrl: chat_ctrl? = nil) throws -> User {
+func apiCreateActiveUser(
+    _ p: Profile?,
+    pastTimestamp: Bool = false,
+    allowAdditionalProfileForMigration: Bool = false,
+    ctrl: chat_ctrl? = nil
+) throws -> User {
+    if !allowAdditionalProfileForMigration, !(try listUsers(ctrl: ctrl)).isEmpty {
+        throw RuntimeError("XauXat Free supports one persistent identity")
+    }
     let r: ChatResponse0 = try chatSendCmdSync(.createActiveUser(profile: p, pastTimestamp: pastTimestamp), ctrl: ctrl)
     if case let .activeUser(user) = r { return user }
     throw r.unexpected
 }
 
-func listUsers() throws -> [UserInfo] {
-    return try listUsersResponse(chatSendCmdSync(.listUsers))
+func listUsers(ctrl: chat_ctrl? = nil) throws -> [UserInfo] {
+    return try listUsersResponse(chatSendCmdSync(.listUsers, ctrl: ctrl))
 }
 
 func listUsersAsync() async throws -> [UserInfo] {
@@ -2305,7 +2313,11 @@ func startChatWithTemporaryDatabase(ctrl: chat_ctrl) throws -> User? {
     guard isXauXatTorReady() else {
         throw RuntimeError("Embedded Tor is not ready")
     }
-    let migrationActiveUser = try? apiGetActiveUser(ctrl: ctrl) ?? apiCreateActiveUser(Profile(displayName: "Temp", fullName: ""), ctrl: ctrl)
+    let migrationActiveUser = try? apiGetActiveUser(ctrl: ctrl) ?? apiCreateActiveUser(
+        Profile(displayName: "Temp", fullName: ""),
+        allowAdditionalProfileForMigration: true,
+        ctrl: ctrl
+    )
     try setNetworkConfig(getNetCfg(), ctrl: ctrl)
     try apiSetAppFilePaths(filesFolder: getMigrationTempFilesDirectory().path, tempFolder: getMigrationTempFilesDirectory().path, assetsFolder: getWallpaperDirectory().deletingLastPathComponent().path, ctrl: ctrl)
     _ = try apiStartChat(ctrl: ctrl)
