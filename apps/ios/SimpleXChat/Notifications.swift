@@ -25,7 +25,7 @@ let contactHidden = NSLocalizedString("Contact hidden:", comment: "notification"
 
 // Spec: spec/services/notifications.md#createContactRequestNtf
 public func createContactRequestNtf(_ user: any UserLike, _ contactRequest: UserContactRequest, _ badgeCount: Int) -> UNMutableNotificationContent {
-    let hideContent = ntfPreviewModeGroupDefault.get() == .hidden
+    let hideContent = xauXatNtfPreviewMode == .hidden
     return createNotification(
         categoryIdentifier: ntfCategoryContactRequest,
         title: String.localizedStringWithFormat(
@@ -44,7 +44,7 @@ public func createContactRequestNtf(_ user: any UserLike, _ contactRequest: User
 
 // Spec: spec/services/notifications.md#createContactConnectedNtf
 public func createContactConnectedNtf(_ user: any UserLike, _ contact: Contact, _ badgeCount: Int) -> UNMutableNotificationContent {
-    let hideContent = ntfPreviewModeGroupDefault.get() == .hidden
+    let hideContent = xauXatNtfPreviewMode == .hidden
     return createNotification(
         categoryIdentifier: ntfCategoryContactConnected,
         title: String.localizedStringWithFormat(
@@ -64,7 +64,7 @@ public func createContactConnectedNtf(_ user: any UserLike, _ contact: Contact, 
 
 // Spec: spec/services/notifications.md#createMessageReceivedNtf
 public func createMessageReceivedNtf(_ user: any UserLike, _ cInfo: ChatInfo, _ cItem: ChatItem, _ badgeCount: Int) -> UNMutableNotificationContent {
-    let previewMode = ntfPreviewModeGroupDefault.get()
+    let previewMode = xauXatNtfPreviewMode
     var title: String
     if case let .group(groupInfo, _) = cInfo, case let .groupRcv(groupMember) = cItem.chatDir {
         title = groupMsgNtfTitle(groupInfo, groupMember, hideContent: previewMode == .hidden)
@@ -87,7 +87,7 @@ public func createCallInvitationNtf(_ invitation: RcvCallInvitation, _ badgeCoun
     let text = (mediaOverride ?? invitation.callType.media) == .video
                 ? NSLocalizedString("Incoming video call", comment: "notification")
                 : NSLocalizedString("Incoming audio call", comment: "notification")
-    let hideContent = ntfPreviewModeGroupDefault.get() == .hidden
+    let hideContent = xauXatNtfPreviewMode == .hidden
     return createNotification(
         categoryIdentifier: ntfCategoryCallInvitation,
         title: hideContent ? contactHidden : "\(invitation.contact.chatViewName):",
@@ -100,7 +100,7 @@ public func createCallInvitationNtf(_ invitation: RcvCallInvitation, _ badgeCoun
 
 // Spec: spec/services/notifications.md#createConnectionEventNtf
 public func createConnectionEventNtf(_ user: User, _ connEntity: ConnectionEntity, _ badgeCount: Int) -> UNMutableNotificationContent {
-    let hideContent = ntfPreviewModeGroupDefault.get() == .hidden
+    let hideContent = xauXatNtfPreviewMode == .hidden
     var title: String
     var body: String? = nil
     var targetContentIdentifier: String? = nil
