@@ -16,6 +16,36 @@ enum LAResult {
     case unavailable(authError: String?)
 }
 
+enum XauXatDuressScope: String, CaseIterable, Identifiable {
+    case primary
+    case decoy
+    case all
+
+    var id: Self { self }
+
+    var label: LocalizedStringKey {
+        switch self {
+        case .primary: "Main environment"
+        case .decoy: "Decoy environment"
+        case .all: "Both environments"
+        }
+    }
+
+    var storageScopes: [XauXatStorageScope] {
+        switch self {
+        case .primary: [.primary]
+        case .decoy: [.decoy]
+        case .all: [.primary, .decoy]
+        }
+    }
+
+    static var configured: XauXatDuressScope {
+        guard let rawValue = UserDefaults.standard.string(forKey: DEFAULT_LA_DURESS_SCOPE),
+              let scope = XauXatDuressScope(rawValue: rawValue) else { return .primary }
+        return scope
+    }
+}
+
 func authorize(_ text: String, _ authorized: Binding<Bool>) {
     authenticate(reason: text) { laResult in
         switch laResult {
