@@ -2291,17 +2291,18 @@ struct ChatView: View {
                    availableReactions.count > 0 {
                     reactionsGroup
                 }
-                if ci.meta.itemDeleted == nil && !ci.isLiveDummy && !live && !ci.localNote && chat.chatInfo.sendMsgEnabled {
+                if ci.meta.itemDeleted == nil && !ci.isLiveDummy && !live && !ci.localNote && chat.chatInfo.sendMsgEnabled && !xauxatIsOneTimePhoto(ci) {
                     replyButton
                 }
                 let fileSource = getLoadedFileSource(ci.file)
                 let fileExists = if let fs = fileSource, FileManager.default.fileExists(atPath: getAppFilePath(fs.filePath).path) { true } else { false }
-                let copyAndShareAllowed = !ci.content.text.isEmpty || (ci.content.msgContent?.isImage == true && fileExists)
+                let mediaExportAllowed = xauxatOneTimePhotoExportAllowed(ci)
+                let copyAndShareAllowed = !ci.content.text.isEmpty || (ci.content.msgContent?.isImage == true && fileExists && mediaExportAllowed)
                 if copyAndShareAllowed {
                     shareButton(ci)
                     copyButton(ci)
                 }
-                if let fileSource = fileSource, fileExists {
+                if let fileSource = fileSource, fileExists, mediaExportAllowed {
                     if case .image = ci.content.msgContent, let image = getLoadedImage(ci.file) {
                         if image.imageData != nil {
                             saveButton(file: fileSource)
@@ -2320,7 +2321,9 @@ struct ChatView: View {
                 if ci.meta.itemDeleted == nil
                     && (ci.file == nil || (fileSource != nil && fileExists))
                     && !ci.isLiveDummy && !live {
-                    forwardButton
+                    if !xauxatIsOneTimePhoto(ci) {
+                        forwardButton
+                    }
                 }
                 if !ci.isLiveDummy {
                     viewInfoButton(ci)
@@ -2468,7 +2471,7 @@ struct ChatView: View {
         private func shareButton(_ ci: ChatItem) -> Button<some View> {
             Button {
                 var shareItems: [Any] = [ci.content.text]
-                if case .image = ci.content.msgContent, let image = getLoadedImage(ci.file) {
+                if case .image = ci.content.msgContent, xauxatOneTimePhotoExportAllowed(ci), let image = getLoadedImage(ci.file) {
                     shareItems.append(image)
                 }
                 showShareSheet(items: shareItems)
@@ -2483,6 +2486,7 @@ struct ChatView: View {
         private func copyButton(_ ci: ChatItem) -> Button<some View> {
             Button {
                 if case let .image(text, _) = ci.content.msgContent,
+                   xauxatOneTimePhotoExportAllowed(ci),
                    text == "",
                    let image = getLoadedImage(ci.file) {
                     UIPasteboard.general.image = image

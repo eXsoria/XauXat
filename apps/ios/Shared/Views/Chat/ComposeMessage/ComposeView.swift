@@ -361,6 +361,7 @@ struct ComposeView: View {
     @State private var showMediaPicker = false
     @State private var showTakePhoto = false
     @State var chosenMedia: [UploadContent] = []
+    @State private var allowOneTimePhotoSave = false
     @State private var showFileImporter = false
 
     @State private var audioRecorder: AudioRecorder?
@@ -1352,9 +1353,18 @@ struct ComposeView: View {
         case let .mediaPreviews(mediaPreviews: media):
             ComposeImageView(
                 images: media.map { (img, _) in img },
+                showsOneTimePhotoControls: media.contains { (_, content) in
+                    guard let content else { return false }
+                    return switch content {
+                    case .simpleImage, .animatedImage: true
+                    default: false
+                    }
+                },
+                allowSave: $allowOneTimePhotoSave,
                 cancelImage: {
                     composeState = composeState.copy(preview: .noPreview)
                     chosenMedia = []
+                    allowOneTimePhotoSave = false
                 },
                 cancelEnabled: !composeState.editing && !composeState.inProgress)
             Divider()
@@ -1559,9 +1569,9 @@ struct ComposeView: View {
             let (previewImage, uploadContent) = media
             return switch uploadContent {
             case let .simpleImage(image):
-                (saveImage(image), .image(text: text, image: previewImage))
+                (saveImage(image, oneTimeAllowSave: allowOneTimePhotoSave), .image(text: text, image: previewImage))
             case let .animatedImage(image):
-                (saveAnimImage(image), .image(text: text, image: previewImage))
+                (saveAnimImage(image, oneTimeAllowSave: allowOneTimePhotoSave), .image(text: text, image: previewImage))
             case let .video(_, url, duration):
                 (moveTempFileFromURL(url), .video(text: text, image: previewImage, duration: duration))
             case .none:
@@ -1843,6 +1853,7 @@ struct ComposeView: View {
             resetLinkPreview()
         }
         chosenMedia = []
+        allowOneTimePhotoSave = false
         audioRecorder = nil
         voiceMessageRecordingTime = nil
         startingRecording = false

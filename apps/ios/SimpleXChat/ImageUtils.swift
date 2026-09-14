@@ -12,6 +12,27 @@ import AVKit
 import SwiftyGif
 import LinkPresentation
 
+public enum XauXatOneTimePhotoPolicy: Equatable {
+    case noSave
+    case allowSave
+}
+
+private let xauxatOneTimePhotoNoSavePrefix = "xauxat-otv-ns-"
+private let xauxatOneTimePhotoAllowSavePrefix = "xauxat-otv-as-"
+
+public func xauxatOneTimePhotoPolicy(_ file: CIFile?) -> XauXatOneTimePhotoPolicy? {
+    guard let fileName = file?.fileName.lowercased() else { return nil }
+    if fileName.hasPrefix(xauxatOneTimePhotoNoSavePrefix) { return .noSave }
+    if fileName.hasPrefix(xauxatOneTimePhotoAllowSavePrefix) { return .allowSave }
+    return nil
+}
+
+private func xauxatPhotoFileName(_ prefix: String, _ ext: String, oneTimeAllowSave: Bool?) -> String {
+    let base = generateNewFileName(prefix, ext)
+    guard let allowSave = oneTimeAllowSave else { return base }
+    return (allowSave ? xauxatOneTimePhotoAllowSavePrefix : xauxatOneTimePhotoNoSavePrefix) + base
+}
+
 public func getLoadedFileSource(_ file: CIFile?) -> CryptoFile? {
     if let file = file, file.loaded {
         return file.fileSource
@@ -56,17 +77,17 @@ public func getLoadedVideo(_ file: CIFile?) -> URL? {
     return nil
 }
 
-public func saveAnimImage(_ image: UIImage) -> CryptoFile? {
-    let fileName = generateNewFileName("IMG", "gif")
+public func saveAnimImage(_ image: UIImage, oneTimeAllowSave: Bool? = nil) -> CryptoFile? {
+    let fileName = xauxatPhotoFileName("IMG", "gif", oneTimeAllowSave: oneTimeAllowSave)
     guard let imageData = image.imageData else { return nil }
     return saveFile(imageData, fileName, encrypted: privacyEncryptLocalFilesGroupDefault.get())
 }
 
-public func saveImage(_ uiImage: UIImage) -> CryptoFile? {
+public func saveImage(_ uiImage: UIImage, oneTimeAllowSave: Bool? = nil) -> CryptoFile? {
     let hasAlpha = imageHasAlpha(uiImage)
     let ext = hasAlpha ? "png" : "jpg"
     if let imageDataResized = resizeImageToDataSize(uiImage, maxDataSize: MAX_IMAGE_SIZE, hasAlpha: hasAlpha) {
-        let fileName = generateNewFileName("IMG", ext)
+        let fileName = xauxatPhotoFileName("IMG", ext, oneTimeAllowSave: oneTimeAllowSave)
         return saveFile(imageDataResized, fileName, encrypted: privacyEncryptLocalFilesGroupDefault.get())
     }
     return nil
