@@ -42,6 +42,7 @@ private func xauxatRemoveConsumedPhotoFile(_ chatItem: ChatItem) {
 // Spec: spec/client/chat-view.md#CIImageView
 struct CIImageView: View {
     @EnvironmentObject var m: ChatModel
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     let chatItem: ChatItem
     let senderProfile: LocalProfile?
     var scrollToItem: ((ChatItem.ID) -> Void)? = nil
@@ -62,22 +63,36 @@ struct CIImageView: View {
             if receivedOneTime, consumed {
                 oneTimePlaceholder(image: preview, consumed: true)
             } else if receivedOneTime, let uiImage = getLoadedXauXatImage(chatItem) {
-                oneTimePlaceholder(image: uiImage, consumed: false)
-                    .fullScreenCover(isPresented: $showFullScreenImage, onDismiss: consumeOneTimePhoto) {
-                        FullScreenMediaView(
-                            chatItem: chatItem,
-                            scrollToItem: nil,
-                            image: uiImage,
-                            showView: $showFullScreenImage,
-                            restrictToCurrentItem: true,
-                            allowSave: xauxatOneTimePhotoPolicy(chatItem) == .allowSave,
-                            onPresented: { xauxatMarkOneTimePhotoConsumed(chatItem) }
-                        )
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        oneTimeRevealing = true
-                        showFullScreenImage = true
+                if plusEntitlements.isAuthorized(for: .pressToPreview) {
+                    XauXatPressToPreview(
+                        onReveal: {
+                            oneTimeRevealing = true
+                            xauxatMarkOneTimePhotoConsumed(chatItem)
+                        },
+                        onHide: {
+                            if oneTimeRevealing { consumeOneTimePhoto() }
+                        },
+                        protectedContent: { imageView(uiImage) },
+                        placeholder: { oneTimePlaceholder(image: uiImage, consumed: false, pressToPreview: true) }
+                    )
+                } else {
+                    oneTimePlaceholder(image: uiImage, consumed: false)
+                        .fullScreenCover(isPresented: $showFullScreenImage, onDismiss: consumeOneTimePhoto) {
+                            FullScreenMediaView(
+                                chatItem: chatItem,
+                                scrollToItem: nil,
+                                image: uiImage,
+                                showView: $showFullScreenImage,
+                                restrictToCurrentItem: true,
+                                allowSave: xauxatOneTimePhotoPolicy(chatItem) == .allowSave,
+                                onPresented: { xauxatMarkOneTimePhotoConsumed(chatItem) }
+                            )
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            oneTimeRevealing = true
+                            showFullScreenImage = true
+                        }
                     }
             } else if let uiImage = getLoadedXauXatImage(chatItem) {
                 Group { if smallView { smallViewImageView(uiImage) } else { imageView(uiImage) } }
@@ -122,17 +137,17 @@ struct CIImageView: View {
         oneTimeRevealing = false
     }
 
-    private func oneTimePlaceholder(image: UIImage?, consumed: Bool) -> some View {
+    private func oneTimePlaceholder(image: UIImage?, consumed: Bool, pressToPreview: Bool = false) -> some View {
         let size = image?.size ?? CGSize(width: 4, height: 3)
         let width = smallView ? maxWidth : (size.width <= size.height ? maxWidth * 0.75 : maxWidth)
         let height = smallView ? maxWidth : width * heightRatio(size)
         return ZStack {
             Color.black.opacity(0.88)
             VStack(spacing: 7) {
-                Image(systemName: consumed ? "eye.slash" : "eye")
+                Image(systemName: consumed ? "eye.slash" : pressToPreview ? "hand.tap" : "eye")
                     .font(.system(size: smallView ? 18 : 25, weight: .medium))
                 if !smallView {
-                    Text(consumed ? "Photo expired" : "Tap to view once")
+                    Text(consumed ? "Photo expired" : pressToPreview ? "Press and hold to view" : "Tap to view once")
                         .font(.subheadline.weight(.medium))
                 }
             }
@@ -140,7 +155,11 @@ struct CIImageView: View {
         }
         .frame(width: width, height: height)
         .clipped()
-        .accessibilityLabel(consumed ? "One-time photo expired" : "One-time photo. Tap to view")
+        .accessibilityLabel(
+            consumed
+            ? "One-time photo expired"
+            : pressToPreview ? "One-time photo. Use the reveal action to view for ten seconds" : "One-time photo. Tap to view"
+        )
     }
 
     private func handleUnloadedImage(_ file: CIFile?) {
