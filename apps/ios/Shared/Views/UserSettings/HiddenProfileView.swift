@@ -39,11 +39,17 @@ struct HiddenProfileView: View {
 
                 settingsRow("lock", color: theme.colors.secondary) {
                     Button("Save profile password") {
+                        let replacementUserId = m.users.first {
+                            $0.user.userId != user.userId && !$0.user.hidden
+                        }?.user.userId
                         Task {
                             do {
                                 let u = try await apiHideUser(user.userId, viewPwd: hidePassword)
+                                if user.activeUser, let replacementUserId {
+                                    try await changeActiveUserAsync_(replacementUserId, viewPwd: nil)
+                                }
                                 await MainActor.run {
-                                    m.updateUser(u)
+                                    if !user.activeUser { m.updateUser(u) }
                                     dismiss()
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                         withAnimation { profileHidden = true }

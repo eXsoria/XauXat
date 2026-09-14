@@ -23,9 +23,14 @@ public let appNotificationId = "chat.simplex.app.notification"
 
 let contactHidden = NSLocalizedString("Contact hidden:", comment: "notification")
 
+private func xauXatIsProtectedProfile(_ user: any UserLike) -> Bool {
+    (user as? User)?.hidden == true || xauXatIsProfileProtected(user.userId)
+}
+
 // Spec: spec/services/notifications.md#createContactRequestNtf
 public func createContactRequestNtf(_ user: any UserLike, _ contactRequest: UserContactRequest, _ badgeCount: Int) -> UNMutableNotificationContent {
-    let hideContent = xauXatNtfPreviewMode == .hidden
+    let protectedProfile = xauXatIsProtectedProfile(user)
+    let hideContent = xauXatNtfPreviewMode == .hidden || protectedProfile
     return createNotification(
         categoryIdentifier: ntfCategoryContactRequest,
         title: String.localizedStringWithFormat(
@@ -38,13 +43,14 @@ public func createContactRequestNtf(_ user: any UserLike, _ contactRequest: User
         ),
         targetContentIdentifier: nil,
         userInfo: ["chatId": contactRequest.id, "contactRequestId": contactRequest.apiId, "userId": user.userId],
-        badgeCount: badgeCount
+        badgeCount: protectedProfile ? nil : badgeCount
     )
 }
 
 // Spec: spec/services/notifications.md#createContactConnectedNtf
 public func createContactConnectedNtf(_ user: any UserLike, _ contact: Contact, _ badgeCount: Int) -> UNMutableNotificationContent {
-    let hideContent = xauXatNtfPreviewMode == .hidden
+    let protectedProfile = xauXatIsProtectedProfile(user)
+    let hideContent = xauXatNtfPreviewMode == .hidden || protectedProfile
     return createNotification(
         categoryIdentifier: ntfCategoryContactConnected,
         title: String.localizedStringWithFormat(
@@ -58,15 +64,16 @@ public func createContactConnectedNtf(_ user: any UserLike, _ contact: Contact, 
         targetContentIdentifier: contact.id,
         userInfo: ["userId": user.userId],
 //            userInfo: ["chatId": contact.id, "contactId": contact.apiId]
-        badgeCount: badgeCount
+        badgeCount: protectedProfile ? nil : badgeCount
     )
 }
 
 // Spec: spec/services/notifications.md#createMessageReceivedNtf
 public func createMessageReceivedNtf(_ user: any UserLike, _ cInfo: ChatInfo, _ cItem: ChatItem, _ badgeCount: Int) -> UNMutableNotificationContent {
     let previewMode = xauXatNtfPreviewMode
-    let protected = xauXatIsChatLocked(cInfo.id) || xauXatIsChatHidden(cInfo.id)
-    let hidden = xauXatIsChatHidden(cInfo.id)
+    let protectedProfile = xauXatIsProtectedProfile(user)
+    let protected = xauXatIsChatLocked(cInfo.id) || xauXatIsChatHidden(cInfo.id) || protectedProfile
+    let hidden = xauXatIsChatHidden(cInfo.id) || protectedProfile
     var title: String
     if protected {
         title = NSLocalizedString("XauXat", comment: "locked conversation notification title")
@@ -92,8 +99,9 @@ public func createCallInvitationNtf(_ invitation: RcvCallInvitation, _ badgeCoun
                 ? NSLocalizedString("Incoming video call", comment: "notification")
                 : NSLocalizedString("Incoming audio call", comment: "notification")
     let hideContent = xauXatNtfPreviewMode == .hidden
-    let protected = xauXatIsChatLocked(invitation.contact.id) || xauXatIsChatHidden(invitation.contact.id)
-    let hidden = xauXatIsChatHidden(invitation.contact.id)
+    let protectedProfile = invitation.user.hidden || xauXatIsProfileProtected(invitation.user.userId)
+    let protected = xauXatIsChatLocked(invitation.contact.id) || xauXatIsChatHidden(invitation.contact.id) || protectedProfile
+    let hidden = xauXatIsChatHidden(invitation.contact.id) || protectedProfile
     return createNotification(
         categoryIdentifier: ntfCategoryCallInvitation,
         title: protected ? NSLocalizedString("XauXat", comment: "protected conversation notification title") : hideContent ? contactHidden : "\(invitation.contact.chatViewName):",
@@ -106,7 +114,8 @@ public func createCallInvitationNtf(_ invitation: RcvCallInvitation, _ badgeCoun
 
 // Spec: spec/services/notifications.md#createConnectionEventNtf
 public func createConnectionEventNtf(_ user: User, _ connEntity: ConnectionEntity, _ badgeCount: Int) -> UNMutableNotificationContent {
-    let hideContent = xauXatNtfPreviewMode == .hidden
+    let protectedProfile = user.hidden || xauXatIsProfileProtected(user.userId)
+    let hideContent = xauXatNtfPreviewMode == .hidden || protectedProfile
     var title: String
     var body: String? = nil
     var targetContentIdentifier: String? = nil
@@ -126,7 +135,7 @@ public func createConnectionEventNtf(_ user: User, _ connEntity: ConnectionEntit
     case .userContactConnection:
         title = NSLocalizedString("New contact request", comment: "notification")
     }
-    let hidden = targetContentIdentifier.map(xauXatIsChatHidden) ?? false
+    let hidden = protectedProfile || (targetContentIdentifier.map(xauXatIsChatHidden) ?? false)
     if let chatID = targetContentIdentifier, xauXatIsChatLocked(chatID) || hidden {
         title = NSLocalizedString("XauXat", comment: "locked conversation notification title")
         body = NSLocalizedString("new message", comment: "notification")

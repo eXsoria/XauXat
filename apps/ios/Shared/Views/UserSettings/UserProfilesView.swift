@@ -10,7 +10,10 @@ import SimpleXChat
 struct UserProfilesView: View {
     @EnvironmentObject private var m: ChatModel
     @EnvironmentObject private var theme: AppTheme
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @Environment(\.editMode) private var editMode
+    var allowsProfileCreation = true
+    var title: LocalizedStringKey = "Your chat profiles"
     @AppStorage(DEFAULT_SHOW_HIDDEN_PROFILES_NOTICE) private var showHiddenProfilesNotice = true
     @AppStorage(DEFAULT_SHOW_MUTE_PROFILE_ALERT) private var showMuteProfileAlert = true
     @State private var showDeleteConfirmation = false
@@ -23,6 +26,11 @@ struct UserProfilesView: View {
     @State private var profileAction: UserProfileAction?
     @State private var actionPassword = ""
     @State private var navigateToProfileCreate = false
+
+    init(allowsProfileCreation: Bool = true, title: LocalizedStringKey = "Your chat profiles") {
+        self.allowsProfileCreation = allowsProfileCreation
+        self.title = title
+    }
 
     var trimmedSearchTextOrPassword: String { searchTextOrPassword.trimmingCharacters(in: .whitespaces)}
 
@@ -82,7 +90,7 @@ struct UserProfilesView: View {
                     v
                 }
 
-                if trimmedSearchTextOrPassword == "" {
+                if allowsProfileCreation && trimmedSearchTextOrPassword == "" {
                     NavigationLink(
                         destination: CreateProfile(),
                         isActive: $navigateToProfileCreate
@@ -113,7 +121,7 @@ struct UserProfilesView: View {
                 EditButton()
             }
         }
-        .navigationTitle("Your chat profiles")
+        .navigationTitle(title)
         .modifier(ThemedBackground(grouped: true))
         .searchable(text: $searchTextOrPassword, placement: .navigationBarDrawer(displayMode: .always))
         .autocorrectionDisabled(true)
@@ -380,7 +388,7 @@ struct UserProfilesView: View {
                 }
                 .tint(.green)
             } else {
-                if visibleUsersCount > 1 {
+                if visibleUsersCount > 1 && plusEntitlements.isAuthorized(for: .protectedProfiles) {
                     Button("Hide") {
                         withAuth {
                             selectedUser = user

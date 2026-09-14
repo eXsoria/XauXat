@@ -1029,6 +1029,18 @@ private struct XauXatPrivacyView: View {
                         )
                         .hidden()
                     }
+                    NavigationLink {
+                        UserProfilesView(
+                            allowsProfileCreation: false,
+                            title: "Protected profiles"
+                        )
+                    } label: {
+                        XauXatSettingsRow(
+                            palette: palette,
+                            symbol: "person.crop.circle.badge.checkmark",
+                            title: "Protected profiles"
+                        )
+                    }
                 }
 
                 Text("XauXat always hides its content in the App Switcher. Your security settings stay on this device.")

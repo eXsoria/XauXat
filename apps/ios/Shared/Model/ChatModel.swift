@@ -394,7 +394,11 @@ final class ChatModel: ObservableObject {
             ThemeManager.applyTheme(currentThemeDefault.get())
         }
     }
-    @Published var users: [UserInfo] = []
+    @Published var users: [UserInfo] = [] {
+        didSet {
+            _ = xauXatSyncProtectedProfileIDs(Set(users.compactMap { $0.user.hidden ? $0.user.userId : nil }))
+        }
+    }
     @Published var chatInitialized = false
     @Published var chatRunning: Bool?
     @Published var chatDbChanged = false
@@ -1154,6 +1158,9 @@ final class ChatModel: ObservableObject {
     }
 
     private func changeUnreadCounter(user: any UserLike, by: Int) {
+        if (user as? User)?.hidden == true || users.first(where: { $0.user.userId == user.userId })?.user.hidden == true {
+            return
+        }
         if let i = users.firstIndex(where: { $0.user.userId == user.userId }) {
             users[i].unreadCount += by
         }
@@ -1172,10 +1179,14 @@ final class ChatModel: ObservableObject {
         }
     }
 
+    func xauXatIsProtectedProfile(_ userId: Int64) -> Bool {
+        users.first(where: { $0.user.userId == userId })?.user.hidden == true || xauXatIsProfileProtected(userId)
+    }
+
     func totalUnreadCountForAllUsers() -> Int {
         var unread = xauXatVisibleUnreadCountForCurrentUser()
         for u in users {
-            if !u.user.activeUser {
+            if !u.user.activeUser && !u.user.hidden {
                 unread += u.unreadCount
             }
         }
