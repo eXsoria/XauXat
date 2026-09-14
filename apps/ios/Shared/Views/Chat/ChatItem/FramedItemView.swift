@@ -144,7 +144,7 @@ struct FramedItemView: View {
             case let .xauXatImage(text, _, _):
                 CIImageView(chatItem: chatItem, senderProfile: ciSenderProfile(chatItem, chat.chatInfo), scrollToItem: scrollToItem, preview: preview, maxWidth: maxWidth, imgWidth: imgWidth, showFullScreenImage: $showFullscreenGallery)
                     .overlay(DetermineWidth())
-                if text == "" && !chatItem.meta.isLive {
+                if (text == "" || XauXatCodeLockedEnvelope.isFileWireText(text)) && !chatItem.meta.isLive {
                     Color.clear
                         .frame(width: 0, height: 0)
                         .onAppear { useWhiteMetaColor = true }
@@ -398,7 +398,8 @@ func onlyImageOrVideo(_ ci: ChatItem) -> Bool {
     if case let .image(text, _) = ci.content.msgContent {
         return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil && text == ""
     } else if case let .xauXatImage(text, _, _) = ci.content.msgContent {
-        return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil && text == ""
+        return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil
+            && (text == "" || XauXatCodeLockedEnvelope.isFileWireText(text))
     } else if case let .video(text, _, _) = ci.content.msgContent {
         return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil && text == ""
     }

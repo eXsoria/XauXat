@@ -312,7 +312,7 @@ struct ChatPreviewView: View {
                 let text = chatLink.displayName + descr
                 return (text, nil)
             }
-            if xauXatIsCodeLockedText(ci.content.text) {
+            if xauXatIsAnyCodeLockedContent(ci.content.text) {
                 return (xauXatCodeLockedPreviewText(ci.content.text), nil)
             }
             return (ci.text(isChannel: chat.chatInfo.isChannel), ci.formattedText)

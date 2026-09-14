@@ -2111,7 +2111,7 @@ struct ChatView: View {
         func chatItemWithMenu(_ ci: ChatItem, _ range: ClosedRange<Int>?, _ maxWidth: CGFloat, _ itemSeparation: ItemSeparation) -> some View {
             let alignment: Alignment = ci.chatDir.sent ? .trailing : .leading
             let live = composeState.liveMessage != nil
-            let codeLocked = xauXatIsCodeLockedText(ci.content.text)
+            let codeLocked = xauXatIsAnyCodeLockedContent(ci.content.text)
             let canReply = ci.meta.itemDeleted == nil && !ci.isLiveDummy && !live && !ci.localNote && !codeLocked && selectedChatItems == nil && chat.chatInfo.sendMsgEnabled
             return ZStack(alignment: .trailing) {
                 Image(systemName: "arrowshape.turn.up.left")
@@ -2292,7 +2292,7 @@ struct ChatView: View {
                    availableReactions.count > 0 {
                     reactionsGroup
                 }
-                let codeLocked = xauXatIsCodeLockedText(ci.content.text)
+                let codeLocked = xauXatIsAnyCodeLockedContent(ci.content.text)
                 if ci.meta.itemDeleted == nil && !ci.isLiveDummy && !live && !ci.localNote && !codeLocked && chat.chatInfo.sendMsgEnabled && !xauxatIsOneTimePhoto(ci) {
                     replyButton
                 }
@@ -2304,7 +2304,7 @@ struct ChatView: View {
                     shareButton(ci)
                     copyButton(ci)
                 }
-                if let fileSource = fileSource, fileExists, mediaExportAllowed {
+                if !codeLocked, let fileSource = fileSource, fileExists, mediaExportAllowed {
                     if ci.content.msgContent?.isImage == true, let image = getLoadedXauXatImage(ci) {
                         if case .xauXatImage = ci.content.msgContent {
                             saveButton(image: image)
