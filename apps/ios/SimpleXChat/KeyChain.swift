@@ -12,14 +12,44 @@ import Security
 private let ACCESS_POLICY: CFString = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 private let ACCESS_GROUP: String = "5NN7GUYB6T.chat.simplex.app"
 private let DATABASE_PASSWORD_ITEM: String = "databasePassword"
+private let DECOY_DATABASE_PASSWORD_ITEM: String = "databasePassword.localProfile"
 private let APP_PASSWORD_ITEM: String = "appPassword"
 private let SELF_DESTRUCT_PASSWORD_ITEM: String = "selfDestructPassword"
+private let DECOY_PASSWORD_ITEM: String = "localProfilePassword"
 
-public let kcDatabasePassword = KeyChainItem(forKey: DATABASE_PASSWORD_ITEM)
+public enum XauXatStorageScope: Sendable {
+    case primary
+    case decoy
+}
+
+private let xauXatStorageScopeLock = NSLock()
+private var activeXauXatStorageScope: XauXatStorageScope = .primary
+
+public func xauXatStorageScope() -> XauXatStorageScope {
+    xauXatStorageScopeLock.lock()
+    defer { xauXatStorageScopeLock.unlock() }
+    return activeXauXatStorageScope
+}
+
+public func setXauXatStorageScope(_ scope: XauXatStorageScope) {
+    xauXatStorageScopeLock.lock()
+    activeXauXatStorageScope = scope
+    xauXatStorageScopeLock.unlock()
+}
+
+public let kcPrimaryDatabasePassword = KeyChainItem(forKey: DATABASE_PASSWORD_ITEM)
+
+public let kcDecoyDatabasePassword = KeyChainItem(forKey: DECOY_DATABASE_PASSWORD_ITEM)
+
+public var kcDatabasePassword: KeyChainItem {
+    xauXatStorageScope() == .decoy ? kcDecoyDatabasePassword : kcPrimaryDatabasePassword
+}
 
 public let kcAppPassword = KeyChainItem(forKey: APP_PASSWORD_ITEM)
 
 public let kcSelfDestructPassword = KeyChainItem(forKey: SELF_DESTRUCT_PASSWORD_ITEM)
+
+public let kcDecoyPassword = KeyChainItem(forKey: DECOY_PASSWORD_ITEM)
 
 public struct KeyChainItem {
     var forKey: String

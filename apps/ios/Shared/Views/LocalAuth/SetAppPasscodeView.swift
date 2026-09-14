@@ -13,6 +13,7 @@ import SimpleXChat
 struct SetAppPasscodeView: View {
     var passcodeKeychain: KeyChainItem = kcAppPassword
     var prohibitedPasscodeKeychain: KeyChainItem = kcSelfDestructPassword
+    var additionalProhibitedPasscodeKeychains: [KeyChainItem] = [kcDecoyPassword]
     var title: LocalizedStringKey = "New Passcode"
     var reason: String?
     var submit: () -> Void
@@ -45,8 +46,11 @@ struct SetAppPasscodeView: View {
             } else {
                 setPasswordView(title: title,
                                 submitLabel: "Save",
-                                // Do not allow to set app passcode == selfDestruct passcode
-                                submitEnabled: { pwd in pwd != prohibitedPasscodeKeychain.get() }) {
+                                // Every unlock action needs a unique passcode.
+                                submitEnabled: { pwd in
+                                    pwd != prohibitedPasscodeKeychain.get() &&
+                                    !additionalProhibitedPasscodeKeychains.contains { pwd == $0.get() }
+                                }) {
                     enteredPassword = passcode
                     passcode = ""
                     confirming = true
