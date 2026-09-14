@@ -33,6 +33,13 @@ enum VoiceMessageRecordingState {
     case finished
 }
 
+enum VoiceMaskingState {
+    case unavailable
+    case available
+    case processing
+    case applied
+}
+
 // Spec: spec/client/compose.md#LiveMessage
 struct LiveMessage {
     var chatItem: ChatItem
@@ -50,6 +57,7 @@ struct ComposeState {
     var preview: ComposePreview
     var contextItem: ComposeContextItem
     var voiceMessageRecordingState: VoiceMessageRecordingState
+    var voiceMaskingState: VoiceMaskingState
     var inProgress = false
     var progressByTimeout = false
     var useLinkPreviews = true
@@ -62,6 +70,7 @@ struct ComposeState {
         preview: ComposePreview = .noPreview,
         contextItem: ComposeContextItem = .noContextItem,
         voiceMessageRecordingState: VoiceMessageRecordingState = .noRecording,
+        voiceMaskingState: VoiceMaskingState = .unavailable,
         mentions: MentionedMembers = [:]
     ) {
         self.message = message
@@ -70,6 +79,7 @@ struct ComposeState {
         self.preview = preview
         self.contextItem = contextItem
         self.voiceMessageRecordingState = voiceMessageRecordingState
+        self.voiceMaskingState = voiceMaskingState
         self.mentions = mentions
     }
 
@@ -89,6 +99,7 @@ struct ComposeState {
         } else {
             self.voiceMessageRecordingState = .noRecording
         }
+        self.voiceMaskingState = .unavailable
         self.mentions = editingItem.mentions ?? [:]
     }
 
@@ -98,6 +109,7 @@ struct ComposeState {
         self.preview = .noPreview
         self.contextItem = .forwardingItems(chatItems: forwardingItems, fromChatInfo: fromChatInfo)
         self.voiceMessageRecordingState = .noRecording
+        self.voiceMaskingState = .unavailable
     }
 
     func copy(
@@ -107,6 +119,7 @@ struct ComposeState {
         preview: ComposePreview? = nil,
         contextItem: ComposeContextItem? = nil,
         voiceMessageRecordingState: VoiceMessageRecordingState? = nil,
+        voiceMaskingState: VoiceMaskingState? = nil,
         mentions: MentionedMembers? = nil
     ) -> ComposeState {
         ComposeState(
@@ -116,6 +129,7 @@ struct ComposeState {
             preview: preview ?? self.preview,
             contextItem: contextItem ?? self.contextItem,
             voiceMessageRecordingState: voiceMessageRecordingState ?? self.voiceMessageRecordingState,
+            voiceMaskingState: voiceMaskingState ?? self.voiceMaskingState,
             mentions: mentions ?? self.mentions
         )
     }
@@ -181,7 +195,7 @@ struct ComposeState {
     var sendEnabled: Bool {
         switch preview {
         case let .mediaPreviews(media): return !media.isEmpty
-        case .voicePreview: return voiceMessageRecordingState == .finished
+        case .voicePreview: return voiceMessageRecordingState == .finished && voiceMaskingState != .processing
         case .chatLinkPreview: return true
         case .filePreview: return true
         default: return !whitespaceOnly || forwarding || liveMessage != nil || submittingValidReport
@@ -1375,11 +1389,13 @@ struct ComposeView: View {
                 recordingFileName: recordingFileName,
                 recordingTime: $voiceMessageRecordingTime,
                 recordingState: $composeState.voiceMessageRecordingState,
+                maskingState: $composeState.voiceMaskingState,
+                applyVoiceMask: applyVoiceMask,
                 cancelVoiceMessage: {
                     cancelVoiceMessageRecording($0)
                     clearState()
                 },
-                cancelEnabled: !composeState.editing && !composeState.inProgress,
+                cancelEnabled: !composeState.editing && !composeState.inProgress && composeState.voiceMaskingState != .processing,
                 stopPlayback: $stopPlayback
             )
             Divider()
@@ -1801,7 +1817,8 @@ struct ComposeView: View {
         } else {
             composeState = composeState.copy(
                 preview: .voicePreview(recordingFileName: fileName, duration: 0),
-                voiceMessageRecordingState: .recording
+                voiceMessageRecordingState: .recording,
+                voiceMaskingState: .available
             )
         }
     }
@@ -1814,6 +1831,32 @@ struct ComposeView: View {
         if let fileName = composeState.voiceMessageRecordingFileName,
            let fileSize = fileSize(getAppFilePath(fileName)) {
             logger.debug("finishVoiceMessageRecording recording file size = \(fileSize)")
+        }
+    }
+
+    private func applyVoiceMask() {
+        guard composeState.voiceMaskingState == .available,
+              let fileName = composeState.voiceMessageRecordingFileName else { return }
+
+        stopPlayback.toggle()
+        composeState = composeState.copy(voiceMaskingState: .processing)
+        let recordingURL = getAppFilePath(fileName)
+
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try XauXatVoiceMask.apply(to: recordingURL)
+                }.value
+                guard composeState.voiceMessageRecordingFileName == fileName else { return }
+                composeState = composeState.copy(voiceMaskingState: .applied)
+            } catch {
+                guard composeState.voiceMessageRecordingFileName == fileName else { return }
+                composeState = composeState.copy(voiceMaskingState: .available)
+                AlertManager.shared.showAlertMsg(
+                    title: "Unable to mask voice",
+                    message: "Error: \(error.localizedDescription)"
+                )
+            }
         }
     }
 
