@@ -120,6 +120,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             _ = kcDecoyPassword.remove()
             _ = kcPrimaryDatabasePassword.remove()
             _ = kcDecoyDatabasePassword.remove()
+            _ = xauXatRemoveConversationLocks(.primary)
+            _ = xauXatRemoveConversationLocks(.decoy)
         }
     }
 

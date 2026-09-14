@@ -16,6 +16,7 @@ let SMALL_GROUPS_RCPS_MEM_LIMIT: Int = 20
 struct GroupChatInfoView: View {
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     @Environment(\.dismiss) var dismiss: DismissAction
     @ObservedObject var chat: Chat
     @Binding var groupInfo: GroupInfo
@@ -166,6 +167,14 @@ struct GroupChatInfoView: View {
                             if groupInfo.groupProfile.publicGroup?.publicGroupAccess?.groupDomainClaim?.shortName != nil {
                                 Text("Channel SimpleX name").foregroundColor(theme.colors.secondary)
                             }
+                        }
+                    }
+
+                    if xauXatIsChatLocked(chat.id) || plusEntitlements.isAuthorized(for: .conversationLock) {
+                        Section {
+                            XauXatConversationLockButton(chatID: chat.id)
+                        } footer: {
+                            Text("Locked conversations hide message previews and require the authentication mode selected in App Lock.")
                         }
                     }
 

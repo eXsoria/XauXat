@@ -16,6 +16,8 @@ private let DECOY_DATABASE_PASSWORD_ITEM: String = "databasePassword.localProfil
 private let APP_PASSWORD_ITEM: String = "appPassword"
 private let SELF_DESTRUCT_PASSWORD_ITEM: String = "selfDestructPassword"
 private let DECOY_PASSWORD_ITEM: String = "localProfilePassword"
+private let PRIMARY_CONVERSATION_LOCKS_ITEM: String = "conversationLocks"
+private let DECOY_CONVERSATION_LOCKS_ITEM: String = "conversationLocks.localProfile"
 
 public enum XauXatStorageScope: Sendable {
     case primary
@@ -50,6 +52,46 @@ public let kcAppPassword = KeyChainItem(forKey: APP_PASSWORD_ITEM)
 public let kcSelfDestructPassword = KeyChainItem(forKey: SELF_DESTRUCT_PASSWORD_ITEM)
 
 public let kcDecoyPassword = KeyChainItem(forKey: DECOY_PASSWORD_ITEM)
+
+private let kcPrimaryConversationLocks = KeyChainItem(forKey: PRIMARY_CONVERSATION_LOCKS_ITEM)
+private let kcDecoyConversationLocks = KeyChainItem(forKey: DECOY_CONVERSATION_LOCKS_ITEM)
+
+private var kcConversationLocks: KeyChainItem {
+    xauXatStorageScope() == .decoy ? kcDecoyConversationLocks : kcPrimaryConversationLocks
+}
+
+public func xauXatLockedChatIDs() -> Set<String> {
+    guard let value = kcConversationLocks.get(),
+          let data = value.data(using: .utf8),
+          let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+    return Set(ids)
+}
+
+public func xauXatIsChatLocked(_ chatID: String) -> Bool {
+    xauXatLockedChatIDs().contains(chatID)
+}
+
+@discardableResult
+public func xauXatSetChatLocked(_ chatID: String, locked: Bool) -> Bool {
+    var ids = xauXatLockedChatIDs()
+    if locked {
+        ids.insert(chatID)
+    } else {
+        ids.remove(chatID)
+    }
+    guard !ids.isEmpty else { return kcConversationLocks.remove() }
+    guard let data = try? JSONEncoder().encode(ids.sorted()),
+          let value = String(data: data, encoding: .utf8) else { return false }
+    return kcConversationLocks.set(value)
+}
+
+@discardableResult
+public func xauXatRemoveConversationLocks(_ scope: XauXatStorageScope) -> Bool {
+    switch scope {
+    case .primary: kcPrimaryConversationLocks.remove()
+    case .decoy: kcDecoyConversationLocks.remove()
+    }
+}
 
 public struct KeyChainItem {
     var forKey: String
