@@ -168,9 +168,14 @@ struct FramedItemView: View {
                     ciMsgContentView(chatItem)
                 }
             case let .voice(text, duration):
-                FramedCIVoiceView(chat: chat, chatItem: chatItem, recordingFile: chatItem.file, duration: duration, allowMenu: $allowMenu)
-                    .overlay(DetermineWidth())
-                if text != "" {
+                if XauXatCodeLockedEnvelope.isFileWireText(text) {
+                    XauXatCodeLockedVoiceView(chat: chat, chatItem: chatItem, recordingFile: chatItem.file, allowMenu: $allowMenu)
+                        .overlay(DetermineWidth())
+                } else {
+                    FramedCIVoiceView(chat: chat, chatItem: chatItem, recordingFile: chatItem.file, duration: duration, allowMenu: $allowMenu)
+                        .overlay(DetermineWidth())
+                }
+                if text != "" && !XauXatCodeLockedEnvelope.isFileWireText(text) {
                     ciMsgContentView(chatItem)
                 }
             case let .file(text):

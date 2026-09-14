@@ -17,19 +17,22 @@ struct XauXatCodeLockedPayload: Codable, Equatable {
     let fileName: String?
     let mimeType: String?
     let caption: String?
+    let duration: Int?
 
     init(
         kind: XauXatCodeLockedContentKind,
         body: Data,
         fileName: String? = nil,
         mimeType: String? = nil,
-        caption: String? = nil
+        caption: String? = nil,
+        duration: Int? = nil
     ) {
         self.kind = kind
         self.body = body
         self.fileName = fileName
         self.mimeType = mimeType
         self.caption = caption
+        self.duration = duration
     }
 
     init(text: String) {
@@ -211,8 +214,13 @@ func xauXatIsAnyCodeLockedContent(_ text: String) -> Bool {
 }
 
 func xauXatCodeLockedPreviewText(_ text: String) -> String {
-    if xauXatIsCodeLockedFile(text, kind: .image) {
+    switch XauXatCodeLockedEnvelope.fileKind(fromWireText: text) {
+    case .some(.image):
         return NSLocalizedString("Protected photo", comment: "code-locked photo placeholder")
+    case .some(.audio):
+        return NSLocalizedString("Protected audio", comment: "code-locked audio placeholder")
+    default:
+        break
     }
     if XauXatCodeLockedEnvelope.isFileWireText(text) {
         return NSLocalizedString("Protected content", comment: "code-locked content placeholder")

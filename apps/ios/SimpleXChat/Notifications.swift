@@ -31,6 +31,9 @@ private func xauXatCodeLockedNotificationBody(_ item: ChatItem, isChannel: Bool)
     if item.content.text.contains("xauxat-code-lock-file:v1:image") {
         return NSLocalizedString("protected photo", comment: "code-locked photo notification body")
     }
+    if item.content.text.contains("xauxat-code-lock-file:v1:audio") {
+        return NSLocalizedString("protected audio", comment: "code-locked audio notification body")
+    }
     return item.content.text.contains("xauxat-code-lock:v1:")
         ? NSLocalizedString("protected message", comment: "code-locked notification body")
         : hideSecrets(item, isChannel: isChannel)

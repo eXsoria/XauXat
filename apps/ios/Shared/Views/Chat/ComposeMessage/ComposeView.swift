@@ -380,6 +380,40 @@ private func saveXauXatCodeLockedPhoto(
     }
 }
 
+private func saveXauXatCodeLockedAudio(
+    recordingFileName: String,
+    duration: Int,
+    code: String,
+    caption: String
+) async -> CryptoFile? {
+    let source = getAppFilePath(recordingFileName)
+    guard let audioData = try? Data(contentsOf: source) else { return nil }
+    do {
+        let envelopeData = try await Task.detached(priority: .userInitiated) {
+            let payload = XauXatCodeLockedPayload(
+                kind: .audio,
+                body: audioData,
+                fileName: "audio.m4a",
+                mimeType: "audio/mp4",
+                caption: caption.isEmpty ? nil : caption,
+                duration: duration
+            )
+            return try XauXatCodeLockedEnvelope.seal(payload, code: code).encoded()
+        }.value
+        let protectedFileName = generateNewFileName("audio", "xauxat")
+        guard let protectedFile = saveFile(
+            envelopeData,
+            protectedFileName,
+            encrypted: privacyEncryptLocalFilesGroupDefault.get()
+        ) else { return nil }
+        removeFile(source)
+        return protectedFile
+    } catch {
+        logger.error("Unable to protect XauXat audio: \(error.localizedDescription)")
+        return nil
+    }
+}
+
 // Spec: spec/client/compose.md#ComposeView
 struct ComposeView: View {
     @EnvironmentObject var chatModel: ChatModel
@@ -1226,6 +1260,8 @@ struct ComposeView: View {
                 case .video, .none: false
                 }
             }
+        case .voicePreview:
+            composeState.voiceMessageRecordingState == .finished
         default: false
         }
     }
@@ -1624,7 +1660,7 @@ struct ComposeView: View {
                 await MainActor.run {
                     AlertManager.shared.showAlertMsg(
                         title: "Cannot protect this content",
-                        message: "Code-Locked Content cannot be combined with editing, forwarding, replies, live messages, video, voice, or files yet."
+                        message: "Code-Locked Content cannot be combined with editing, forwarding, replies, live messages, video, or files yet."
                     )
                 }
                 return nil
@@ -1720,8 +1756,34 @@ struct ComposeView: View {
 
             case let .voicePreview(recordingFileName, duration):
                 stopPlayback.toggle()
-                let file = voiceCryptoFile(recordingFileName)
-                sent = await send(.voice(text: msgText, duration: duration), quoted: quoted, file: file, ttl: ttl, mentions: mentions, sign: sign)
+                if let code = codeLockCode {
+                    guard let file = await saveXauXatCodeLockedAudio(
+                        recordingFileName: recordingFileName,
+                        duration: duration,
+                        code: code,
+                        caption: msgText
+                    ) else {
+                        await MainActor.run {
+                            composeState.inProgress = false
+                            AlertManager.shared.showAlertMsg(
+                                title: "Could not protect audio",
+                                message: "Nothing was sent. Please try again."
+                            )
+                        }
+                        return nil
+                    }
+                    sent = await send(
+                        .voice(text: XauXatCodeLockedEnvelope.fileWireText(kind: .audio), duration: 0),
+                        quoted: quoted,
+                        file: file,
+                        ttl: ttl,
+                        mentions: [:],
+                        sign: sign
+                    )
+                } else {
+                    let file = voiceCryptoFile(recordingFileName)
+                    sent = await send(.voice(text: msgText, duration: duration), quoted: quoted, file: file, ttl: ttl, mentions: mentions, sign: sign)
+                }
             case let .filePreview(_, file):
                 if let savedFile = saveFileFromURL(file) {
                     sent = await send(.file(msgText), quoted: quoted, file: savedFile, live: live, ttl: ttl, mentions: mentions, sign: sign)

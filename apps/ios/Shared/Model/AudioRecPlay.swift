@@ -138,6 +138,25 @@ class AudioPlayer: NSObject, AVAudioPlayerDelegate {
         }
     }
 
+    func start(data: Data, at: TimeInterval? = nil) {
+        audioPlayer = try? AVAudioPlayer(data: data)
+        audioPlayer?.delegate = self
+        audioPlayer?.prepareToPlay()
+        if let at { audioPlayer?.currentTime = at }
+        audioPlayer?.play()
+
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { _ in
+            if self.audioPlayer?.isPlaying ?? false {
+                AppDelegate.keepScreenOn(true)
+                guard let time = self.audioPlayer?.currentTime else { return }
+                self.onTimer?(time)
+                AudioPlayer.changeAudioSession(true)
+            } else {
+                AudioPlayer.changeAudioSession(false)
+            }
+        }
+    }
+
     func pause() {
         audioPlayer?.pause()
         AppDelegate.keepScreenOn(false)
