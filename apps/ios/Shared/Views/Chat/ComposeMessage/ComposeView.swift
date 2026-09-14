@@ -382,6 +382,8 @@ struct ComposeView: View {
     @AppStorage(GROUP_DEFAULT_PRIVACY_LINK_PREVIEWS_SHOW_ALERT, store: groupDefaults) private var linkPreviewsShowAlert = true
     @State private var updatingCompose = false
     @State private var relayListExpanded = false
+    @State private var showReportSendConfirmation = false
+    @State private var pendingReportTTL: Int? = nil
     @StateObject private var channelRelaysModel = ChannelRelaysModel.shared
 
     // Spec: spec/client/compose.md#body
@@ -728,6 +730,17 @@ struct ComposeView: View {
             if case let .voicePreview(_, duration) = composeState.preview {
                 voiceMessageRecordingTime = TimeInterval(duration)
             }
+        }
+        .alert("Send report to moderators?", isPresented: $showReportSendConfirmation) {
+            Button("Send report", role: .destructive) {
+                performSendMessage(ttl: pendingReportTTL)
+                pendingReportTTL = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingReportTTL = nil
+            }
+        } message: {
+            Text("Only the selected message, the chosen reason and the text you added will be sent to the group moderators. No other messages or chat history are included.")
         }
     }
 
@@ -1418,14 +1431,10 @@ struct ComposeView: View {
     }
 
     private func reportReasonView(_ reason: ReportReason) -> some View {
-        let reportText = switch reason {
-        case .spam: NSLocalizedString("Report spam: only group moderators will see it.", comment: "report reason")
-        case .profile: NSLocalizedString("Report member profile: only group moderators will see it.", comment: "report reason")
-        case .community: NSLocalizedString("Report violation: only group moderators will see it.", comment: "report reason")
-        case .illegal: NSLocalizedString("Report content: only group moderators will see it.", comment: "report reason")
-        case .other: NSLocalizedString("Report other: only group moderators will see it.", comment: "report reason")
-        case .unknown: "" // Should never happen
-        }
+        let reportText = String.localizedStringWithFormat(
+            NSLocalizedString("Reason: %@. Only the selected message and the text you add will be sent to group moderators. No chat history is included.", comment: "report reason"),
+            reason.text
+        )
 
         return Text(reportText)
             .italic()
@@ -1479,6 +1488,15 @@ struct ComposeView: View {
 
     // Spec: spec/client/compose.md#sendMessage
     private func sendMessage(ttl: Int?, sign: Bool = false) {
+        if case .reportedItem = composeState.contextItem {
+            pendingReportTTL = ttl
+            showReportSendConfirmation = true
+            return
+        }
+        performSendMessage(ttl: ttl, sign: sign)
+    }
+
+    private func performSendMessage(ttl: Int?, sign: Bool = false) {
         logger.debug("ChatView sendMessage")
         Task {
             logger.debug("ChatView sendMessage: in Task")

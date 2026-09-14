@@ -1724,6 +1724,7 @@ struct ChatView: View {
         @State private var markedRead = false
         @State private var markReadTask: Task<Void, Never>? = nil
         @State private var actionSheet: SomeActionSheet? = nil
+        @State private var safetyReport: XauXatSafetyReport? = nil
         @State private var swipeOffset: CGFloat = 0
 
         var revealed: Bool { revealedItems.contains(chatItem.id) }
@@ -1813,6 +1814,16 @@ struct ChatView: View {
                 markedRead = false
             }
             .actionSheet(item: $actionSheet) { $0.actionSheet }
+            .alert(item: $safetyReport) { report in
+                Alert(
+                    title: Text(report.title),
+                    message: Text(report.disclosure),
+                    primaryButton: .default(Text("Open share sheet")) {
+                        showShareSheet(items: [report.exportText])
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
             // skip updating struct on touch if no need to show GoTo button
             .if(touchInProgress || searchIsNotBlank || (chatItem.meta.itemForwarded != nil && chatItem.meta.itemForwarded != .unknown)) {
                 // long press listener steals taps from top-level listener, so repeating it's logic here as well
@@ -2341,7 +2352,7 @@ struct ChatView: View {
                 if !live || !ci.meta.isLive {
                     deleteButton(ci)
                 }
-                if ci.chatDir != .groupSnd {
+                if !ci.chatDir.sent {
                     if let (groupInfo, _) = ci.memberToModerate(chat.chatInfo) {
                         moderateButton(ci, groupInfo)
                     } else if ci.meta.itemDeleted == nil && chat.groupFeatureEnabled(.reports),
@@ -2350,6 +2361,10 @@ struct ChatView: View {
                                 && !live
                                 && composeState.voiceMessageRecordingState == .noRecording {
                         reportButton(ci)
+                    } else if ci.meta.itemDeleted == nil,
+                              case let .direct(contact) = chat.chatInfo,
+                              !live {
+                        externalReportButton(ci, contact: contact)
                     }
                 }
             } else if ci.meta.itemDeleted != nil {
@@ -2761,6 +2776,54 @@ struct ChatView: View {
                     NSLocalizedString("Report", comment: "chat item action"),
                     systemImage: "flag"
                 )
+            }
+        }
+
+        private func externalReportButton(_ ci: ChatItem, contact: Contact) -> Button<some View> {
+            Button(role: .destructive) {
+                var buttons = ReportReason.supportedReasons.map { reason in
+                    ActionSheet.Button.default(Text(reason.text)) {
+                        safetyReport = xauXatMessageSafetyReport(
+                            displayName: contact.displayName,
+                            reason: reason,
+                            messageType: safetyReportMessageType(ci),
+                            selectedText: safetyReportMessageText(ci)
+                        )
+                    }
+                }
+                buttons.append(.cancel())
+                actionSheet = SomeActionSheet(
+                    actionSheet: ActionSheet(
+                        title: Text("Report message"),
+                        message: Text("Choose a reason. Blocking is available separately from the contact profile."),
+                        buttons: buttons
+                    ),
+                    id: "reportDirectChatMessage"
+                )
+            } label: {
+                Label("Report", systemImage: "flag")
+            }
+        }
+
+        private func safetyReportMessageText(_ ci: ChatItem) -> String? {
+            guard !xauxatIsOneTimePhoto(ci) else { return nil }
+            let text = ci.content.msgContent?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return text.isEmpty ? nil : text
+        }
+
+        private func safetyReportMessageType(_ ci: ChatItem) -> String {
+            guard let content = ci.content.msgContent else { return "Unknown content" }
+            switch content {
+            case .text: return "Text"
+            case .link: return "Link"
+            case .image: return "Photo (not attached)"
+            case .xauXatImage: return xauxatIsOneTimePhoto(ci) ? "One-time photo (not attached)" : "Photo (not attached)"
+            case .video: return "Video (not attached)"
+            case .voice: return "Voice message (not attached)"
+            case .file: return "File (not attached)"
+            case .report: return "Report"
+            case .chat: return "Chat link"
+            case .unknown: return "Unknown content"
             }
         }
 
