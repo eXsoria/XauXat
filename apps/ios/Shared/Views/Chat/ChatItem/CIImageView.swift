@@ -81,6 +81,21 @@ struct CIImageView: View {
                     }
             } else if let uiImage = getLoadedXauXatImage(chatItem) {
                 Group { if smallView { smallViewImageView(uiImage) } else { imageView(uiImage) } }
+                .overlay(alignment: .bottom) {
+                    if chatItem.chatDir.sent && xauxatIsOneTimePhoto(chatItem) && !smallView {
+                        HStack(spacing: 6) {
+                            Image(systemName: "eye")
+                            Text("One-Time View")
+                                .font(.caption.weight(.semibold))
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .frame(height: 32)
+                        .background(Color.black.opacity(0.72))
+                        .accessibilityElement(children: .combine)
+                    }
+                }
                 .fullScreenCover(isPresented: $showFullScreenImage) {
                     FullScreenMediaView(chatItem: chatItem, scrollToItem: scrollToItem, image: uiImage, showView: $showFullScreenImage)
                 }

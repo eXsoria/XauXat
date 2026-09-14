@@ -363,6 +363,7 @@ struct ComposeView: View {
     @State private var showMediaPicker = false
     @State private var showTakePhoto = false
     @State var chosenMedia: [UploadContent] = []
+    @State private var oneTimePhotoEnabled = true
     @State private var allowOneTimePhotoSave = false
     @State private var showFileImporter = false
 
@@ -1362,10 +1363,12 @@ struct ComposeView: View {
                     default: false
                     }
                 },
+                oneTimeView: $oneTimePhotoEnabled,
                 allowSave: $allowOneTimePhotoSave,
                 cancelImage: {
                     composeState = composeState.copy(preview: .noPreview)
                     chosenMedia = []
+                    oneTimePhotoEnabled = true
                     allowOneTimePhotoSave = false
                 },
                 cancelEnabled: !composeState.editing && !composeState.inProgress)
@@ -1571,11 +1574,19 @@ struct ComposeView: View {
             let (previewImage, uploadContent) = media
             switch uploadContent {
             case let .simpleImage(image):
-                guard let prepared = saveXauXatOneTimeImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
-                return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
+                if oneTimePhotoEnabled {
+                    guard let prepared = saveXauXatOneTimeImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
+                    return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
+                } else {
+                    return (saveImage(image), .image(text: text, image: previewImage))
+                }
             case let .animatedImage(image):
-                guard let prepared = saveXauXatOneTimeAnimImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
-                return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
+                if oneTimePhotoEnabled {
+                    guard let prepared = saveXauXatOneTimeAnimImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
+                    return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
+                } else {
+                    return (saveAnimImage(image), .image(text: text, image: previewImage))
+                }
             case let .video(_, url, duration):
                 return (moveTempFileFromURL(url), .video(text: text, image: previewImage, duration: duration))
             case .none:
@@ -1859,6 +1870,7 @@ struct ComposeView: View {
             resetLinkPreview()
         }
         chosenMedia = []
+        oneTimePhotoEnabled = true
         allowOneTimePhotoSave = false
         audioRecorder = nil
         voiceMessageRecordingTime = nil
