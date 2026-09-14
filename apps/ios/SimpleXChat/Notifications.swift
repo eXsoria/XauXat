@@ -27,6 +27,12 @@ private func xauXatIsProtectedProfile(_ user: any UserLike) -> Bool {
     (user as? User)?.hidden == true || xauXatIsProfileProtected(user.userId)
 }
 
+private func xauXatCodeLockedNotificationBody(_ item: ChatItem, isChannel: Bool) -> String {
+    item.content.text.contains("xauxat-code-lock:v1:")
+        ? NSLocalizedString("protected message", comment: "code-locked notification body")
+        : hideSecrets(item, isChannel: isChannel)
+}
+
 // Spec: spec/services/notifications.md#createContactRequestNtf
 public func createContactRequestNtf(_ user: any UserLike, _ contactRequest: UserContactRequest, _ badgeCount: Int) -> UNMutableNotificationContent {
     let protectedProfile = xauXatIsProtectedProfile(user)
@@ -85,7 +91,7 @@ public func createMessageReceivedNtf(_ user: any UserLike, _ cInfo: ChatInfo, _ 
     return createNotification(
         categoryIdentifier: ntfCategoryMessageReceived,
         title: title,
-        body: !protected && previewMode == .message ? hideSecrets(cItem, isChannel: cInfo.isChannel) : NSLocalizedString("new message", comment: "notification"),
+        body: !protected && previewMode == .message ? xauXatCodeLockedNotificationBody(cItem, isChannel: cInfo.isChannel) : NSLocalizedString("new message", comment: "notification"),
         targetContentIdentifier: cInfo.id,
         userInfo: ["userId": user.userId],
 //            userInfo: ["chatId": cInfo.id, "chatItemId": cItem.id]

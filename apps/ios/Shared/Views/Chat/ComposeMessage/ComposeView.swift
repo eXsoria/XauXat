@@ -344,6 +344,7 @@ enum UploadContent: Equatable {
 struct ComposeView: View {
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @ObservedObject var chat: Chat
     @ObservedObject var im: ItemsModel
     @Binding var composeState: ComposeState
@@ -365,6 +366,8 @@ struct ComposeView: View {
     @State var chosenMedia: [UploadContent] = []
     @State private var allowOneTimePhotoSave = false
     @State private var showFileImporter = false
+    @State private var showCodeLockSetup = false
+    @State private var codeLockCode: String?
 
     @State private var audioRecorder: AudioRecorder?
     @State private var voiceMessageRecordingTime: TimeInterval?
@@ -463,6 +466,10 @@ struct ComposeView: View {
                     Divider()
                 } else if voiceProhibited {
                     msgNotAllowedView("Voice messages not allowed", icon: "mic")
+                    Divider()
+                }
+                if codeLockCode != nil {
+                    codeLockStatusView()
                     Divider()
                 }
                 contextItemView()
@@ -564,7 +571,7 @@ struct ComposeView: View {
             } else {
                 composeState = composeState.copy(parsedMessage: parsedMsg ?? FormattedText.plain(msg))
             }
-            if composeState.linkPreviewAllowed && useLinkPreviews {
+            if codeLockCode == nil && composeState.linkPreviewAllowed && useLinkPreviews {
                 if !msg.isEmpty {
                     showLinkPreview(parsedMsg)
                 } else {
@@ -595,6 +602,9 @@ struct ComposeView: View {
             } else {
                 composeState.progressByTimeout = false
             }
+        }
+        .onChange(of: composeState.contextItem) { contextItem in
+            if contextItem != .noContextItem { codeLockCode = nil }
         }
         .confirmationDialog("Attach", isPresented: $showChooseSource, titleVisibility: .visible) {
             Button("Take picture") {
@@ -634,6 +644,13 @@ struct ComposeView: View {
                         composeState = composeState.copy(preview: .mediaPreviews(mediaPreviews: []))
                     }
                 }
+            }
+        }
+        .sheet(isPresented: $showCodeLockSetup) {
+            XauXatCodeLockSetupView { code in
+                codeLockCode = code
+                resetLinkPreview()
+                composeState = composeState.copy(preview: .noPreview)
             }
         }
         .onChange(of: chosenMedia) { selected in
@@ -683,7 +700,10 @@ struct ComposeView: View {
             }
         }
         .onDisappear {
-            if composeState.liveMessage != nil
+            if codeLockCode != nil {
+                cancelCurrentVoiceRecording()
+                clearCurrentDraft()
+            } else if composeState.liveMessage != nil
                 && (!composeState.message.isEmpty || composeState.liveMessage?.sentMsg != nil) {
                 cancelCurrentVoiceRecording()
                 clearCurrentDraft()
@@ -707,6 +727,7 @@ struct ComposeView: View {
                 clearState()
             }
             chatModel.removeLiveDummy(animated: false)
+            codeLockCode = nil
         }
         .onChange(of: chatModel.stopPreviousRecPlay) { _ in
             if !startingRecording {
@@ -1051,7 +1072,7 @@ struct ComposeView: View {
                     sendMessage(ttl: nil, sign: true)
                     resetLinkPreview()
                 },
-                sendLiveMessage: chat.chatInfo.chatType != .local ? sendLiveMessage : nil,
+                sendLiveMessage: chat.chatInfo.chatType != .local && codeLockCode == nil ? sendLiveMessage : nil,
                 updateLiveMessage: updateLiveMessage,
                 cancelLiveMessage: {
                     composeState.liveMessage = nil
@@ -1059,7 +1080,7 @@ struct ComposeView: View {
                 },
                 sendToConnect: sendToConnect,
                 hideSendButton: chat.chatInfo.nextConnect && chat.chatInfo.contact?.nextSendGrpInv != true && composeState.whitespaceOnly,
-                voiceMessageAllowed: chat.chatInfo.featureEnabled(.voice),
+                voiceMessageAllowed: codeLockCode == nil && chat.chatInfo.featureEnabled(.voice),
                 disableSendButton: disableSendButton,
                 showEnableVoiceMessagesAlert: chat.chatInfo.showEnableVoiceMessagesAlert,
                 startVoiceMessageRecording: {
@@ -1101,6 +1122,10 @@ struct ComposeView: View {
                 .padding(.trailing, 3)
                 .if(showCommands) { v in v.padding(.leading, 3) }
         }
+        if canConfigureCodeLockedText {
+            codeLockButton()
+                .padding(.leading, 3)
+        }
     }
 
     private func commandsButton() -> some View {
@@ -1125,7 +1150,7 @@ struct ComposeView: View {
             Image(systemName: "paperclip")
                 .resizable()
         }
-            .disabled(composeState.attachmentDisabled || !chat.chatInfo.sendMsgEnabled)
+            .disabled(composeState.attachmentDisabled || codeLockCode != nil || !chat.chatInfo.sendMsgEnabled)
             .frame(width: 25, height: 25)
             .tint(theme.colors.primary)
         if im.secondaryIMFilter == nil,
@@ -1139,6 +1164,59 @@ struct ComposeView: View {
         } else {
             b
         }
+    }
+
+    private var canConfigureCodeLockedText: Bool {
+        composeState.contextItem == .noContextItem
+            && codeLockCompatiblePreview
+            && composeState.liveMessage == nil
+            && chat.chatInfo.sendMsgEnabled
+            && !chat.chatInfo.nextConnect
+    }
+
+    private var codeLockCompatiblePreview: Bool {
+        switch composeState.preview {
+        case .noPreview, .linkPreview: true
+        default: false
+        }
+    }
+
+    private func codeLockButton() -> some View {
+        Button {
+            if codeLockCode != nil {
+                codeLockCode = nil
+            } else if plusEntitlements.isAuthorized(for: .codeLockedContent) {
+                clearCurrentDraft()
+                showCodeLockSetup = true
+            } else {
+                AlertManager.shared.showAlertMsg(
+                    title: "XauXat Plus required",
+                    message: "Code-Locked Content is included with XauXat Plus."
+                )
+            }
+        } label: {
+            Image(systemName: codeLockCode == nil ? "lock" : "lock.fill")
+                .font(.system(size: 19, weight: .medium))
+                .frame(width: 25, height: 25)
+                .contentShape(Rectangle())
+        }
+        .tint(theme.colors.primary)
+        .accessibilityLabel(codeLockCode == nil ? "Protect message with code" : "Remove message code")
+    }
+
+    private func codeLockStatusView() -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.fill")
+                .font(.caption)
+            Text("Message protected by code")
+                .font(.subheadline.weight(.medium))
+            Spacer()
+            Button("Remove") { codeLockCode = nil }
+                .font(.subheadline)
+        }
+        .foregroundColor(theme.colors.secondary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
     }
 
     private func sendMemberContactInvitation() {
@@ -1491,7 +1569,35 @@ struct ComposeView: View {
         var sent: ChatItem?
         let msgText = text ?? composeState.message
         let liveMessage = composeState.liveMessage
-        let mentions = composeState.memberMentions
+        let protectedText: MsgContent?
+        if let code = codeLockCode {
+            guard !live, composeState.noPreview, composeState.contextItem == .noContextItem else {
+                await MainActor.run {
+                    AlertManager.shared.showAlertMsg(
+                        title: "Cannot protect this message",
+                        message: "Code-Locked Text cannot be combined with editing, forwarding, replies, live messages, or attachments."
+                    )
+                }
+                return nil
+            }
+            do {
+                let wireText = try await Task.detached(priority: .userInitiated) {
+                    try XauXatCodeLockedEnvelope.seal(XauXatCodeLockedPayload(text: msgText), code: code).wireText()
+                }.value
+                protectedText = .text(wireText)
+            } catch {
+                await MainActor.run {
+                    AlertManager.shared.showAlertMsg(
+                        title: "Could not protect message",
+                        message: "The message was not sent. Please try again."
+                    )
+                }
+                return nil
+            }
+        } else {
+            protectedText = nil
+        }
+        let mentions = protectedText == nil ? composeState.memberMentions : [:]
         if !live {
             if liveMessage != nil { composeState = composeState.copy(liveMessage: nil) }
             await sending()
@@ -1516,7 +1622,7 @@ struct ComposeView: View {
 
             switch (composeState.preview) {
             case .noPreview:
-                sent = await send(.text(msgText), quoted: quoted, live: live, ttl: ttl, mentions: mentions, sign: sign)
+                sent = await send(protectedText ?? .text(msgText), quoted: quoted, live: live, ttl: ttl, mentions: mentions, sign: sign)
             case .linkPreview:
                 sent = await send(checkLinkPreview(), quoted: quoted, live: live, ttl: ttl, mentions: mentions, sign: sign)
             case let .chatLinkPreview(chatLink, ownerSig):
@@ -1860,6 +1966,7 @@ struct ComposeView: View {
         }
         chosenMedia = []
         allowOneTimePhotoSave = false
+        codeLockCode = nil
         audioRecorder = nil
         voiceMessageRecordingTime = nil
         startingRecording = false
@@ -1983,6 +2090,67 @@ struct ComposeView: View {
         prevLinkUrl = nil
         pendingLinkUrl = nil
         cancelledLinks = []
+    }
+}
+
+private struct XauXatCodeLockSetupView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var code = ""
+    @State private var confirmation = ""
+    @State private var validationMessage: String?
+
+    let onSave: (String) -> Void
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    SecureField("Code", text: $code)
+                        .textContentType(.newPassword)
+                        .privacySensitive()
+                    SecureField("Confirm code", text: $confirmation)
+                        .textContentType(.newPassword)
+                        .privacySensitive()
+                } header: {
+                    Text("Protect message")
+                } footer: {
+                    Text("Share this code through a different secure channel. XauXat does not send or save it.")
+                }
+
+                if let validationMessage {
+                    Text(validationMessage)
+                        .foregroundColor(.red)
+                }
+            }
+            .navigationTitle("Message code")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Protect") { save() }
+                        .disabled(code.isEmpty || confirmation.isEmpty)
+                }
+            }
+        }
+        .interactiveDismissDisabled(!code.isEmpty || !confirmation.isEmpty)
+        .modifier(XauXatAppSwitcherProtection())
+    }
+
+    private func save() {
+        guard code == confirmation else {
+            validationMessage = NSLocalizedString("Codes do not match.", comment: "code-lock validation")
+            return
+        }
+        guard code.utf8.count >= 4, code.utf8.count <= 128 else {
+            validationMessage = NSLocalizedString("Use a code between 4 and 128 characters.", comment: "code-lock validation")
+            return
+        }
+        onSave(code)
+        code = ""
+        confirmation = ""
+        dismiss()
     }
 }
 
