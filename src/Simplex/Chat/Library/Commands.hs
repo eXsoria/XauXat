@@ -2744,11 +2744,11 @@ processChatCommand cxt nm = \case
   APIAddMember groupId contactId memRole -> withUser $ \user -> withGroupLock "addMember" groupId $ do
     -- TODO for large groups: no need to load all members to determine if contact is a member
     (group, contact) <- withFastStore $ \db -> (,) <$> getGroup db cxt user groupId <*> getContact db cxt user contactId
-    let Group gInfo members = group
+    let Group gInfo@GroupInfo {groupProfile} members = group
         Contact {localDisplayName = cName} = contact
     when (useRelays' gInfo) $ throwCmdError "can't invite contact to channel"
     assertDirectAllowed user MDSnd contact XGrpInv_
-    assertUserGroupRole gInfo $ max GRAdmin memRole
+    assertUserGroupRole gInfo $ max (groupInviteRole groupProfile) memRole
     -- [incognito] forbid to invite contact to whom user is connected incognito
     when (contactConnIncognito contact) $ throwChatError CEContactIncognitoCantInvite
     -- [incognito] forbid to invite contacts if user joined the group using an incognito profile
@@ -3219,6 +3219,13 @@ processChatCommand cxt nm = \case
   APIUpdateGroupProfile groupId p' -> withUser $ \user -> do
     gInfo <- withFastStore $ \db -> getGroupInfo db cxt user groupId
     runUpdateGroupProfile user gInfo p' False
+  APISetGroupInviteRole groupId inviteRole' -> withUser $ \user -> do
+    gInfo@GroupInfo {groupProfile = p@GroupProfile {memberAdmission}} <- withFastStore $ \db -> getGroupInfo db cxt user groupId
+    unless (inviteRole' `elem` [GRMember, GRModerator, GRAdmin]) $
+      throwCmdError "invalid group invite role"
+    let admission = fromMaybe emptyGroupMemberAdmission memberAdmission
+        p' = p {memberAdmission = Just admission {inviteRole = Just inviteRole'}}
+    runUpdateGroupProfileAs GRAdmin user gInfo p' False
   UpdateGroupNames gName GroupProfile {displayName, fullName, shortDescr} ->
     updateGroupProfileByName gName $ \p -> p {displayName, fullName, shortDescr}
   ShowGroupProfile gName -> withUser $ \user ->
@@ -3240,7 +3247,7 @@ processChatCommand cxt nm = \case
       Nothing -> throwChatError $ CECommandError "not a public group"
   APICreateGroupLink groupId mRole -> withUser $ \user -> withGroupLock "createGroupLink" groupId $ do
     gInfo@GroupInfo {groupProfile} <- withFastStore $ \db -> getGroupInfo db cxt user groupId
-    assertUserGroupRole gInfo GRAdmin
+    assertUserGroupRole gInfo $ groupInviteRole groupProfile
     when (mRole > GRMember) $ throwChatError $ CEGroupMemberInitialRole gInfo mRole
     groupLinkId <- GroupLinkId <$> drgRandomBytes 16
     subMode <- chatReadVar subscriptionMode
@@ -3253,9 +3260,9 @@ processChatCommand cxt nm = \case
     gLink <- withFastStore $ \db -> createGroupLink db gVar user gInfo connId ccLink' groupLinkId mRole subMode
     pure $ CRGroupLinkCreated user gInfo gLink
   APIGroupLinkMemberRole groupId mRole' -> withUser $ \user -> withGroupLock "groupLinkMemberRole" groupId $ do
-    gInfo <- withFastStore $ \db -> getGroupInfo db cxt user groupId
+    gInfo@GroupInfo {groupProfile} <- withFastStore $ \db -> getGroupInfo db cxt user groupId
     gLnk@GroupLink {acceptMemberRole} <- withFastStore $ \db -> getGroupLink db user gInfo
-    assertUserGroupRole gInfo GRAdmin
+    assertUserGroupRole gInfo $ groupInviteRole groupProfile
     when (mRole' > GRMember) $ throwChatError $ CEGroupMemberInitialRole gInfo mRole'
     gLnk' <-
       if mRole' /= acceptMemberRole
@@ -4016,8 +4023,10 @@ processChatCommand cxt nm = \case
               lift . when (directOrUsed ct') $ createSndFeatureItems user ct ct'
           pure $ CRContactPrefsUpdated user ct ct'
     runUpdateGroupProfile :: User -> GroupInfo -> GroupProfile -> Bool -> CM ChatResponse
-    runUpdateGroupProfile user gInfo@GroupInfo {businessChat, groupProfile = p@GroupProfile {displayName = n}} p'@GroupProfile {displayName = n', image = img'} domainVerified = do
-      assertUserGroupRole gInfo GROwner
+    runUpdateGroupProfile = runUpdateGroupProfileAs GROwner
+    runUpdateGroupProfileAs :: GroupMemberRole -> User -> GroupInfo -> GroupProfile -> Bool -> CM ChatResponse
+    runUpdateGroupProfileAs requiredRole user gInfo@GroupInfo {businessChat, groupProfile = p@GroupProfile {displayName = n}} p'@GroupProfile {displayName = n', image = img'} domainVerified = do
+      assertUserGroupRole gInfo requiredRole
       when (n /= n') $ checkValidName n'
       checkProfileImageSize img'
       checkGroupProfileSize p'
@@ -5623,6 +5632,7 @@ chatCommandP =
       "/_groups " *> (APIListGroups <$> A.decimal <*> optional (" @" *> A.decimal) <*> optional (A.space *> textP)),
       ("/groups" <|> "/gs") *> (ListGroups <$> optional (" @" *> displayNameP) <*> optional (A.space *> textP)),
       "/_group_profile #" *> (APIUpdateGroupProfile <$> A.decimal <* A.space <*> jsonP),
+      "/_group_invite_role #" *> (APISetGroupInviteRole <$> A.decimal <*> memberRole),
       ("/group_profile " <|> "/gp ") *> char_ '#' *> (UpdateGroupNames <$> displayNameP <* A.space <*> groupProfile),
       ("/group_profile " <|> "/gp ") *> char_ '#' *> (ShowGroupProfile <$> displayNameP),
       "/public group access " *> char_ '#' *> (SetPublicGroupAccess <$> displayNameP <*> publicGroupAccessP),

@@ -31,13 +31,8 @@ struct GroupPreferencesView: View {
         VStack {
             List {
                 if !groupInfo.useRelays {
-                    Section {
-                        MemberAdmissionButton(
-                            groupInfo: $groupInfo,
-                            admission: groupInfo.groupProfile.memberAdmission_,
-                            currentAdmission: groupInfo.groupProfile.memberAdmission_,
-                            creatingGroup: creatingGroup
-                        )
+                    if groupInfo.businessChat == nil {
+                        GroupInvitePermissionsSection(groupInfo: $groupInfo)
                     }
                     featureSection(.timedMessages, $preferences.timedMessages.enable)
                     featureSection(.fullDelete, $preferences.fullDelete.enable)
@@ -172,6 +167,80 @@ struct GroupPreferencesView: View {
         .onChange(of: enableFeature.wrappedValue) { enabled in
             if case .off = enabled {
                 enableForRole?.wrappedValue = nil
+            }
+        }
+    }
+}
+
+private struct GroupInvitePermissionsSection: View {
+    @Binding var groupInfo: GroupInfo
+    @EnvironmentObject var theme: AppTheme
+    @State private var inviteRole: GroupMemberRole
+    @State private var saving = false
+
+    private let roles: [(GroupMemberRole, LocalizedStringKey)] = [
+        (.admin, "Admins only"),
+        (.moderator, "Admins and moderators"),
+        (.member, "All members")
+    ]
+
+    init(groupInfo: Binding<GroupInfo>) {
+        _groupInfo = groupInfo
+        _inviteRole = State(initialValue: groupInfo.wrappedValue.groupProfile.memberAdmission_.inviteRole_)
+    }
+
+    var body: some View {
+        Section {
+            if groupInfo.canManageInvitePermissions {
+                Picker("Who can invite", selection: $inviteRole) {
+                    ForEach(roles, id: \.0) { role, text in
+                        Text(text).tag(role)
+                    }
+                }
+                .disabled(saving)
+                .onChange(of: inviteRole) { role in
+                    guard role != groupInfo.groupProfile.memberAdmission_.inviteRole_ else { return }
+                    save(role)
+                }
+            } else {
+                HStack {
+                    Text("Who can invite")
+                    Spacer()
+                    Text(inviteRoleText(groupInfo.groupProfile.memberAdmission_.inviteRole_))
+                        .foregroundColor(theme.colors.secondary)
+                }
+            }
+        } header: {
+            Text("Group invites")
+        } footer: {
+            Text("This rule applies to direct invites, invite links and QR codes.")
+        }
+    }
+
+    private func inviteRoleText(_ role: GroupMemberRole) -> LocalizedStringKey {
+        roles.first(where: { $0.0 == role })?.1 ?? "Admins only"
+    }
+
+    private func save(_ role: GroupMemberRole) {
+        saving = true
+        Task {
+            do {
+                let updatedGroup = try await apiSetGroupInviteRole(groupInfo.groupId, role)
+                await MainActor.run {
+                    groupInfo = updatedGroup
+                    ChatModel.shared.updateGroup(updatedGroup)
+                    inviteRole = updatedGroup.groupProfile.memberAdmission_.inviteRole_
+                    saving = false
+                }
+            } catch {
+                await MainActor.run {
+                    inviteRole = groupInfo.groupProfile.memberAdmission_.inviteRole_
+                    saving = false
+                    showAlert(
+                        NSLocalizedString("Couldn't update group invite permissions", comment: "alert title"),
+                        message: responseError(error)
+                    )
+                }
             }
         }
     }

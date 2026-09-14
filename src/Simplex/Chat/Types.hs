@@ -877,7 +877,8 @@ data GroupProfile = GroupProfile
 data GroupMemberAdmission = GroupMemberAdmission
   { -- names :: Maybe MemberCriteria,
     -- captcha :: Maybe MemberCriteria,
-    review :: Maybe MemberCriteria
+    review :: Maybe MemberCriteria,
+    inviteRole :: Maybe GroupMemberRole
   }
   deriving (Eq, Show)
 
@@ -885,7 +886,11 @@ data MemberCriteria = MCAll
   deriving (Eq, Show)
 
 emptyGroupMemberAdmission :: GroupMemberAdmission
-emptyGroupMemberAdmission = GroupMemberAdmission Nothing
+emptyGroupMemberAdmission = GroupMemberAdmission Nothing Nothing
+
+groupInviteRole :: GroupProfile -> GroupMemberRole
+groupInviteRole GroupProfile {memberAdmission} =
+  fromMaybe GRAdmin $ memberAdmission >>= inviteRole
 
 newtype ImageData = ImageData Text
   deriving (Eq, Show)

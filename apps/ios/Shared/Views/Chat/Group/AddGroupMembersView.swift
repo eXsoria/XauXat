@@ -32,15 +32,19 @@ struct AddGroupMembersViewCommon: View {
     @State private var selectedRole: GroupMemberRole = .member
     @State private var alert: AddGroupMembersAlert?
     @State private var searchText: String = ""
+    @State private var freeCapacity: XauXatFreeGroupCapacity?
+    @State private var loadingFreeCapacity = true
     @FocusState private var searchFocussed
 
     private enum AddGroupMembersAlert: Identifiable {
         case prohibitedToInviteIncognito
+        case freeLimit
         case error(title: LocalizedStringKey, error: LocalizedStringKey?)
 
         var id: String {
             switch self {
             case .prohibitedToInviteIncognito: return "prohibitedToInviteIncognito"
+            case .freeLimit: return "freeLimit"
             case let .error(title, _): return "error \(title)"
             }
         }
@@ -63,6 +67,7 @@ struct AddGroupMembersViewCommon: View {
     private func addGroupMembersView() -> some View {
         VStack {
             let membersToAdd = filterMembersToAdd(chatModel.groupMembers)
+            let remaining = freeCapacity?.remaining ?? 0
             List {
                 ChatInfoToolbar(chat: chat, imageSize: 48)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -79,12 +84,6 @@ struct AddGroupMembersViewCommon: View {
                     let count = selectedContacts.count
                     Section {
                         if creatingGroup {
-                            MemberAdmissionButton(
-                                groupInfo: $groupInfo,
-                                admission: groupInfo.groupProfile.memberAdmission_,
-                                currentAdmission: groupInfo.groupProfile.memberAdmission_,
-                                creatingGroup: true
-                            )
                             GroupPreferencesButton(
                                 groupInfo: $groupInfo,
                                 preferences: groupInfo.fullGroupPreferences,
@@ -94,22 +93,31 @@ struct AddGroupMembersViewCommon: View {
                         }
                         rolePicker()
                         inviteMembersButton()
-                            .disabled(count < 1)
+                            .disabled(count < 1 || loadingFreeCapacity || count > remaining)
                     } footer: {
-                        if showFooterCounter {
-                            if (count >= 1) {
-                                HStack {
-                                    Button { selectedContacts.removeAll() } label: { Text("Clear").font(.caption) }
-                                    Spacer()
-                                    Text("\(count) contact(s) selected")
-                                        .foregroundColor(theme.colors.secondary)
+                        VStack(alignment: .leading, spacing: 5) {
+                            if loadingFreeCapacity {
+                                Text("Checking the XauXat Free group limit…")
+                            } else if let freeCapacity {
+                                Text("\(freeCapacity.occupied) of \(XAUXAT_FREE_GROUP_MEMBER_LIMIT) member spots used")
+                                if freeCapacity.isFull {
+                                    Text("This group is full on XauXat Free. Existing members are not affected.")
                                 }
-                            } else {
-                                Text("No contacts selected")
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
-                                    .foregroundColor(theme.colors.secondary)
+                            }
+                            if showFooterCounter {
+                                if count >= 1 {
+                                    HStack {
+                                        Button { selectedContacts.removeAll() } label: { Text("Clear").font(.caption) }
+                                        Spacer()
+                                        Text("\(count) contact(s) selected")
+                                    }
+                                } else {
+                                    Text("No contacts selected")
+                                        .frame(maxWidth: .infinity, alignment: .trailing)
+                                }
                             }
                         }
+                        .foregroundColor(theme.colors.secondary)
                     }
 
                     Section {
@@ -134,12 +142,20 @@ struct AddGroupMembersViewCommon: View {
                     title: Text("Can't invite contact!"),
                     message: Text("You're trying to invite contact with whom you've shared an incognito profile to the group in which you're using your main profile")
                 )
+            case .freeLimit:
+                return Alert(
+                    title: Text("Group limit reached"),
+                    message: Text("XauXat Free groups support up to 20 members. Existing members remain in the group.")
+                )
             case let .error(title, error):
                 return mkAlert(title: title, message: error)
             }
         }
         .onChange(of: selectedContacts) { _ in
             searchFocussed = false
+        }
+        .task {
+            await refreshFreeCapacity()
         }
         .modifier(ThemedBackground(grouped: true))
     }
@@ -168,6 +184,7 @@ struct AddGroupMembersViewCommon: View {
     private func inviteMembers() {
         Task {
             do {
+                _ = try await apiRequireXauXatFreeGroupCapacity(groupInfo.groupId, adding: selectedContacts.count)
                 for contactId in selectedContacts {
                     let member = try await apiAddMember(groupInfo.groupId, contactId, selectedRole)
                     await MainActor.run { _ = chatModel.upsertGroupMember(groupInfo, member) }
@@ -213,6 +230,8 @@ struct AddGroupMembersViewCommon: View {
             } else {
                 if checked {
                     selectedContacts.remove(contact.apiId)
+                } else if let freeCapacity, selectedContacts.count >= freeCapacity.remaining {
+                    alert = .freeLimit
                 } else {
                     selectedContacts.insert(contact.apiId)
                 }
@@ -230,6 +249,24 @@ struct AddGroupMembersViewCommon: View {
                 Spacer()
                 Image(systemName: icon)
                     .foregroundColor(iconColor)
+            }
+        }
+    }
+
+    private func refreshFreeCapacity() async {
+        do {
+            let capacity = try await apiXauXatFreeGroupCapacity(groupInfo.groupId)
+            await MainActor.run {
+                freeCapacity = capacity
+                loadingFreeCapacity = false
+            }
+        } catch {
+            await MainActor.run {
+                loadingFreeCapacity = false
+                alert = .error(
+                    title: "Couldn't check group capacity",
+                    error: LocalizedStringKey(responseError(error))
+                )
             }
         }
     }

@@ -182,7 +182,7 @@ struct GroupChatInfoView: View {
                             groupInfo.useRelays
                             ? "Only channel owners can change channel preferences."
                             : groupInfo.businessChat == nil
-                            ? "Only group owners can change group preferences."
+                            ? "Only group owners can change group features. Admins can also change who may invite members."
                             : "Only chat owners can change preferences."
                         )
                         Text(label)

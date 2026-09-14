@@ -94,6 +94,7 @@ struct ChatItemView: View {
             .flatMap {
                 switch $0 {
                 case let .image(_, image): image
+                case let .xauXatImage(_, image, _): image
                 case let .video(_, image, _): image
                 default: nil
                 }

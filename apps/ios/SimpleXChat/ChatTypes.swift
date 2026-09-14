@@ -2615,6 +2615,10 @@ public struct GroupInfo: Identifiable, Decodable, NamedChat, Hashable {
     }
 
     public var canAddMembers: Bool {
+        return membership.memberRole >= groupProfile.memberAdmission_.inviteRole_ && membership.memberActive
+    }
+
+    public var canManageInvitePermissions: Bool {
         return membership.memberRole >= .admin && membership.memberActive
     }
 
@@ -2773,15 +2777,21 @@ public struct GroupProfile: Codable, NamedChat, Hashable {
 
 public struct GroupMemberAdmission: Codable, Hashable {
     public var review: MemberCriteria?
+    public var inviteRole: GroupMemberRole?
 
     public init(
-        review: MemberCriteria? = nil
+        review: MemberCriteria? = nil,
+        inviteRole: GroupMemberRole? = nil
     ) {
         self.review = review
+        self.inviteRole = inviteRole
     }
 
+    public var inviteRole_: GroupMemberRole { inviteRole ?? .admin }
+
     public static let sampleData = GroupMemberAdmission(
-        review: .all
+        review: .all,
+        inviteRole: .admin
     )
 }
 
@@ -3653,6 +3663,7 @@ public struct ChatItem: Identifiable, Decodable, Hashable {
     }
 
     public var encryptedFile: Bool? {
+        if case .xauXatImage = content.msgContent { return true }
         guard let fileSource = file?.fileSource else { return nil }
         return fileSource.cryptoArgs != nil
     }
@@ -4908,10 +4919,25 @@ public enum FileError: Decodable, Equatable, Hashable {
     }
 }
 
+public struct XauXatImagePrivacy: Codable, Hashable {
+    public let version: Int
+    public let viewOnce: Bool
+    public let allowSave: Bool
+    public let fileCrypto: CryptoFileArgs
+
+    public init(viewOnce: Bool = true, allowSave: Bool, fileCrypto: CryptoFileArgs) {
+        self.version = 1
+        self.viewOnce = viewOnce
+        self.allowSave = allowSave
+        self.fileCrypto = fileCrypto
+    }
+}
+
 public enum MsgContent: Equatable, Hashable {
     case text(String)
     case link(text: String, preview: LinkPreview)
     case image(text: String, image: String)
+    case xauXatImage(text: String, image: String, privacy: XauXatImagePrivacy)
     case video(text: String, image: String, duration: Int)
     case voice(text: String, duration: Int)
     case file(String)
@@ -4929,6 +4955,7 @@ public enum MsgContent: Equatable, Hashable {
         case let .text(text): return text
         case let .link(text, _): return text
         case let .image(text, _): return text
+        case let .xauXatImage(text, _, _): return text
         case let .video(text, _, _): return text
         case let .voice(text, _): return text
         case let .file(text): return text
@@ -4954,7 +4981,7 @@ public enum MsgContent: Equatable, Hashable {
 
     public var isImage: Bool {
         switch self {
-        case .image: return true
+        case .image, .xauXatImage: return true
         default: return false
         }
     }
@@ -4968,7 +4995,7 @@ public enum MsgContent: Equatable, Hashable {
 
     public var isImageOrVideo: Bool {
         switch self {
-        case .image: true
+        case .image, .xauXatImage: true
         case .video: true
         default: false
         }
@@ -4976,7 +5003,7 @@ public enum MsgContent: Equatable, Hashable {
 
     public var isMediaOrFileAttachment: Bool {
         switch self {
-        case .image: true
+        case .image, .xauXatImage: true
         case .video: true
         case .file: true
         default: false
@@ -4997,6 +5024,8 @@ public enum MsgContent: Equatable, Hashable {
         case reason
         case chatLink
         case ownerSig
+        case caption
+        case xauxat
     }
 
     public static func == (lhs: MsgContent, rhs: MsgContent) -> Bool {
@@ -5004,6 +5033,7 @@ public enum MsgContent: Equatable, Hashable {
         case let (.text(lt), .text(rt)): return lt == rt
         case let (.link(lt, lp), .link(rt, rp)): return lt == rt && lp == rp
         case let (.image(lt, li), .image(rt, ri)): return lt == rt && li == ri
+        case let (.xauXatImage(lt, li, lp), .xauXatImage(rt, ri, rp)): return lt == rt && li == ri && lp == rp
         case let (.video(lt, li, ld), .video(rt, ri, rd)): return lt == rt && li == ri && ld == rd
         case let (.voice(lt, ld), .voice(rt, rd)): return lt == rt && ld == rd
         case let (.file(lf), .file(rf)): return lf == rf
@@ -5032,6 +5062,18 @@ extension MsgContent: Decodable {
                 let text = try container.decode(String.self, forKey: CodingKeys.text)
                 let image = try container.decode(String.self, forKey: CodingKeys.image)
                 self = .image(text: text, image: image)
+            case "xauxat.image":
+                let text = try container.decodeIfPresent(String.self, forKey: CodingKeys.caption) ?? ""
+                let image = try container.decode(String.self, forKey: CodingKeys.image)
+                let privacy = try container.decode(XauXatImagePrivacy.self, forKey: CodingKeys.xauxat)
+                guard privacy.version == 1, privacy.viewOnce else {
+                    throw DecodingError.dataCorruptedError(
+                        forKey: .xauxat,
+                        in: container,
+                        debugDescription: "Unsupported XauXat one-time image policy"
+                    )
+                }
+                self = .xauXatImage(text: text, image: image, privacy: privacy)
             case "video":
                 let text = try container.decode(String.self, forKey: CodingKeys.text)
                 let image = try container.decode(String.self, forKey: CodingKeys.image)
@@ -5078,6 +5120,12 @@ extension MsgContent: Encodable {
             try container.encode("image", forKey: .type)
             try container.encode(text, forKey: .text)
             try container.encode(image, forKey: .image)
+        case let .xauXatImage(text, image, privacy):
+            try container.encode("xauxat.image", forKey: .type)
+            try container.encode("One-time photo - open with XauXat", forKey: .text)
+            try container.encode(text, forKey: .caption)
+            try container.encode(image, forKey: .image)
+            try container.encode(privacy, forKey: .xauxat)
         case let .video(text, image, duration):
             try container.encode("video", forKey: .type)
             try container.encode(text, forKey: .text)

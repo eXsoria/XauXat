@@ -81,7 +81,7 @@ struct ContextItemView: View {
             } else { false }
             switch contextItem.content.msgContent {
             case .file: return isFileLoaded ? image("doc.fill") : Text("")
-            case .image: return image("photo")
+            case .image, .xauXatImage: return image("photo")
             case .voice: return isFileLoaded ? image("play.fill") : Text("")
             case let .chat(_, chatLink, _):
                 let hasText = contextItem.text != chatLink.connLinkStr

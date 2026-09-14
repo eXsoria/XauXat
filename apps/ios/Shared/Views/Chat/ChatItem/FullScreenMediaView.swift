@@ -188,8 +188,8 @@ struct FullScreenMediaView: View {
     }
 
     private func chatItemImage(_ ci: ChatItem) -> (ChatItem, UIImage?, URL?)? {
-        if case .image = ci.content.msgContent,
-           let img = getLoadedImage(ci.file) {
+        if ci.content.msgContent?.isImage == true,
+           let img = getLoadedXauXatImage(ci) {
             return (ci, img, nil)
         }
         // Currently, video support in gallery is not enabled

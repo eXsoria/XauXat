@@ -18,6 +18,11 @@ public enum XauXatOneTimePhotoPolicy: Equatable {
     case allowSave
 }
 
+public struct XauXatPreparedOneTimePhoto {
+    public let file: CryptoFile
+    public let privacy: XauXatImagePrivacy
+}
+
 private let xauxatOneTimePhotoNoSavePrefix = "xauxat-otv-ns-"
 private let xauxatOneTimePhotoAllowSavePrefix = "xauxat-otv-as-"
 
@@ -26,6 +31,13 @@ public func xauxatOneTimePhotoPolicy(_ file: CIFile?) -> XauXatOneTimePhotoPolic
     if fileName.hasPrefix(xauxatOneTimePhotoNoSavePrefix) { return .noSave }
     if fileName.hasPrefix(xauxatOneTimePhotoAllowSavePrefix) { return .allowSave }
     return nil
+}
+
+public func xauxatOneTimePhotoPolicy(_ chatItem: ChatItem) -> XauXatOneTimePhotoPolicy? {
+    if case let .xauXatImage(_, _, privacy) = chatItem.content.msgContent, privacy.viewOnce {
+        return privacy.allowSave ? .allowSave : .noSave
+    }
+    return xauxatOneTimePhotoPolicy(chatItem.file)
 }
 
 private func xauxatPhotoFileName(_ prefix: String, _ ext: String, oneTimeAllowSave: Bool?) -> String {
@@ -60,6 +72,42 @@ public func getLoadedImage(_ file: CIFile?) -> UIImage? {
     return nil
 }
 
+public func getLoadedXauXatImage(_ chatItem: ChatItem) -> UIImage? {
+    guard case let .xauXatImage(_, _, privacy) = chatItem.content.msgContent,
+          let fileSource = getLoadedFileSource(chatItem.file) else {
+        return getLoadedImage(chatItem.file)
+    }
+
+    let storedPath = getAppFilePath(fileSource.filePath)
+    var envelopePath = storedPath
+    var temporaryPath: URL?
+    defer {
+        if let temporaryPath { try? FileManager.default.removeItem(at: temporaryPath) }
+    }
+
+    do {
+        if let localCrypto = fileSource.cryptoArgs {
+            let encryptedEnvelope = try readCryptoFile(path: storedPath.path, cryptoArgs: localCrypto)
+            let temp = getMigrationTempFilesDirectory().appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: getMigrationTempFilesDirectory(), withIntermediateDirectories: true)
+            try encryptedEnvelope.write(to: temp, options: .atomic)
+            temporaryPath = temp
+            envelopePath = temp
+        }
+        let data = try readCryptoFile(path: envelopePath.path, cryptoArgs: privacy.fileCrypto)
+        let image = UIImage(data: data)
+        do {
+            try image?.setGifFromData(data, levelOfIntegrity: 1.0)
+            return image
+        } catch {
+            return UIImage(data: data)
+        }
+    } catch {
+        logger.error("Unable to decrypt XauXat one-time photo: \(error.localizedDescription)")
+        return nil
+    }
+}
+
 public func getFileData(_ path: URL, _ cfArgs: CryptoFileArgs?) throws -> Data {
     if let cfArgs = cfArgs {
         return try readCryptoFile(path: path.path, cryptoArgs: cfArgs)
@@ -83,6 +131,12 @@ public func saveAnimImage(_ image: UIImage, oneTimeAllowSave: Bool? = nil) -> Cr
     guard let imageData = image.imageData,
           let sanitizedData = xauxatSanitizeAnimatedImageData(imageData) else { return nil }
     return saveFile(sanitizedData, fileName, encrypted: privacyEncryptLocalFilesGroupDefault.get())
+}
+
+public func saveXauXatOneTimeAnimImage(_ image: UIImage, allowSave: Bool) -> XauXatPreparedOneTimePhoto? {
+    guard let imageData = image.imageData,
+          let sanitizedData = xauxatSanitizeAnimatedImageData(imageData) else { return nil }
+    return saveXauXatOneTimePhotoData(sanitizedData, allowSave: allowSave)
 }
 
 private func xauxatSanitizeAnimatedImageData(_ data: Data) -> Data? {
@@ -131,6 +185,29 @@ public func saveImage(_ uiImage: UIImage, oneTimeAllowSave: Bool? = nil) -> Cryp
         return saveFile(imageDataResized, fileName, encrypted: privacyEncryptLocalFilesGroupDefault.get())
     }
     return nil
+}
+
+public func saveXauXatOneTimeImage(_ image: UIImage, allowSave: Bool) -> XauXatPreparedOneTimePhoto? {
+    let hasAlpha = imageHasAlpha(image)
+    guard let sanitizedData = resizeImageToDataSize(image, maxDataSize: MAX_IMAGE_SIZE, hasAlpha: hasAlpha) else { return nil }
+    return saveXauXatOneTimePhotoData(sanitizedData, allowSave: allowSave)
+}
+
+private func saveXauXatOneTimePhotoData(_ data: Data, allowSave: Bool) -> XauXatPreparedOneTimePhoto? {
+    let fileName = generateNewFileName("photo", "xauxat")
+    let path = getAppFilePath(fileName)
+    do {
+        let cryptoArgs = try writeCryptoFile(path: path.path, data: data)
+        _ = excludeFromSystemBackup(path)
+        return XauXatPreparedOneTimePhoto(
+            file: CryptoFile.plain(fileName),
+            privacy: XauXatImagePrivacy(allowSave: allowSave, fileCrypto: cryptoArgs)
+        )
+    } catch {
+        logger.error("Unable to encrypt XauXat one-time photo: \(error.localizedDescription)")
+        try? FileManager.default.removeItem(at: path)
+        return nil
+    }
 }
 
 public func cropToSquare(_ image: UIImage) -> UIImage {

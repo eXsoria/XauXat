@@ -763,11 +763,11 @@ processAgentMessageConn cxt user@User {userId} corrId agentConnId agentMessage =
                   ct <- getContactViaMember db cxt user m
                   liftIO $ setNewContactMemberConnRequest db user m cReq
                   liftIO $ (ct,) <$> getGroupLinkId db user gInfo
-                if memberRole' membership >= GRAdmin
+                if memberRole' membership >= groupInviteRole groupProfile
                   then do
                     sendGrpInvitation ct m groupLinkId
                     toView $ CEvtSentGroupInvitation user gInfo ct m
-                  else messageError "processGroupMessage: group link host no longer has admin role"
+                  else messageError "processGroupMessage: group link host no longer has permission to invite"
                 where
                   sendGrpInvitation :: Contact -> GroupMember -> Maybe GroupLinkId -> CM ()
                   sendGrpInvitation ct GroupMember {memberId, memberRole = memRole} groupLinkId = do
@@ -1609,12 +1609,12 @@ processAgentMessageConn cxt user@User {userId} corrId agentConnId agentMessage =
             -- ##### Group link join requests (don't create contact requests) #####
             Just gli@GroupLinkInfo {groupId, memberRole = gLinkMemRole} -> do
               -- TODO [short links] deduplicate request by xContactId?
-              gInfo <- withStore $ \db -> getGroupInfo db cxt user groupId
+              gInfo@GroupInfo {groupProfile = joinGroupProfile} <- withStore $ \db -> getGroupInfo db cxt user groupId
               if
                 | useRelays' gInfo ->
                     messageWarning $ "processContactConnMessage (group " <> groupName' gInfo <> "): ignored direct join request from " <> displayName <> " (group uses relays)"
-                | memberRole' (membership gInfo) < GRAdmin ->
-                    messageWarning $ "processContactConnMessage (group " <> groupName' gInfo <> "): ignored join request because host is no longer admin"
+                | memberRole' (membership gInfo) < groupInviteRole joinGroupProfile ->
+                    messageWarning $ "processContactConnMessage (group " <> groupName' gInfo <> "): ignored join request because host no longer has permission to invite"
                 | otherwise -> do
                   acceptMember_ <- asks $ acceptMember . chatHooks . config
                   maybe (pure $ Right (GAAccepted, gLinkMemRole)) (\am -> liftIO $ am gInfo gli p) acceptMember_ >>= \case
@@ -2646,9 +2646,9 @@ processAgentMessageConn cxt user@User {userId} corrId agentConnId agentMessage =
       | isJust publicGroup = messageError "x.grp.inv: can't invite to channel"
       | otherwise = do
           let Contact {localDisplayName = c, activeConn} = ct
-              GroupInvitation {fromMember = (MemberIdRole fromMemId fromRole), invitedMember = (MemberIdRole memId memRole), connRequest, groupLinkId} = inv
+              GroupInvitation {fromMember = (MemberIdRole fromMemId fromRole), invitedMember = (MemberIdRole memId memRole), connRequest, groupLinkId, groupProfile} = inv
           forM_ activeConn $ \Connection {connId, connChatVersion, peerChatVRange, customUserProfileId, groupLinkId = groupLinkId'} -> do
-            when (fromRole < GRAdmin || fromRole < memRole) $ throwChatError (CEGroupContactRole c)
+            when (fromRole < groupInviteRole groupProfile || fromRole < memRole) $ throwChatError (CEGroupContactRole c)
             when (fromMemId == memId) $ throwChatError CEGroupDuplicateMemberId
             -- [incognito] if direct connection with host is incognito, create membership using the same incognito profile
             (gInfo@GroupInfo {groupId, localDisplayName, groupProfile, membership}, hostId) <- withStore $ \db -> createGroupInvitation db cxt user ct inv customUserProfileId
@@ -3118,7 +3118,7 @@ processAgentMessageConn cxt user@User {userId} corrId agentConnId agentMessage =
 
     xGrpMemNew :: GroupInfo -> GroupMember -> MemberInfo -> Maybe MsgScope -> RcvMessage -> UTCTime -> CM (Maybe DeliveryJobScope)
     xGrpMemNew gInfo m memInfo@(MemberInfo memId memRole _ _ assertedKey_) msgScope_ msg brokerTs = do
-      unless (useRelays' gInfo) $ checkHostRole m memRole
+      unless (useRelays' gInfo) $ checkHostRole gInfo m memRole
       if sameMemberId memId (membership gInfo)
         then pure Nothing
         else
@@ -3254,7 +3254,7 @@ processAgentMessageConn cxt user@User {userId} corrId agentConnId agentMessage =
     xGrpMemFwd :: GroupInfo -> GroupMember -> MemberInfo -> IntroInvitation -> CM ()
     xGrpMemFwd gInfo@GroupInfo {membership, chatSettings} m memInfo@(MemberInfo memId memRole memChatVRange _ _) IntroInvitation {groupConnReq, directConnReq} = do
       let GroupMember {memberId = membershipMemId} = membership
-      checkHostRole m memRole
+      checkHostRole gInfo m memRole
       toMember <- withStore $ \db -> do
         toMember <-
           getGroupMemberByMemberId db cxt user gInfo memId
@@ -3575,9 +3575,9 @@ processAgentMessageConn cxt user@User {userId} corrId agentConnId agentMessage =
         forM_ stored_ $ \stored ->
           when (maybe True (stored >) reqVer_ && maybe True (stored >) served_) $ serveRoster user gInfo m
 
-    checkHostRole :: GroupMember -> GroupMemberRole -> CM ()
-    checkHostRole GroupMember {memberRole, localDisplayName} memRole =
-      when (memberRole < GRAdmin || memberRole < memRole) $ throwChatError (CEGroupContactRole localDisplayName)
+    checkHostRole :: GroupInfo -> GroupMember -> GroupMemberRole -> CM ()
+    checkHostRole GroupInfo {groupProfile} GroupMember {memberRole, localDisplayName} memRole =
+      when (memberRole < groupInviteRole groupProfile || memberRole < memRole) $ throwChatError (CEGroupContactRole localDisplayName)
 
     xGrpMemRestrict :: GroupInfo -> GroupMember -> MemberId -> MemberRestrictions -> RcvMessage -> UTCTime -> CM (Maybe DeliveryJobScope)
     xGrpMemRestrict
@@ -3730,7 +3730,7 @@ processAgentMessageConn cxt user@User {userId} corrId agentConnId agentMessage =
 
     xGrpInfo :: GroupInfo -> GroupMember -> GroupProfile -> RcvMessage -> UTCTime -> CM (Maybe DeliveryJobScope)
     xGrpInfo g@GroupInfo {groupProfile = p@GroupProfile {publicGroup = pg}, businessChat} m@GroupMember {memberRole} p'@GroupProfile {publicGroup = pg'} msg@RcvMessage {msgSigned} brokerTs
-      | memberRole < GROwner = messageError "x.grp.info with insufficient member permissions" $> Nothing
+      | memberRole < GROwner && not (memberRole >= GRAdmin && onlyInviteRoleChanged p p') = messageError "x.grp.info with insufficient member permissions" $> Nothing
       | let pgId = fmap (\PublicGroupProfile {publicGroupId} -> publicGroupId),
         useRelays' g && (isNothing pg' || pgId pg' /= pgId pg) = messageError "x.grp.info: publicGroupId mismatch for channel" $> Nothing
       | not (useRelays' g) && isJust pg' = messageError "x.grp.info: publicGroup not allowed in p2p groups" $> Nothing
@@ -3754,6 +3754,11 @@ processAgentMessageConn cxt user@User {userId} corrId agentConnId agentMessage =
           -- relay advertises its web capability now that the owner's version is known (bumped by saveGroupRcvMsg)
           when (isRelay (membership g)) $ sendRelayCapIfNeeded user g
           pure $ Just DJSGroup {jobSpec = DJDeliveryJob {includePending = True}}
+      where
+        onlyInviteRoleChanged gp gp' = normalizeAdmission gp == normalizeAdmission gp'
+        normalizeAdmission gp@GroupProfile {memberAdmission} =
+          let admission = fromMaybe emptyGroupMemberAdmission memberAdmission
+           in gp {memberAdmission = Just admission {inviteRole = Nothing}}
 
     xGrpPrefs :: GroupInfo -> GroupMember -> GroupPreferences -> RcvMessage -> CM (Maybe DeliveryJobScope)
     xGrpPrefs g m@GroupMember {memberRole} ps' RcvMessage {msgSigned}

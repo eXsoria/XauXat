@@ -22,6 +22,7 @@ fi
 
 ARCHIVE_DIR=""
 DEVICE_ONLY=false
+LOCAL_BUILD=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --archive-dir)
@@ -36,8 +37,12 @@ while [ "$#" -gt 0 ]; do
       DEVICE_ONLY=true
       shift
       ;;
+    --local-build)
+      LOCAL_BUILD=true
+      shift
+      ;;
     *)
-      echo "Usage: $0 [--archive-dir /absolute/or/relative/path] [--device-only]" >&2
+      echo "Usage: $0 [--archive-dir /absolute/or/relative/path] [--device-only] [--local-build]" >&2
       exit 1
       ;;
   esac
@@ -68,7 +73,11 @@ verify_archive() {
   unzip -tq "$archive_path" >/dev/null
 }
 
-verify_archive "$XAUXAT_IOS_ARM64_SHA256" "$ARM_ARCHIVE"
+if [ "$LOCAL_BUILD" = true ]; then
+  unzip -tq "$ARM_ARCHIVE" >/dev/null
+else
+  verify_archive "$XAUXAT_IOS_ARM64_SHA256" "$ARM_ARCHIVE"
+fi
 
 RAW_ARM="$WORK_DIR/raw-aarch64"
 PREPARED="$WORK_DIR/prepared"
@@ -119,7 +128,11 @@ done
   ./scripts/ios/update-pbxproj.sh
 )
 
-echo "Prepared SimpleX ${XAUXAT_SIMPLEX_BASELINE} libraries with verified checksums."
+if [ "$LOCAL_BUILD" = true ]; then
+  echo "Prepared SimpleX libraries built from this XauXat source revision."
+else
+  echo "Prepared SimpleX ${XAUXAT_SIMPLEX_BASELINE} libraries with verified checksums."
+fi
 echo "Device libraries:    $LIBRARIES_DIR/ios"
 if [ "$DEVICE_ONLY" = false ]; then
   echo "Simulator libraries: $LIBRARIES_DIR/sim"

@@ -2303,8 +2303,10 @@ struct ChatView: View {
                     copyButton(ci)
                 }
                 if let fileSource = fileSource, fileExists, mediaExportAllowed {
-                    if case .image = ci.content.msgContent, let image = getLoadedImage(ci.file) {
-                        if image.imageData != nil {
+                    if ci.content.msgContent?.isImage == true, let image = getLoadedXauXatImage(ci) {
+                        if case .xauXatImage = ci.content.msgContent {
+                            saveButton(image: image)
+                        } else if image.imageData != nil {
                             saveButton(file: fileSource)
                         } else {
                             saveButton(image: image)
@@ -2471,7 +2473,7 @@ struct ChatView: View {
         private func shareButton(_ ci: ChatItem) -> Button<some View> {
             Button {
                 var shareItems: [Any] = [ci.content.text]
-                if case .image = ci.content.msgContent, xauxatOneTimePhotoExportAllowed(ci), let image = getLoadedImage(ci.file) {
+                if ci.content.msgContent?.isImage == true, xauxatOneTimePhotoExportAllowed(ci), let image = getLoadedXauXatImage(ci) {
                     shareItems.append(image)
                 }
                 showShareSheet(items: shareItems)
@@ -2485,10 +2487,10 @@ struct ChatView: View {
 
         private func copyButton(_ ci: ChatItem) -> Button<some View> {
             Button {
-                if case let .image(text, _) = ci.content.msgContent,
+                if ci.content.msgContent?.isImage == true,
                    xauxatOneTimePhotoExportAllowed(ci),
-                   text == "",
-                   let image = getLoadedImage(ci.file) {
+                   ci.content.text == "",
+                   let image = getLoadedXauXatImage(ci) {
                     UIPasteboard.general.image = image
                 } else {
                     UIPasteboard.general.string = ci.content.text

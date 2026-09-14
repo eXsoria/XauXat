@@ -49,7 +49,8 @@ struct AddGroupView: View {
                     groupLink: $groupLink,
                     groupLinkMemberRole: $groupLinkMemberRole,
                     showTitle: false,
-                    creatingGroup: true
+                    creatingGroup: true,
+                    groupInfo: groupInfo
                 ) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         dismissAllSheets(animated: true) {
