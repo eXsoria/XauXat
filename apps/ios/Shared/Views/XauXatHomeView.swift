@@ -973,7 +973,6 @@ private struct XauXatHelpDestination: View {
 private struct XauXatPrivacyView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DEFAULT_PERFORM_LA) private var appLock = false
-    @AppStorage(DEFAULT_PRIVACY_PROTECT_SCREEN) private var protectScreen = false
     @State private var localAuthMode = privacyLocalAuthModeDefault.get()
 
     private var palette: XauXatPalette { XauXatPalette(colorScheme) }
@@ -995,16 +994,9 @@ private struct XauXatPrivacyView: View {
                             value: appLock ? (localAuthMode == .system ? "System" : "Passcode") : "Off"
                         )
                     }
-                    XauXatToggleRow(
-                        palette: palette,
-                        symbol: "eye.slash",
-                        title: "Protect App Switcher",
-                        subtitle: "Hide XauXat when you leave the app.",
-                        isOn: $protectScreen
-                    )
                 }
 
-                Text("Your security settings stay on this device.")
+                Text("XauXat always hides its content in the App Switcher. Your security settings stay on this device.")
                     .font(.custom("Courier", size: 11))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)

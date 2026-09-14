@@ -19,13 +19,30 @@ class AppSheetState: ObservableObject {
     }
 }
 
+struct XauXatAppSwitcherProtection: ViewModifier {
+    @ObservedObject private var appSheetState = AppSheetState.shared
+
+    func body(content: Content) -> some View {
+        ZStack {
+            content
+            if !appSheetState.scenePhaseActive {
+                Color.black
+                    .ignoresSafeArea()
+                    .accessibilityLabel("XauXat is hidden while inactive")
+            }
+        }
+    }
+}
+
 private struct PrivacySensitive: ViewModifier {
     @AppStorage(DEFAULT_PRIVACY_PROTECT_SCREEN) private var protectScreen = false
     // Screen protection doesn't work for appSheet on iOS 16 if @Environment(\.scenePhase) is used instead of global state
     @ObservedObject var appSheetState: AppSheetState = AppSheetState.shared
 
     func body(content: Content) -> some View {
-        content.redacted(reason: appSheetState.redactionReasons(protectScreen))
+        content
+            .redacted(reason: appSheetState.redactionReasons(protectScreen))
+            .modifier(XauXatAppSwitcherProtection())
     }
 }
 
