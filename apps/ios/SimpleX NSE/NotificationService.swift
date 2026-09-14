@@ -73,6 +73,21 @@ public enum NSENotificationData {
         default: nil
         }
     }
+
+    @inline(__always)
+    var xauXatHiddenConversation: Bool {
+        let chatId: ChatId? = switch self {
+        case let .messageReceived(_, chatInfo, _): chatInfo.id
+        case let .callInvitation(invitation): invitation.contact.id
+        case let .connectionEvent(_, entity): switch entity {
+            case let .rcvDirectMsgConnection(_, contact): contact?.id
+            case let .rcvGroupMsgConnection(_, groupInfo, _): groupInfo.id
+            case .userContactConnection: nil
+            }
+        default: nil
+        }
+        return chatId.map(xauXatIsChatHidden) ?? false
+    }
 }
 
 // Once the last thread in the process completes processing chat controller is suspended, and the database is closed, to avoid
@@ -669,10 +684,13 @@ class NotificationService: UNNotificationServiceExtension {
             serviceBestAttemptNtf = nil
             contentHandler = nil
             if let callInv {
+                if xauXatIsChatHidden(callInv.contact.id) {
+                    removeHiddenEventFromBadge()
+                }
                 if useCallKit() {
                     logger.debug("NotificationService reportNewIncomingVoIPPushPayload for \(callInv.contact.id)")
                     CXProvider.reportNewIncomingVoIPPushPayload([
-                        "displayName": callInv.contact.displayName,
+                        "displayName": xauXatIsChatHidden(callInv.contact.id) ? NSLocalizedString("XauXat call", comment: "hidden conversation callkit banner") : callInv.contact.displayName,
                         "contactId": callInv.contact.id,
                         "callUUID": callInv.callUUID ?? "",
                         "media": CallMediaType.audio.rawValue,
@@ -697,7 +715,11 @@ class NotificationService: UNNotificationServiceExtension {
         // uncomment localDisplayName in ConnectionEntity
         // let conns = self.notificationEntities.compactMap { $0.value.ntfConn.connEntity.localDisplayName }
         // logger.debug("NotificationService prepareNotification for \(String(describing: conns))")
-        let ntfs = notificationEntities.compactMap { $0.value.msgBestAttemptNtf.notificationEvent }
+        let allNtfs = notificationEntities.compactMap { $0.value.msgBestAttemptNtf.notificationEvent }
+        let ntfs = allNtfs.filter { !$0.xauXatHiddenConversation }
+        if !allNtfs.isEmpty && ntfs.isEmpty {
+            removeHiddenEventFromBadge()
+        }
         let newMsgNtfs = ntfs.compactMap({ $0.newMsgNtf })
         let useNtfs = if newMsgNtfs.isEmpty { ntfs } else { newMsgNtfs }
         return createNtf(useNtfs)
@@ -710,6 +732,11 @@ class NotificationService: UNNotificationServiceExtension {
             default: createJointNtf(ntfs)
             }
         }
+    }
+
+    private func removeHiddenEventFromBadge() {
+        badgeCount = max(0, badgeCount - 1)
+        ntfBadgeCountGroupDefault.set(badgeCount)
     }
 
     // NOTE: this can be improved when there are two or more connection entity events when no messages were delivered.

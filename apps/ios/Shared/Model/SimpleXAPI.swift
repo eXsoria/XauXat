@@ -2625,7 +2625,7 @@ func processReceivedMsg(_ res: ChatEvent) async {
                     if cItem.isActiveReport {
                         m.increaseGroupReportsCounter(cInfo.id)
                     }
-                } else if cItem.isRcvNew && cInfo.ntfsEnabled(chatItem: cItem) {
+                } else if cItem.isRcvNew && cInfo.ntfsEnabled(chatItem: cItem) && !xauXatIsChatHidden(cInfo.id) {
                     m.increaseUnreadCounter(user: user)
                 }
             }

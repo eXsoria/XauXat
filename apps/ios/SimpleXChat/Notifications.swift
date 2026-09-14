@@ -65,9 +65,10 @@ public func createContactConnectedNtf(_ user: any UserLike, _ contact: Contact, 
 // Spec: spec/services/notifications.md#createMessageReceivedNtf
 public func createMessageReceivedNtf(_ user: any UserLike, _ cInfo: ChatInfo, _ cItem: ChatItem, _ badgeCount: Int) -> UNMutableNotificationContent {
     let previewMode = xauXatNtfPreviewMode
-    let locked = xauXatIsChatLocked(cInfo.id)
+    let protected = xauXatIsChatLocked(cInfo.id) || xauXatIsChatHidden(cInfo.id)
+    let hidden = xauXatIsChatHidden(cInfo.id)
     var title: String
-    if locked {
+    if protected {
         title = NSLocalizedString("XauXat", comment: "locked conversation notification title")
     } else if case let .group(groupInfo, _) = cInfo, case let .groupRcv(groupMember) = cItem.chatDir {
         title = groupMsgNtfTitle(groupInfo, groupMember, hideContent: previewMode == .hidden)
@@ -77,11 +78,11 @@ public func createMessageReceivedNtf(_ user: any UserLike, _ cInfo: ChatInfo, _ 
     return createNotification(
         categoryIdentifier: ntfCategoryMessageReceived,
         title: title,
-        body: !locked && previewMode == .message ? hideSecrets(cItem, isChannel: cInfo.isChannel) : NSLocalizedString("new message", comment: "notification"),
+        body: !protected && previewMode == .message ? hideSecrets(cItem, isChannel: cInfo.isChannel) : NSLocalizedString("new message", comment: "notification"),
         targetContentIdentifier: cInfo.id,
         userInfo: ["userId": user.userId],
 //            userInfo: ["chatId": cInfo.id, "chatItemId": cItem.id]
-        badgeCount: badgeCount
+        badgeCount: hidden ? nil : badgeCount
     )
 }
 
@@ -91,14 +92,15 @@ public func createCallInvitationNtf(_ invitation: RcvCallInvitation, _ badgeCoun
                 ? NSLocalizedString("Incoming video call", comment: "notification")
                 : NSLocalizedString("Incoming audio call", comment: "notification")
     let hideContent = xauXatNtfPreviewMode == .hidden
-    let locked = xauXatIsChatLocked(invitation.contact.id)
+    let protected = xauXatIsChatLocked(invitation.contact.id) || xauXatIsChatHidden(invitation.contact.id)
+    let hidden = xauXatIsChatHidden(invitation.contact.id)
     return createNotification(
         categoryIdentifier: ntfCategoryCallInvitation,
-        title: locked ? NSLocalizedString("XauXat", comment: "locked conversation notification title") : hideContent ? contactHidden : "\(invitation.contact.chatViewName):",
-        body: locked ? NSLocalizedString("new activity", comment: "locked conversation notification") : text,
+        title: protected ? NSLocalizedString("XauXat", comment: "protected conversation notification title") : hideContent ? contactHidden : "\(invitation.contact.chatViewName):",
+        body: protected ? NSLocalizedString("new activity", comment: "protected conversation notification") : text,
         targetContentIdentifier: nil,
         userInfo: ["chatId": invitation.contact.id, "userId": invitation.user.userId],
-        badgeCount: badgeCount
+        badgeCount: hidden ? nil : badgeCount
     )
 }
 
@@ -124,7 +126,8 @@ public func createConnectionEventNtf(_ user: User, _ connEntity: ConnectionEntit
     case .userContactConnection:
         title = NSLocalizedString("New contact request", comment: "notification")
     }
-    if let chatID = targetContentIdentifier, xauXatIsChatLocked(chatID) {
+    let hidden = targetContentIdentifier.map(xauXatIsChatHidden) ?? false
+    if let chatID = targetContentIdentifier, xauXatIsChatLocked(chatID) || hidden {
         title = NSLocalizedString("XauXat", comment: "locked conversation notification title")
         body = NSLocalizedString("new message", comment: "notification")
     }
@@ -134,7 +137,7 @@ public func createConnectionEventNtf(_ user: User, _ connEntity: ConnectionEntit
         body: body,
         targetContentIdentifier: targetContentIdentifier,
         userInfo: ["userId": user.userId],
-        badgeCount: badgeCount
+        badgeCount: hidden ? nil : badgeCount
     )
 }
 
@@ -187,7 +190,7 @@ public func createNotification(
     body: String? = nil,
     targetContentIdentifier: String? = nil,
     userInfo: [AnyHashable : Any] = [:],
-    badgeCount: Int
+    badgeCount: Int?
 ) -> UNMutableNotificationContent {
     let content = UNMutableNotificationContent()
     content.categoryIdentifier = categoryIdentifier
@@ -198,7 +201,7 @@ public func createNotification(
     content.userInfo = userInfo
     // TODO move logic of adding sound here, so it applies to background notifications too
     content.sound = .default
-    content.badge = badgeCount as NSNumber
+    if let badgeCount { content.badge = badgeCount as NSNumber }
 //        content.interruptionLevel = .active
 //        content.relevanceScore = 0.5 // 0-1
     return content

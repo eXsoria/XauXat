@@ -252,7 +252,7 @@ class NtfManager: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
     // Spec: spec/services/notifications.md#notifyMessageReceived
     func notifyMessageReceived(_ user: any UserLike, _ cInfo: ChatInfo, _ cItem: ChatItem) {
         logger.debug("NtfManager.notifyMessageReceived")
-        if cInfo.ntfsEnabled(chatItem: cItem) {
+        if cInfo.ntfsEnabled(chatItem: cItem) && !xauXatIsChatHidden(cInfo.id) {
             addNotification(createMessageReceivedNtf(user, cInfo, cItem, 0))
         }
     }
@@ -260,6 +260,7 @@ class NtfManager: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
     // Spec: spec/services/notifications.md#notifyCallInvitation
     func notifyCallInvitation(_ invitation: RcvCallInvitation) {
         logger.debug("NtfManager.notifyCallInvitation")
+        if xauXatIsChatHidden(invitation.contact.id) { return }
         addNotification(createCallInvitationNtf(invitation, 0, mediaOverride: .audio))
     }
 

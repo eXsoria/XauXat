@@ -633,7 +633,9 @@ private struct XauXatChatsView: View {
     @Binding var showNewChatSheet: Bool
 
     private var chats: [Chat] {
-        chatModel.chats.filter { !$0.chatInfo.chatDeleted && !$0.chatInfo.contactCard }
+        chatModel.chats.filter {
+            !$0.chatInfo.chatDeleted && !$0.chatInfo.contactCard && !xauXatIsChatHidden($0.id)
+        }
     }
 
     var body: some View {
@@ -680,7 +682,8 @@ private struct XauXatContactsView: View {
                   contact.active,
                   !contact.chatDeleted,
                   !contact.isContactCard,
-                  !xauXatIsChatLocked(chat.id) else { return false }
+                  !xauXatIsChatLocked(chat.id),
+                  !xauXatIsChatHidden(chat.id) else { return false }
             return query.isEmpty || contact.chatViewName.localizedLowercase.contains(query)
         }
     }
@@ -983,6 +986,7 @@ private struct XauXatPrivacyView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DEFAULT_PERFORM_LA) private var appLock = false
     @State private var localAuthMode = privacyLocalAuthModeDefault.get()
+    @State private var showHiddenConversations = false
 
     private var palette: XauXatPalette { XauXatPalette(colorScheme) }
 
@@ -1003,6 +1007,28 @@ private struct XauXatPrivacyView: View {
                             value: appLock ? (localAuthMode == .system ? "System" : "Passcode") : "Off"
                         )
                     }
+                    Button {
+                        authenticate(
+                            title: "Hidden conversations",
+                            reason: NSLocalizedString("Authenticate to manage hidden conversations", comment: "hidden conversations")
+                        ) { result in
+                            if case .success = result { showHiddenConversations = true }
+                        }
+                    } label: {
+                        XauXatSettingsRow(
+                            palette: palette,
+                            symbol: "eye.slash",
+                            title: "Hidden conversations"
+                        )
+                    }
+                    .background {
+                        NavigationLink(
+                            destination: XauXatHiddenChatsView(),
+                            isActive: $showHiddenConversations,
+                            label: { EmptyView() }
+                        )
+                        .hidden()
+                    }
                 }
 
                 Text("XauXat always hides its content in the App Switcher. Your security settings stay on this device.")
@@ -1018,6 +1044,67 @@ private struct XauXatPrivacyView: View {
         .navigationTitle("Privacy & Security")
         .navigationBarTitleDisplayMode(.inline)
         .buttonStyle(.plain)
+    }
+}
+
+private struct XauXatHiddenChatsView: View {
+    @EnvironmentObject private var chatModel: ChatModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hiddenIDs = xauXatHiddenChatIDs()
+
+    private var palette: XauXatPalette { XauXatPalette(colorScheme) }
+    private var chats: [Chat] {
+        chatModel.chats.filter { hiddenIDs.contains($0.id) && !$0.chatInfo.chatDeleted }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if chats.isEmpty {
+                    Text("No hidden conversations.")
+                        .font(.custom("Courier", size: 14))
+                        .foregroundStyle(palette.muted)
+                        .frame(maxWidth: .infinity, minHeight: 160)
+                } else {
+                    XauXatSettingsCard(palette: palette) {
+                        ForEach(chats, id: \.viewId) { chat in
+                            Button {
+                                if chatModel.setXauXatChatHidden(chat.id, hidden: false) {
+                                    hiddenIDs.remove(chat.id)
+                                }
+                            } label: {
+                                HStack(spacing: 13) {
+                                    ChatInfoImage(chat: chat, size: 42, color: palette.raised)
+                                    Text(chat.chatInfo.chatViewName)
+                                        .font(.custom("Courier", size: 14).weight(.bold))
+                                        .foregroundStyle(palette.ink)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 12)
+                                    Text("Show")
+                                        .font(.custom("Courier", size: 12).weight(.bold))
+                                        .foregroundStyle(palette.muted)
+                                }
+                                .padding(.horizontal, 16)
+                                .frame(minHeight: 64)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    Text("Showing a conversation returns it to the normal list without deleting messages or changing the contact.")
+                        .font(.custom("Courier", size: 11))
+                        .foregroundStyle(palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 5)
+                        .padding(.top, 18)
+                }
+            }
+            .padding(22)
+        }
+        .background(palette.background.ignoresSafeArea())
+        .navigationTitle("Hidden conversations")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
