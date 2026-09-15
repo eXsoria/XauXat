@@ -9,6 +9,8 @@
 
 import SwiftUI
 import SimpleXChat
+import QuickLook
+import UniformTypeIdentifiers
 
 // Spec: spec/client/chat-view.md#CIFileView
 struct CIFileView: View {
@@ -23,9 +25,34 @@ struct CIFileView: View {
     let meta: CIMeta
     let senderProfile: LocalProfile?
     var smallViewSize: CGFloat?
+    let contentText: String
+
+    init(
+        chat: Chat,
+        file: CIFile?,
+        meta: CIMeta,
+        senderProfile: LocalProfile?,
+        smallViewSize: CGFloat? = nil,
+        contentText: String = ""
+    ) {
+        self.chat = chat
+        self.file = file
+        self.meta = meta
+        self.senderProfile = senderProfile
+        self.smallViewSize = smallViewSize
+        self.contentText = contentText
+    }
 
     var body: some View {
-        if smallViewSize != nil {
+        if xauXatIsCodeLockedFile(contentText, kind: .file) {
+            XauXatCodeLockedFileView(
+                chat: chat,
+                file: file,
+                meta: meta,
+                senderProfile: senderProfile,
+                smallViewSize: smallViewSize
+            )
+        } else if smallViewSize != nil {
             fileIndicator()
             .simultaneousGesture(TapGesture().onEnded(fileAction))
         } else {
@@ -230,6 +257,457 @@ struct CIFileView: View {
             )
             .rotationEffect(.degrees(-90))
             .frame(width: 30, height: 30)
+    }
+}
+
+private enum XauXatCodeLockedFileLoadState {
+    case idle
+    case loading
+    case loaded(XauXatCodeLockedEnvelope)
+    case invalid
+}
+
+private struct XauXatCodeLockedFileView: View {
+    @EnvironmentObject private var chatModel: ChatModel
+    @ObservedObject var chat: Chat
+    let file: CIFile?
+    let meta: CIMeta
+    let senderProfile: LocalProfile?
+    let smallViewSize: CGFloat?
+    @State private var loadState: XauXatCodeLockedFileLoadState = .idle
+
+    private var loadedSource: CryptoFile? { getLoadedFileSource(file) }
+    private var sourceKey: String? { loadedSource?.filePath }
+
+    var body: some View {
+        Group {
+            if let size = smallViewSize {
+                Image(systemName: "lock.doc.fill")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size, height: size)
+                    .foregroundColor(Color(uiColor: .tertiaryLabel))
+                    .accessibilityLabel("Protected file")
+            } else if file?.loaded == true {
+                switch loadState {
+                case let .loaded(envelope):
+                    XauXatUnlockedFileView(chat: chat, meta: meta, envelope: envelope)
+                case .invalid:
+                    protectedRow(
+                        title: Text("Protected file unavailable"),
+                        detail: Text("The encrypted file could not be opened"),
+                        icon: "doc.badge.ellipsis"
+                    )
+                case .idle, .loading:
+                    protectedRow(
+                        title: Text("Loading protected file"),
+                        detail: Text("Please wait"),
+                        icon: "lock.doc.fill",
+                        loading: true
+                    )
+                }
+            } else {
+                Button(action: download) {
+                    protectedRow(
+                        title: Text(canDownload ? "Download protected file" : "Protected file"),
+                        detail: Text(canDownload ? "Code required after download" : "Waiting for file"),
+                        icon: canDownload ? "arrow.down.doc.fill" : "lock.doc.fill"
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canDownload)
+            }
+        }
+        .privacySensitive()
+        .task(id: sourceKey) { await loadEnvelope() }
+    }
+
+    private var canDownload: Bool {
+        guard let file else { return false }
+        return switch file.fileStatus {
+        case .rcvInvitation, .rcvAborted: true
+        default: false
+        }
+    }
+
+    private func download() {
+        guard canDownload, let file, let user = chatModel.currentUser else { return }
+        guard fileSizeValid(file, senderProfile) else {
+            let maximum = ByteCountFormatter.string(
+                fromByteCount: getMaxFileSize(file.fileProtocol, senderProfile),
+                countStyle: .binary
+            )
+            AlertManager.shared.showAlertMsg(
+                title: "Large file!",
+                message: "Your contact sent a file that is larger than currently supported maximum size (\(maximum))."
+            )
+            return
+        }
+        Task { await receiveFile(user: user, fileId: file.fileId) }
+    }
+
+    @MainActor
+    private func loadEnvelope() async {
+        guard smallViewSize == nil, let source = loadedSource else {
+            loadState = .idle
+            return
+        }
+        loadState = .loading
+        let envelope = await Task.detached(priority: .userInitiated) {
+            guard let data = try? getFileData(getAppFilePath(source.filePath), source.cryptoArgs),
+                  let envelope = try? XauXatCodeLockedEnvelope.decode(data),
+                  envelope.kind == .file else { return nil as XauXatCodeLockedEnvelope? }
+            return envelope
+        }.value
+        guard !Task.isCancelled else { return }
+        loadState = envelope.map(XauXatCodeLockedFileLoadState.loaded) ?? .invalid
+    }
+
+    private func protectedRow(title: Text, detail: Text, icon: String, loading: Bool = false) -> some View {
+        XauXatProtectedFileRow(
+            chat: chat,
+            meta: meta,
+            title: title,
+            detail: detail,
+            icon: icon,
+            loading: loading
+        )
+    }
+}
+
+private struct XauXatUnlockedFileView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject var chat: Chat
+    let meta: CIMeta
+    @StateObject private var session: XauXatCodeLockedSession
+    @State private var showUnlock = false
+    @State private var showPreview = false
+    @State private var preparingPreview = false
+    @State private var clearURL: URL?
+    @State private var previewOperation = UUID()
+
+    init(chat: Chat, meta: CIMeta, envelope: XauXatCodeLockedEnvelope) {
+        self.chat = chat
+        self.meta = meta
+        _session = StateObject(wrappedValue: XauXatCodeLockedSession(envelope: envelope))
+    }
+
+    var body: some View {
+        Group {
+            switch session.state {
+            case let .unlocked(payload):
+                if payload.kind == .file {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button { preparePreview(payload) } label: {
+                            XauXatProtectedFileRow(
+                                chat: chat,
+                                meta: meta,
+                                title: Text(verbatim: displayName(payload)),
+                                detail: Text("Tap to preview · \(formattedSize(payload.body.count))"),
+                                icon: "doc.fill",
+                                loading: preparingPreview
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(preparingPreview)
+                        .accessibilityHint("Opens a protected preview without sharing controls")
+
+                        if let caption = payload.caption, !caption.isEmpty {
+                            Text(caption)
+                                .font(.body)
+                                .padding(.horizontal, 12)
+                                .padding(.bottom, 8)
+                        }
+                    }
+                } else {
+                    unavailableRow
+                }
+            case .unlocking:
+                XauXatProtectedFileRow(
+                    chat: chat,
+                    meta: meta,
+                    title: Text("Checking code"),
+                    detail: Text("Protected file"),
+                    icon: "lock.doc.fill",
+                    loading: true
+                )
+            case .locked, .rejected:
+                Button { showUnlock = true } label: {
+                    XauXatProtectedFileRow(
+                        chat: chat,
+                        meta: meta,
+                        title: Text("Protected file"),
+                        detail: Text("Tap to enter code"),
+                        icon: "lock.doc.fill"
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens code entry")
+            }
+        }
+        .privacySensitive()
+        .sheet(isPresented: $showUnlock) {
+            XauXatCodeUnlockView(session: session)
+        }
+        .sheet(isPresented: $showPreview, onDismiss: removeClearFile) {
+            if let clearURL {
+                XauXatProtectedFilePreview(url: clearURL) {
+                    showPreview = false
+                    removeClearFile()
+                }
+            }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active {
+                showPreview = false
+                removeClearFile()
+                session.lock()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
+            if UIScreen.main.isCaptured {
+                showPreview = false
+                removeClearFile()
+                session.lock()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+            showPreview = false
+            removeClearFile()
+            session.lock()
+        }
+        .onDisappear {
+            showPreview = false
+            removeClearFile()
+            session.lock()
+        }
+    }
+
+    private var unavailableRow: some View {
+        XauXatProtectedFileRow(
+            chat: chat,
+            meta: meta,
+            title: Text("Protected file unavailable"),
+            detail: Text("The encrypted content is invalid"),
+            icon: "doc.badge.ellipsis"
+        )
+    }
+
+    private func displayName(_ payload: XauXatCodeLockedPayload) -> String {
+        guard let fileName = payload.fileName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !fileName.isEmpty else { return NSLocalizedString("Document", comment: "protected file fallback name") }
+        let lastComponent = URL(fileURLWithPath: fileName).lastPathComponent
+        return lastComponent.isEmpty ? NSLocalizedString("Document", comment: "protected file fallback name") : lastComponent
+    }
+
+    private func formattedSize(_ size: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .binary)
+    }
+
+    private func preparePreview(_ payload: XauXatCodeLockedPayload) {
+        guard !preparingPreview, clearURL == nil else { return }
+        preparingPreview = true
+        let operation = UUID()
+        previewOperation = operation
+        let fileExtension = preferredExtension(payload)
+        Task {
+            let url = await Task.detached(priority: .userInitiated) { () -> URL? in
+                let directory = getTempFilesDirectory()
+                do {
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let url = xauXatProtectedFileTempURL(fileExtension: fileExtension)
+                    try payload.body.write(to: url, options: [.atomic, .completeFileProtection])
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                    return url
+                } catch {
+                    logger.error("Unable to prepare protected XauXat file: \(error.localizedDescription)")
+                    return nil
+                }
+            }.value
+            preparingPreview = false
+            guard let url else {
+                AlertManager.shared.showAlertMsg(
+                    title: "Could not preview file",
+                    message: "The protected file could not be prepared."
+                )
+                return
+            }
+            guard previewOperation == operation else {
+                try? FileManager.default.removeItem(at: url)
+                return
+            }
+            ChatModel.shared.filesToDelete.insert(url)
+            clearURL = url
+            showPreview = true
+        }
+    }
+
+    private func preferredExtension(_ payload: XauXatCodeLockedPayload) -> String? {
+        if let fileName = payload.fileName {
+            let fileExtension = URL(fileURLWithPath: fileName).pathExtension
+            if !fileExtension.isEmpty { return fileExtension }
+        }
+        if let mimeType = payload.mimeType {
+            return UTType(mimeType: mimeType)?.preferredFilenameExtension
+        }
+        return nil
+    }
+
+    private func removeClearFile() {
+        previewOperation = UUID()
+        preparingPreview = false
+        if let clearURL {
+            ChatModel.shared.filesToDelete.remove(clearURL)
+            try? FileManager.default.removeItem(at: clearURL)
+        }
+        clearURL = nil
+    }
+}
+
+private struct XauXatProtectedFileRow: View {
+    @EnvironmentObject private var theme: AppTheme
+    @AppStorage(DEFAULT_SHOW_SENT_VIA_RPOXY) private var showSentViaProxy = false
+    @Environment(\.showTimestamp) private var showTimestamp: Bool
+    @ObservedObject var chat: Chat
+    let meta: CIMeta
+    let title: Text
+    let detail: Text
+    let icon: String
+    var loading: Bool = false
+
+    var body: some View {
+        let metaReserve = Text(verbatim: "   ") + ciMetaText(
+            meta,
+            chatTTL: chat.chatInfo.timedMessagesTTL,
+            encrypted: true,
+            colorMode: .transparent,
+            showViaProxy: showSentViaProxy,
+            showTimesamp: showTimestamp
+        )
+        HStack(alignment: .bottom, spacing: 8) {
+            ZStack {
+                Image(systemName: icon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 30, height: 30)
+                    .foregroundColor(Color(uiColor: .tertiaryLabel))
+                if loading {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                title
+                    .lineLimit(1)
+                    .foregroundColor(theme.colors.onBackground)
+                (detail + metaReserve)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .foregroundColor(theme.colors.secondary)
+            }
+        }
+        .padding(.top, 9)
+        .padding(.bottom, 8)
+        .padding(.leading, 10)
+        .padding(.trailing, 12)
+        .frame(minWidth: 220, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct XauXatProtectedFilePreview: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    let url: URL
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Protected preview")
+                    .font(.headline)
+                Spacer()
+                Button("Close", action: close)
+                    .font(.body.weight(.semibold))
+            }
+            .padding(.horizontal, 18)
+            .frame(minHeight: 54)
+
+            XauXatQuickLookPreview(url: url)
+        }
+        .privacySensitive()
+        .modifier(XauXatAppSwitcherProtection())
+        .onChange(of: scenePhase) { phase in
+            if phase != .active { close() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
+            if UIScreen.main.isCaptured { close() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+            close()
+        }
+        .onDisappear(perform: onClose)
+    }
+
+    private func close() {
+        onClose()
+        dismiss()
+    }
+}
+
+private struct XauXatQuickLookPreview: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = XauXatReadOnlyPreviewController()
+        controller.dataSource = context.coordinator
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {
+        context.coordinator.url = url
+        controller.reloadData()
+    }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
+        var url: URL
+
+        init(url: URL) { self.url = url }
+
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as NSURL
+        }
+
+        func previewController(
+            _ controller: QLPreviewController,
+            editingModeFor previewItem: QLPreviewItem
+        ) -> QLPreviewItemEditingMode {
+            .disabled
+        }
+    }
+}
+
+private final class XauXatReadOnlyPreviewController: QLPreviewController {
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        removeExportControls()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        removeExportControls()
+    }
+
+    private func removeExportControls() {
+        navigationItem.rightBarButtonItem = nil
+        navigationItem.rightBarButtonItems = []
+        toolbarItems = []
+        navigationController?.setToolbarHidden(true, animated: false)
     }
 }
 

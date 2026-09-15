@@ -33,6 +33,18 @@ video gallery and share/save actions never receive the protected video URL. A
 launch-time sweep removes a protected-video temporary file left behind by an
 unexpected process termination.
 
+Protected documents use the same media-file representation and common
+authenticated envelope. The public SimpleX file carries only a generated
+`.xauxat` name and a protected-file marker. The original file name, extension,
+MIME type, bytes, and optional caption remain inside the encrypted payload.
+The recipient sees no name or document preview before entering the correct
+code. After unlock, XauXat materializes a randomly named, file-protected copy
+only for its read-only in-app Quick Look surface. That surface has no share or
+editing controls and is kept separate from the standard file Share Sheet.
+Closing the preview, locking or backgrounding the app, screen capture, leaving
+the chat, and the launch-time stale-file sweep all remove the clear temporary
+copy.
+
 The text representation starts with a plain compatibility notice followed by
 the versioned envelope marker. A client without XauXat support sees only a safe
 notice and encrypted data, never the protected content.

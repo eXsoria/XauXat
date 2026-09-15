@@ -221,6 +221,8 @@ func xauXatCodeLockedPreviewText(_ text: String) -> String {
         return NSLocalizedString("Protected audio", comment: "code-locked audio placeholder")
     case .some(.video):
         return NSLocalizedString("Protected video", comment: "code-locked video placeholder")
+    case .some(.file):
+        return NSLocalizedString("Protected file", comment: "code-locked file placeholder")
     default:
         break
     }

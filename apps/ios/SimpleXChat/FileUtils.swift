@@ -327,7 +327,16 @@ public func xauXatProtectedVideoTempURL() -> URL {
     getTempFilesDirectory().appendingPathComponent("\(xauXatProtectedVideoTempPrefix)\(UUID().uuidString).mp4")
 }
 
-public func removeStaleXauXatProtectedVideoFiles() {
+public func xauXatProtectedFileTempURL(fileExtension: String?) -> URL {
+    let safeExtension = (fileExtension ?? "")
+        .lowercased()
+        .filter { $0.isLetter || $0.isNumber }
+        .prefix(16)
+    let suffix = safeExtension.isEmpty ? "" : ".\(safeExtension)"
+    return getTempFilesDirectory().appendingPathComponent("\(xauXatProtectedVideoTempPrefix)\(UUID().uuidString)\(suffix)")
+}
+
+public func removeStaleXauXatProtectedFiles() {
     guard let files = try? FileManager.default.contentsOfDirectory(
         at: getTempFilesDirectory(),
         includingPropertiesForKeys: nil
