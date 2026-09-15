@@ -179,6 +179,17 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
     }
 }
 
+func xauXatIsCodeLockedText(_ text: String) -> Bool {
+    text.hasPrefix(XauXatCodeLockedEnvelope.unsupportedClientMessage)
+        && text.contains(XauXatCodeLockedEnvelope.wireMarker)
+}
+
+func xauXatCodeLockedPreviewText(_ text: String) -> String {
+    xauXatIsCodeLockedText(text)
+        ? NSLocalizedString("Protected message", comment: "code-locked message placeholder")
+        : text
+}
+
 enum XauXatCodeLockedState: Equatable {
     case locked
     case unlocking
