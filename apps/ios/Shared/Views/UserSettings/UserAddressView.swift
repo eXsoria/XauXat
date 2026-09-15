@@ -14,6 +14,7 @@ struct UserAddressView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.dismiss) var dismiss: DismissAction
     @EnvironmentObject private var chatModel: ChatModel
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @EnvironmentObject var theme: AppTheme
     @State var shareViaProfile = false
     @State var autoCreate = false
@@ -345,15 +346,26 @@ struct UserAddressView: View {
         }
     }
 
+    @ViewBuilder
     private func createOneTimeLinkButton() -> some View {
-        NavigationLink {
-            NewChatView(selection: .invite)
-                .navigationTitle("New chat")
-                .navigationBarTitleDisplayMode(.large)
-                .modifier(ThemedBackground(grouped: true))
-        } label: {
-            Label("Create 1-time link", systemImage: "link.badge.plus")
-                .foregroundColor(theme.colors.primary)
+        if plusEntitlements.isAuthorized(for: .advancedContactInvites) {
+            NavigationLink {
+                NewChatView(selection: .invite)
+                    .navigationTitle("New chat")
+                    .navigationBarTitleDisplayMode(.large)
+                    .modifier(ThemedBackground(grouped: true))
+            } label: {
+                Label("Create 1-time link", systemImage: "link.badge.plus")
+                    .foregroundColor(theme.colors.primary)
+            }
+        } else {
+            NavigationLink {
+                XauXatPlusView()
+                    .navigationTitle("XauXat Plus")
+                    .navigationBarTitleDisplayMode(.inline)
+            } label: {
+                XauXatPlusLockedLabel(title: "Create 1-time link", systemImage: "link.badge.plus")
+            }
         }
     }
 

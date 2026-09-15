@@ -63,6 +63,7 @@ struct ContactConnectionInfo: View {
 
                     if contactConnection.initiated,
                        let connLinkInv = contactConnection.connLinkInv {
+                        infoRow("Invite status", "Unused")
                         SimpleXCreatedLinkQRCode(link: connLinkInv, short: $showShortLink)
                             .id("simplex-invitation-qrcode-\(connLinkInv.simplexChatUri(short: showShortLink))")
                         incognitoEnabled()

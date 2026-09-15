@@ -2230,6 +2230,13 @@ public struct Contact: Identifiable, Decodable, NamedChat, Hashable {
         activeConn?.customUserProfileId != nil
     }
 
+    public var connectedViaCreatedOneTimeInvite: Bool {
+        guard let activeConn else { return false }
+        return activeConn.contactConnInitiated
+            && activeConn.viaUserContactLink == nil
+            && !activeConn.viaGroupLink
+    }
+
     public var chatIconName: String {
         isBot ? "cube.fill" : "person.crop.circle.fill"
     }
@@ -2325,7 +2332,9 @@ public struct Connection: Decodable, Hashable {
     public var peerChatVRange: VersionRange
     public var connStatus: ConnStatus
     public var connLevel: Int
+    public var viaUserContactLink: Int64?
     public var viaGroupLink: Bool
+    public var contactConnInitiated: Bool
     public var customUserProfileId: Int64?
     public var connectionCode: SecurityCode?
     public var pqSupport: Bool
@@ -2338,7 +2347,7 @@ public struct Connection: Decodable, Hashable {
     public var connectionStats: ConnectionStats? = nil
 
     private enum CodingKeys: String, CodingKey {
-        case connId, agentConnId, peerChatVRange, connStatus, connLevel, viaGroupLink, customUserProfileId, connectionCode, pqSupport, pqEncryption, pqSndEnabled, pqRcvEnabled, authErrCounter, quotaErrCounter
+        case connId, agentConnId, peerChatVRange, connStatus, connLevel, viaUserContactLink, viaGroupLink, contactConnInitiated, customUserProfileId, connectionCode, pqSupport, pqEncryption, pqSndEnabled, pqRcvEnabled, authErrCounter, quotaErrCounter
     }
 
     public var id: ChatId { get { ":\(connId)" } }
@@ -2366,7 +2375,9 @@ public struct Connection: Decodable, Hashable {
         peerChatVRange: VersionRange(1, 1),
         connStatus: .ready,
         connLevel: 0,
+        viaUserContactLink: nil,
         viaGroupLink: false,
+        contactConnInitiated: true,
         pqSupport: false,
         pqEncryption: false,
         authErrCounter: 0,
