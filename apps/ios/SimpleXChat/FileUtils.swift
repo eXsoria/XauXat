@@ -47,6 +47,8 @@ private let CHAT_DB_BAK: String = "_chat.db.bak"
 
 private let AGENT_DB_BAK: String = "_agent.db.bak"
 
+private let DECOY_STORAGE_DIRECTORY = ".local-profile"
+
 // Spec: spec/database.md#getDocumentsDirectory
 public func getDocumentsDirectory() -> URL {
     FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -57,10 +59,13 @@ public func getGroupContainerDirectory() -> URL {
     FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: APP_GROUP_NAME)!
 }
 
-func getAppDirectory() -> URL {
-    dbContainerGroupDefault.get() == .group
-    ? getGroupContainerDirectory()
-    : getDocumentsDirectory()
+func getAppDirectory(_ scope: XauXatStorageScope = xauXatStorageScope()) -> URL {
+    let base = dbContainerGroupDefault.get() == .group
+        ? getGroupContainerDirectory()
+        : getDocumentsDirectory()
+    return scope == .decoy
+        ? base.appendingPathComponent(DECOY_STORAGE_DIRECTORY, isDirectory: true)
+        : base
 }
 
 /// XauXat keeps its live database, settings and received media off device and
@@ -106,6 +111,30 @@ public func protectPrivateAppDataFromSystemBackup() -> Bool {
     }
 }
 
+/// Creates the directories used by the currently selected local identity before
+/// the native core opens its database. The decoy scope never reuses the primary
+/// database, media, temporary files or wallpaper directories.
+public func prepareXauXatStorageScope() throws {
+    let fm = FileManager.default
+    try fm.createDirectory(at: getAppDirectory(), withIntermediateDirectories: true)
+    try fm.createDirectory(at: getAppFilesDirectory(), withIntermediateDirectories: true)
+    try fm.createDirectory(at: getTempFilesDirectory(), withIntermediateDirectories: true)
+    try fm.createDirectory(at: getMigrationTempFilesDirectory(), withIntermediateDirectories: true)
+    try fm.createDirectory(at: getWallpaperDirectory(), withIntermediateDirectories: true)
+    _ = protectPrivateAppDataFromSystemBackup()
+}
+
+/// Removes only the secondary local identity. The primary store is deliberately
+/// addressed independently so this operation cannot delete it by accident.
+public func deleteDecoyStorage() {
+    guard xauXatStorageScope() == .primary else {
+        logger.error("Refusing to remove the active local profile")
+        return
+    }
+    try? FileManager.default.removeItem(at: getAppDirectory(.decoy))
+    _ = kcDecoyDatabasePassword.remove()
+}
+
 // Spec: spec/database.md#DB_FILE_PREFIX
 let DB_FILE_PREFIX = "simplex_v1"
 
@@ -115,9 +144,12 @@ func getLegacyDatabasePath() -> URL {
 
 // Spec: spec/database.md#getAppDatabasePath
 public func getAppDatabasePath() -> URL {
-    dbContainerGroupDefault.get() == .group
-    ? getGroupContainerDirectory().appendingPathComponent(DB_FILE_PREFIX, isDirectory: false)
-    : getLegacyDatabasePath()
+    if xauXatStorageScope() == .decoy {
+        return getAppDirectory(.decoy).appendingPathComponent(DB_FILE_PREFIX, isDirectory: false)
+    }
+    return dbContainerGroupDefault.get() == .group
+        ? getGroupContainerDirectory().appendingPathComponent(DB_FILE_PREFIX, isDirectory: false)
+        : getLegacyDatabasePath()
 }
 
 func fileModificationDate(_ path: String) -> Date? {
@@ -225,6 +257,10 @@ public func hasDatabase() -> Bool {
     hasDatabaseAtPath(getAppDatabasePath())
 }
 
+public func hasDecoyDatabase() -> Bool {
+    hasDatabaseAtPath(getAppDirectory(.decoy).appendingPathComponent(DB_FILE_PREFIX, isDirectory: false))
+}
+
 func hasDatabaseAtPath(_ dbPath: URL) -> Bool {
     let fm = FileManager.default
     return fm.isReadableFile(atPath: dbPath.path + AGENT_DB) &&
@@ -249,7 +285,8 @@ public func getTempFilesDirectory() -> URL {
 }
 
 public func getMigrationTempFilesDirectory() -> URL {
-    getDocumentsDirectory().appendingPathComponent("migration_temp_files", isDirectory: true)
+    let base = xauXatStorageScope() == .decoy ? getAppDirectory(.decoy) : getDocumentsDirectory()
+    return base.appendingPathComponent("migration_temp_files", isDirectory: true)
 }
 
 // Spec: spec/services/files.md#getAppFilesDirectory

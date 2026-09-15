@@ -436,6 +436,7 @@ struct SimplexLockView: View {
     @Binding var currentLAMode: LAMode
     @EnvironmentObject var m: ChatModel
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     @AppStorage(DEFAULT_LA_NOTICE_SHOWN) private var prefLANoticeShown = false
     @State private var laMode: LAMode = privacyLocalAuthModeDefault.get()
     @AppStorage(DEFAULT_LA_LOCK_DELAY) private var laLockDelay = 30
@@ -443,12 +444,14 @@ struct SimplexLockView: View {
     @State private var selfDestruct: Bool = UserDefaults.standard.bool(forKey: DEFAULT_LA_SELF_DESTRUCT)
     @State private var currentSelfDestruct: Bool = UserDefaults.standard.bool(forKey: DEFAULT_LA_SELF_DESTRUCT)
     @AppStorage(DEFAULT_LA_SELF_DESTRUCT_DISPLAY_NAME) private var selfDestructDisplayName = ""
+    @AppStorage(DEFAULT_LA_DECOY_DISPLAY_NAME) private var decoyDisplayName = "Alex"
     @AppStorage(GROUP_DEFAULT_ALLOW_SHARE_EXTENSION, store: groupDefaults) private var allowShareExtension = false
     @State private var performLAToggleReset = false
     @State private var performLAModeReset = false
     @State private var performLASelfDestructReset = false
     @State private var showPasswordAction: PasswordAction? = nil
     @State private var showChangePassword = false
+    @State private var decoyEnabled = kcDecoyPassword.get() != nil
     @State var laAlert: LASettingViewAlert? = nil
 
     enum LASettingViewAlert: Identifiable {
@@ -461,6 +464,10 @@ struct SimplexLockView: View {
         case laSelfDestructPasscodeSetAlert
         case laSelfDestructPasscodeChangedAlert
         case laPasscodeNotChangedAlert
+        case decoyPasscodeSetAlert
+        case decoyPasscodeChangedAlert
+        case removeDecoyConfirmation
+        case decoyRemovedAlert
 
         var id: Self { self }
     }
@@ -472,6 +479,8 @@ struct SimplexLockView: View {
         case enableSelfDestruct
         case changeSelfDestructPasscode
         case selfDestructInfo
+        case enableDecoy
+        case changeDecoyPasscode
 
         var id: Self { self }
     }
@@ -493,12 +502,14 @@ struct SimplexLockView: View {
             List {
                 Section("") {
                     Toggle("Enable lock", isOn: $performLA)
+                        .disabled(decoyEnabled)
                     Picker("Lock mode", selection: $laMode) {
                         ForEach(LAMode.allCases) { mode in
                             Text(mode.text)
                         }
                     }
                     .frame(height: 36)
+                    .disabled(decoyEnabled)
                     if performLA {
                         Picker("Lock after", selection: $laLockDelay) {
                             let delays = laDelays.contains(laLockDelay) ? laDelays : [laLockDelay] + laDelays
@@ -522,6 +533,32 @@ struct SimplexLockView: View {
                 }
 
                 if performLA && laMode == .passcode {
+                    if xauXatStorageScope() == .primary &&
+                        (plusEntitlements.isAuthorized(for: .decoyPIN) || decoyEnabled) {
+                        Section {
+                            TextField("Decoy profile display name", text: $decoyDisplayName)
+                                .disabled(hasDecoyDatabase())
+                            if decoyEnabled {
+                                Button("Change decoy PIN") {
+                                    changeDecoyPassword()
+                                }
+                                Button("Remove decoy environment", role: .destructive) {
+                                    laAlert = .removeDecoyConfirmation
+                                }
+                            } else {
+                                Button("Set up decoy PIN") {
+                                    showPasswordAction = .enableDecoy
+                                }
+                                .disabled(!plusEntitlements.isAuthorized(for: .decoyPIN))
+                            }
+                        } header: {
+                            Text("Decoy environment")
+                                .foregroundColor(theme.colors.secondary)
+                        } footer: {
+                            Text("Entering this PIN at app unlock opens a separate local profile. While it is configured, app unlock always uses PIN entry so biometrics cannot select the real environment.")
+                        }
+                    }
+
                     Section(header: Text("Self-destruct passcode").foregroundColor(theme.colors.secondary)) {
                         Toggle(isOn: $selfDestruct) {
                             HStack(spacing: 6) {
@@ -588,6 +625,16 @@ struct SimplexLockView: View {
             case .laSelfDestructPasscodeSetAlert: return selfDestructPasscodeAlert("Self-destruct passcode enabled!")
             case .laSelfDestructPasscodeChangedAlert: return selfDestructPasscodeAlert("Self-destruct passcode changed!")
             case .laPasscodeNotChangedAlert: return mkAlert(title: "Passcode not changed!")
+            case .decoyPasscodeSetAlert: return passcodeAlert("Decoy PIN set!")
+            case .decoyPasscodeChangedAlert: return passcodeAlert("Decoy PIN changed!")
+            case .removeDecoyConfirmation:
+                return Alert(
+                    title: Text("Remove decoy environment?"),
+                    message: Text("The separate decoy profile, its conversations and local files will be permanently deleted. Your main environment is not affected."),
+                    primaryButton: .destructive(Text("Remove")) { removeDecoy() },
+                    secondaryButton: .cancel()
+                )
+            case .decoyRemovedAlert: return mkAlert(title: "Decoy environment removed")
             }
         }
         .sheet(item: $showPasswordAction) { a in
@@ -641,6 +688,29 @@ struct SimplexLockView: View {
                 }
             case .selfDestructInfo:
                 selfDestructInfoView()
+            case .enableDecoy:
+                SetAppPasscodeView(
+                    passcodeKeychain: kcDecoyPassword,
+                    prohibitedPasscodeKeychain: kcAppPassword,
+                    additionalProhibitedPasscodeKeychains: [kcSelfDestructPassword],
+                    title: "Set decoy PIN",
+                    reason: NSLocalizedString("Create a separate decoy environment", comment: "set passcode view")
+                ) {
+                    decoyEnabled = true
+                    showLAAlert(.decoyPasscodeSetAlert)
+                } cancel: {}
+            case .changeDecoyPasscode:
+                SetAppPasscodeView(
+                    passcodeKeychain: kcDecoyPassword,
+                    prohibitedPasscodeKeychain: kcAppPassword,
+                    additionalProhibitedPasscodeKeychains: [kcSelfDestructPassword],
+                    title: "New decoy PIN",
+                    reason: NSLocalizedString("Change decoy PIN", comment: "set passcode view")
+                ) {
+                    showLAAlert(.decoyPasscodeChangedAlert)
+                } cancel: {
+                    showLAAlert(.laPasscodeNotChangedAlert)
+                }
             }
         }
         .onAppear {
@@ -747,6 +817,33 @@ struct SimplexLockView: View {
             case .failed: laAlert = .laFailedAlert
             case .success: showPasswordAction = .changeSelfDestructPasscode
             case .unavailable: disableUnavailableLA()
+            }
+        }
+    }
+
+    private func changeDecoyPassword() {
+        authenticate(reason: NSLocalizedString("Change decoy PIN", comment: "authentication reason")) { laResult in
+            switch laResult {
+            case .failed: laAlert = .laFailedAlert
+            case .success: showPasswordAction = .changeDecoyPasscode
+            case .unavailable: disableUnavailableLA()
+            }
+        }
+    }
+
+    private func removeDecoy() {
+        authenticate(reason: NSLocalizedString("Remove decoy environment", comment: "authentication reason")) { laResult in
+            switch laResult {
+            case .failed:
+                laAlert = .laFailedAlert
+            case .success:
+                deleteDecoyStorage()
+                _ = kcDecoyPassword.remove()
+                decoyEnabled = false
+                decoyDisplayName = "Alex"
+                showLAAlert(.decoyRemovedAlert)
+            case .unavailable:
+                laAlert = .laUnavailableInstructionAlert
             }
         }
     }

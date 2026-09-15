@@ -32,6 +32,9 @@ struct SimpleXApp: App {
         UserDefaults.standard.register(defaults: appDefaults)
         setGroupDefaults()
         registerGroupDefaults()
+        // The real store is the neutral launch default. When a decoy PIN is
+        // configured, neither store is opened until the user enters a PIN.
+        setXauXatStorageScope(.primary)
         // A SOCKS port persisted by a previous process is never trusted.
         // Every launch remains offline until this process boots embedded Tor.
         setXauXatTorSocksPort(nil)
@@ -65,8 +68,9 @@ struct SimpleXApp: App {
                         chatModel.onboardingStage = onboardingStageDefault.get()
                     }
                     startEmbeddedTor(showError: true) {
+                        let hasAlternatePIN = kcSelfDestructPassword.get() != nil || kcDecoyPassword.get() != nil
                         if chatModel.migrationState == nil &&
-                           (kcAppPassword.get() == nil || kcSelfDestructPassword.get() == nil) {
+                           (kcAppPassword.get() == nil || !hasAlternatePIN) {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                                 initChatAndMigrate()
                             }
@@ -127,6 +131,11 @@ struct SimpleXApp: App {
     }
 
     private func resumeChatAfterTor() {
+        // With a decoy PIN configured, the unlock PIN must select the storage
+        // scope before the native core is allowed to open either database.
+        if kcDecoyPassword.get() != nil && !chatModel.contentViewAccessAuthenticated {
+            return
+        }
         let appState = AppChatState.shared.value
         guard appState != .stopped else { return }
 

@@ -38,6 +38,24 @@ struct LocalAuthRequest {
 
 func authenticate(title: LocalizedStringKey? = nil, reason: String, selfDestruct: Bool = false, completed: @escaping (LAResult) -> Void) {
     logger.debug("DEBUGGING: authenticate")
+    // When a decoy profile exists, app unlock always asks for a PIN. Face ID or
+    // the device passcode cannot choose which local database should be opened.
+    if selfDestruct, kcDecoyPassword.get() != nil {
+        if let password = kcAppPassword.get() {
+            DispatchQueue.main.async {
+                ChatModel.shared.laRequest = LocalAuthRequest(
+                    title: title,
+                    reason: reason,
+                    password: password,
+                    selfDestruct: true,
+                    completed: completed
+                )
+            }
+        } else {
+            completed(.unavailable(authError: NSLocalizedString("No app password", comment: "Authentication unavailable")))
+        }
+        return
+    }
     switch privacyLocalAuthModeDefault.get() {
     case .system: systemAuthenticate(reason, completed)
     case .passcode:
@@ -114,4 +132,3 @@ func laUnavailableTurningOffAlert() -> Alert {
         message: "Device authentication is disabled. Turning off SimpleX Lock."
     )
 }
-
