@@ -184,6 +184,8 @@ struct ChatInfoView: View {
 
     enum ChatInfoViewAlert: Identifiable {
         case clearChatAlert
+        case blockContactAlert
+        case safetyReport(report: XauXatSafetyReport)
         case subStatusAlert(status: SubscriptionStatus)
         case switchAddressAlert
         case abortSwitchAddressAlert
@@ -195,6 +197,8 @@ struct ChatInfoView: View {
         var id: String {
             switch self {
             case .clearChatAlert: return "clearChatAlert"
+            case .blockContactAlert: return "blockContactAlert"
+            case let .safetyReport(report): return "safetyReport \(report.id)"
             case let .subStatusAlert(status): return "subStatusAlert \(status)"
             case .switchAddressAlert: return "switchAddressAlert"
             case .abortSwitchAddressAlert: return "abortSwitchAddressAlert"
@@ -351,6 +355,10 @@ struct ChatInfoView: View {
                     }
 
                     Section {
+                        if contact.ready && contact.active {
+                            reportContactButton()
+                            blockContactButton()
+                        }
                         clearChatButton()
                         deleteContactButton()
                     }
@@ -413,6 +421,8 @@ struct ChatInfoView: View {
         .alert(item: $alert) { alertItem in
             switch(alertItem) {
             case .clearChatAlert: return clearChatAlert()
+            case .blockContactAlert: return blockContactAlert()
+            case let .safetyReport(report): return safetyReportAlert(report)
             case let .subStatusAlert(status): return subStatusAlert(status)
             case .switchAddressAlert: return switchAddressAlert(switchContactAddress)
             case .abortSwitchAddressAlert: return abortSwitchAddressAlert(abortSwitchContactAddress)
@@ -635,6 +645,61 @@ struct ChatInfoView: View {
             Label("Delete contact", systemImage: "person.badge.minus")
                 .foregroundColor(Color.red)
         }
+    }
+
+    private func reportContactButton() -> some View {
+        Button(role: .destructive) {
+            var buttons = ReportReason.supportedReasons.map { reason in
+                ActionSheet.Button.default(Text(reason.text)) {
+                    alert = .safetyReport(report: xauXatContactSafetyReport(displayName: contact.displayName, reason: reason))
+                }
+            }
+            buttons.append(.cancel())
+            actionSheet = SomeActionSheet(
+                actionSheet: ActionSheet(
+                    title: Text("Report contact"),
+                    message: Text("Choose a reason. Blocking is a separate action."),
+                    buttons: buttons
+                ),
+                id: "reportContact"
+            )
+        } label: {
+            Label("Report contact", systemImage: "flag")
+                .foregroundColor(.red)
+        }
+    }
+
+    private func blockContactButton() -> some View {
+        Button(role: .destructive) {
+            alert = .blockContactAlert
+        } label: {
+            Label("Block contact", systemImage: "hand.raised")
+                .foregroundColor(.red)
+        }
+    }
+
+    private func blockContactAlert() -> Alert {
+        Alert(
+            title: Text("Block contact?"),
+            message: Text("This revokes the current connection without notifying the contact and keeps the conversation on your device. Because SimpleX has no global contact IDs, a new invitation can create a new connection."),
+            primaryButton: .destructive(Text("Block")) {
+                deleteContactMaybeErrorAlert(chat, contact, chatDeleteMode: .entity(notify: false), true) {
+                    alert = .someAlert(alert: $0)
+                }
+            },
+            secondaryButton: .cancel()
+        )
+    }
+
+    private func safetyReportAlert(_ report: XauXatSafetyReport) -> Alert {
+        Alert(
+            title: Text(report.title),
+            message: Text(report.disclosure),
+            primaryButton: .default(Text("Open share sheet")) {
+                showShareSheet(items: [report.exportText])
+            },
+            secondaryButton: .cancel()
+        )
     }
 
     private func clearChatButton() -> some View {

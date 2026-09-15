@@ -11,6 +11,114 @@ import AVFoundation
 import SwiftUI
 import SimpleXChat
 
+enum XauXatVoiceMaskError: LocalizedError {
+    case emptyRecording
+    case renderingFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyRecording:
+            return NSLocalizedString("The recording is empty.", comment: "voice masking error")
+        case .renderingFailed:
+            return NSLocalizedString("The voice mask could not be applied.", comment: "voice masking error")
+        }
+    }
+}
+
+struct XauXatVoiceMask {
+    static let presetName = NSLocalizedString("Veil", comment: "free voice masking preset name")
+
+    private static let pitch: Float = -420
+    private static let renderBufferSize: AVAudioFrameCount = 4096
+
+    static func apply(to recordingURL: URL) throws {
+        let sourceFile = try AVAudioFile(forReading: recordingURL)
+        guard sourceFile.length > 0 else { throw XauXatVoiceMaskError.emptyRecording }
+
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        let timePitch = AVAudioUnitTimePitch()
+        let renderFormat = sourceFile.processingFormat
+        timePitch.pitch = pitch
+        timePitch.rate = 1
+
+        engine.attach(player)
+        engine.attach(timePitch)
+        engine.connect(player, to: timePitch, format: renderFormat)
+        engine.connect(timePitch, to: engine.mainMixerNode, format: renderFormat)
+        try engine.enableManualRenderingMode(
+            .offline,
+            format: renderFormat,
+            maximumFrameCount: renderBufferSize
+        )
+
+        let maskedURL = recordingURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(UUID().uuidString)-masked.m4a")
+        defer { try? FileManager.default.removeItem(at: maskedURL) }
+
+        let outputSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: renderFormat.sampleRate,
+            AVEncoderBitRateKey: 32000,
+            AVEncoderBitRateStrategyKey: AVAudioBitRateStrategy_VariableConstrained,
+            AVNumberOfChannelsKey: renderFormat.channelCount
+        ]
+        var maskedFile: AVAudioFile? = try AVAudioFile(
+            forWriting: maskedURL,
+            settings: outputSettings,
+            commonFormat: renderFormat.commonFormat,
+            interleaved: renderFormat.isInterleaved
+        )
+        guard let renderBuffer = AVAudioPCMBuffer(
+            pcmFormat: engine.manualRenderingFormat,
+            frameCapacity: renderBufferSize
+        ) else {
+            throw XauXatVoiceMaskError.renderingFailed
+        }
+
+        player.scheduleFile(sourceFile, at: nil)
+        try engine.start()
+        player.play()
+
+        var stalledRenderAttempts = 0
+        while engine.manualRenderingSampleTime < sourceFile.length {
+            let remainingFrames = sourceFile.length - engine.manualRenderingSampleTime
+            let framesToRender = min(renderBufferSize, AVAudioFrameCount(remainingFrames))
+
+            switch try engine.renderOffline(framesToRender, to: renderBuffer) {
+            case .success:
+                try maskedFile?.write(from: renderBuffer)
+                stalledRenderAttempts = 0
+            case .insufficientDataFromInputNode, .cannotDoInCurrentContext:
+                stalledRenderAttempts += 1
+                if stalledRenderAttempts > 20 {
+                    throw XauXatVoiceMaskError.renderingFailed
+                }
+            case .error:
+                throw XauXatVoiceMaskError.renderingFailed
+            @unknown default:
+                throw XauXatVoiceMaskError.renderingFailed
+            }
+        }
+
+        player.stop()
+        engine.stop()
+        maskedFile = nil
+        let maskedFileSize = try maskedURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard maskedFileSize > 0 else {
+            throw XauXatVoiceMaskError.renderingFailed
+        }
+
+        _ = try FileManager.default.replaceItemAt(
+            recordingURL,
+            withItemAt: maskedURL,
+            backupItemName: nil,
+            options: []
+        )
+        _ = excludeFromSystemBackup(recordingURL)
+    }
+}
+
 class AudioRecorder {
     var onTimer: ((TimeInterval) -> Void)?
     var onFinishRecording: (() -> Void)?

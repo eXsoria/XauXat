@@ -29,6 +29,8 @@ struct ComposeVoiceView: View {
     var recordingFileName: String
     @Binding var recordingTime: TimeInterval?
     @Binding var recordingState: VoiceMessageRecordingState
+    @Binding var maskingState: VoiceMaskingState
+    let applyVoiceMask: (() -> Void)
     let cancelVoiceMessage: ((String) -> Void)
     let cancelEnabled: Bool
 
@@ -38,21 +40,71 @@ struct ComposeVoiceView: View {
     @State private var playbackTime: TimeInterval?
     @State private var startingPlayback: Bool = false
 
-    private static let previewHeight: CGFloat = 55
+    private var previewHeight: CGFloat {
+        recordingState == .finished && maskingState != .unavailable ? 94 : 55
+    }
 
     var body: some View {
-        ZStack {
+        VStack(spacing: 0) {
             if recordingState != .finished {
                 recordingMode()
             } else {
                 playbackMode()
+                maskingMode()
             }
         }
         .padding(.vertical, 1)
-        .frame(height: ComposeVoiceView.previewHeight)
+        .frame(height: previewHeight)
         .background(theme.appColors.sentMessage)
         .frame(minHeight: 54)
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder private func maskingMode() -> some View {
+        switch maskingState {
+        case .unavailable:
+            EmptyView()
+        case .available:
+            Button(action: applyVoiceMask) {
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform.badge.shield.lefthalf.filled")
+                    Text("Mask voice")
+                        .fontWeight(.medium)
+                    Spacer()
+                    Text(XauXatVoiceMask.presetName)
+                        .foregroundColor(theme.colors.secondary)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 38)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(theme.colors.primary)
+            .accessibilityHint("Applies the local Veil voice transformation. The original recording is removed.")
+        case .processing:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Masking voice on this device…")
+                    .foregroundColor(theme.colors.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+        case .applied:
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.shield.fill")
+                Text("Voice masked")
+                    .fontWeight(.medium)
+                Spacer()
+                Text(XauXatVoiceMask.presetName)
+                    .foregroundColor(theme.colors.secondary)
+            }
+            .foregroundColor(theme.colors.primary)
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .accessibilityElement(children: .combine)
+        }
     }
 
     private func recordingMode() -> some View {
@@ -116,6 +168,8 @@ struct ComposeVoiceView: View {
         }
         .onChange(of: stopPlayback) { _ in
             audioPlayer?.stop()
+            playbackState = .noPlayback
+            playbackTime = 0
         }
         .onDisappear {
             audioPlayer?.stop()
@@ -203,6 +257,8 @@ struct ComposeVoiceView_Previews: PreviewProvider {
             recordingFileName: "voice.m4a",
             recordingTime: Binding.constant(TimeInterval(20)),
             recordingState: Binding.constant(VoiceMessageRecordingState.recording),
+            maskingState: Binding.constant(VoiceMaskingState.available),
+            applyVoiceMask: {},
             cancelVoiceMessage: { _ in },
             cancelEnabled: true,
             stopPlayback: Binding.constant(false)

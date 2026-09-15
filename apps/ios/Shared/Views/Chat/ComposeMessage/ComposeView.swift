@@ -33,6 +33,13 @@ enum VoiceMessageRecordingState {
     case finished
 }
 
+enum VoiceMaskingState {
+    case unavailable
+    case available
+    case processing
+    case applied
+}
+
 // Spec: spec/client/compose.md#LiveMessage
 struct LiveMessage {
     var chatItem: ChatItem
@@ -50,6 +57,7 @@ struct ComposeState {
     var preview: ComposePreview
     var contextItem: ComposeContextItem
     var voiceMessageRecordingState: VoiceMessageRecordingState
+    var voiceMaskingState: VoiceMaskingState
     var inProgress = false
     var progressByTimeout = false
     var useLinkPreviews = true
@@ -62,6 +70,7 @@ struct ComposeState {
         preview: ComposePreview = .noPreview,
         contextItem: ComposeContextItem = .noContextItem,
         voiceMessageRecordingState: VoiceMessageRecordingState = .noRecording,
+        voiceMaskingState: VoiceMaskingState = .unavailable,
         mentions: MentionedMembers = [:]
     ) {
         self.message = message
@@ -70,6 +79,7 @@ struct ComposeState {
         self.preview = preview
         self.contextItem = contextItem
         self.voiceMessageRecordingState = voiceMessageRecordingState
+        self.voiceMaskingState = voiceMaskingState
         self.mentions = mentions
     }
 
@@ -89,6 +99,7 @@ struct ComposeState {
         } else {
             self.voiceMessageRecordingState = .noRecording
         }
+        self.voiceMaskingState = .unavailable
         self.mentions = editingItem.mentions ?? [:]
     }
 
@@ -98,6 +109,7 @@ struct ComposeState {
         self.preview = .noPreview
         self.contextItem = .forwardingItems(chatItems: forwardingItems, fromChatInfo: fromChatInfo)
         self.voiceMessageRecordingState = .noRecording
+        self.voiceMaskingState = .unavailable
     }
 
     func copy(
@@ -107,6 +119,7 @@ struct ComposeState {
         preview: ComposePreview? = nil,
         contextItem: ComposeContextItem? = nil,
         voiceMessageRecordingState: VoiceMessageRecordingState? = nil,
+        voiceMaskingState: VoiceMaskingState? = nil,
         mentions: MentionedMembers? = nil
     ) -> ComposeState {
         ComposeState(
@@ -116,6 +129,7 @@ struct ComposeState {
             preview: preview ?? self.preview,
             contextItem: contextItem ?? self.contextItem,
             voiceMessageRecordingState: voiceMessageRecordingState ?? self.voiceMessageRecordingState,
+            voiceMaskingState: voiceMaskingState ?? self.voiceMaskingState,
             mentions: mentions ?? self.mentions
         )
     }
@@ -181,7 +195,7 @@ struct ComposeState {
     var sendEnabled: Bool {
         switch preview {
         case let .mediaPreviews(media): return !media.isEmpty
-        case .voicePreview: return voiceMessageRecordingState == .finished
+        case .voicePreview: return voiceMessageRecordingState == .finished && voiceMaskingState != .processing
         case .chatLinkPreview: return true
         case .filePreview: return true
         default: return !whitespaceOnly || forwarding || liveMessage != nil || submittingValidReport
@@ -404,6 +418,7 @@ struct ComposeView: View {
     @State private var showMediaPicker = false
     @State private var showTakePhoto = false
     @State var chosenMedia: [UploadContent] = []
+    @State private var oneTimePhotoEnabled = true
     @State private var allowOneTimePhotoSave = false
     @State private var showFileImporter = false
     @State private var showCodeLockSetup = false
@@ -425,6 +440,8 @@ struct ComposeView: View {
     @AppStorage(GROUP_DEFAULT_PRIVACY_LINK_PREVIEWS_SHOW_ALERT, store: groupDefaults) private var linkPreviewsShowAlert = true
     @State private var updatingCompose = false
     @State private var relayListExpanded = false
+    @State private var showReportSendConfirmation = false
+    @State private var pendingReportTTL: Int? = nil
     @StateObject private var channelRelaysModel = ChannelRelaysModel.shared
 
     // Spec: spec/client/compose.md#body
@@ -791,6 +808,17 @@ struct ComposeView: View {
             if case let .voicePreview(_, duration) = composeState.preview {
                 voiceMessageRecordingTime = TimeInterval(duration)
             }
+        }
+        .alert("Send report to moderators?", isPresented: $showReportSendConfirmation) {
+            Button("Send report", role: .destructive) {
+                performSendMessage(ttl: pendingReportTTL)
+                pendingReportTTL = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingReportTTL = nil
+            }
+        } message: {
+            Text("Only the selected message, the chosen reason and the text you added will be sent to the group moderators. No other messages or chat history are included.")
         }
     }
 
@@ -1489,10 +1517,12 @@ struct ComposeView: View {
                     default: false
                     }
                 },
+                oneTimeView: $oneTimePhotoEnabled,
                 allowSave: $allowOneTimePhotoSave,
                 cancelImage: {
                     composeState = composeState.copy(preview: .noPreview)
                     chosenMedia = []
+                    oneTimePhotoEnabled = true
                     allowOneTimePhotoSave = false
                 },
                 cancelEnabled: !composeState.editing && !composeState.inProgress)
@@ -1502,11 +1532,13 @@ struct ComposeView: View {
                 recordingFileName: recordingFileName,
                 recordingTime: $voiceMessageRecordingTime,
                 recordingState: $composeState.voiceMessageRecordingState,
+                maskingState: $composeState.voiceMaskingState,
+                applyVoiceMask: applyVoiceMask,
                 cancelVoiceMessage: {
                     cancelVoiceMessageRecording($0)
                     clearState()
                 },
-                cancelEnabled: !composeState.editing && !composeState.inProgress,
+                cancelEnabled: !composeState.editing && !composeState.inProgress && composeState.voiceMaskingState != .processing,
                 stopPlayback: $stopPlayback
             )
             Divider()
@@ -1545,14 +1577,10 @@ struct ComposeView: View {
     }
 
     private func reportReasonView(_ reason: ReportReason) -> some View {
-        let reportText = switch reason {
-        case .spam: NSLocalizedString("Report spam: only group moderators will see it.", comment: "report reason")
-        case .profile: NSLocalizedString("Report member profile: only group moderators will see it.", comment: "report reason")
-        case .community: NSLocalizedString("Report violation: only group moderators will see it.", comment: "report reason")
-        case .illegal: NSLocalizedString("Report content: only group moderators will see it.", comment: "report reason")
-        case .other: NSLocalizedString("Report other: only group moderators will see it.", comment: "report reason")
-        case .unknown: "" // Should never happen
-        }
+        let reportText = String.localizedStringWithFormat(
+            NSLocalizedString("Reason: %@. Only the selected message and the text you add will be sent to group moderators. No chat history is included.", comment: "report reason"),
+            reason.text
+        )
 
         return Text(reportText)
             .italic()
@@ -1606,6 +1634,15 @@ struct ComposeView: View {
 
     // Spec: spec/client/compose.md#sendMessage
     private func sendMessage(ttl: Int?, sign: Bool = false) {
+        if case .reportedItem = composeState.contextItem {
+            pendingReportTTL = ttl
+            showReportSendConfirmation = true
+            return
+        }
+        performSendMessage(ttl: ttl, sign: sign)
+    }
+
+    private func performSendMessage(ttl: Int?, sign: Bool = false) {
         logger.debug("ChatView sendMessage")
         Task {
             logger.debug("ChatView sendMessage: in Task")
@@ -1760,8 +1797,11 @@ struct ComposeView: View {
                         )
                     )
                 }
-                guard let prepared = saveXauXatOneTimeImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
-                return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
+                if oneTimePhotoEnabled {
+                    guard let prepared = saveXauXatOneTimeImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
+                    return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
+                }
+                return (saveImage(image), .image(text: text, image: previewImage))
             case let .animatedImage(image):
                 if let code = codeLockCode {
                     guard let prepared = await saveXauXatCodeLockedPhoto(
@@ -1780,8 +1820,11 @@ struct ComposeView: View {
                         )
                     )
                 }
-                guard let prepared = saveXauXatOneTimeAnimImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
-                return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
+                if oneTimePhotoEnabled {
+                    guard let prepared = saveXauXatOneTimeAnimImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
+                    return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
+                }
+                return (saveAnimImage(image), .image(text: text, image: previewImage))
             case let .video(_, url, duration):
                 return (moveTempFileFromURL(url), .video(text: text, image: previewImage, duration: duration))
             case .none:
@@ -2007,7 +2050,8 @@ struct ComposeView: View {
         } else {
             composeState = composeState.copy(
                 preview: .voicePreview(recordingFileName: fileName, duration: 0),
-                voiceMessageRecordingState: .recording
+                voiceMessageRecordingState: .recording,
+                voiceMaskingState: .available
             )
         }
     }
@@ -2020,6 +2064,32 @@ struct ComposeView: View {
         if let fileName = composeState.voiceMessageRecordingFileName,
            let fileSize = fileSize(getAppFilePath(fileName)) {
             logger.debug("finishVoiceMessageRecording recording file size = \(fileSize)")
+        }
+    }
+
+    private func applyVoiceMask() {
+        guard composeState.voiceMaskingState == .available,
+              let fileName = composeState.voiceMessageRecordingFileName else { return }
+
+        stopPlayback.toggle()
+        composeState = composeState.copy(voiceMaskingState: .processing)
+        let recordingURL = getAppFilePath(fileName)
+
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try XauXatVoiceMask.apply(to: recordingURL)
+                }.value
+                guard composeState.voiceMessageRecordingFileName == fileName else { return }
+                composeState = composeState.copy(voiceMaskingState: .applied)
+            } catch {
+                guard composeState.voiceMessageRecordingFileName == fileName else { return }
+                composeState = composeState.copy(voiceMaskingState: .available)
+                AlertManager.shared.showAlertMsg(
+                    title: "Unable to mask voice",
+                    message: "Error: \(error.localizedDescription)"
+                )
+            }
         }
     }
 
@@ -2065,6 +2135,7 @@ struct ComposeView: View {
             resetLinkPreview()
         }
         chosenMedia = []
+        oneTimePhotoEnabled = true
         allowOneTimePhotoSave = false
         codeLockCode = nil
         audioRecorder = nil

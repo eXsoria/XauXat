@@ -13,6 +13,7 @@ struct ComposeImageView: View {
     @EnvironmentObject var theme: AppTheme
     let images: [String]
     let showsOneTimePhotoControls: Bool
+    @Binding var oneTimeView: Bool
     @Binding var allowSave: Bool
     let cancelImage: (() -> Void)
     let cancelEnabled: Bool
@@ -50,14 +51,19 @@ struct ComposeImageView: View {
             .padding(.trailing, 12)
 
             if showsOneTimePhotoControls {
-                HStack(spacing: 10) {
-                    Image(systemName: "eye")
-                    Text("One-Time View")
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Toggle("Allow Save", isOn: $allowSave)
-                        .font(.subheadline)
-                        .fixedSize()
+                VStack(spacing: 8) {
+                    Toggle(isOn: $oneTimeView) {
+                        Label("One-Time View", systemImage: oneTimeView ? "eye" : "photo")
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .onChange(of: oneTimeView) { enabled in
+                        if !enabled { allowSave = false }
+                    }
+
+                    if oneTimeView {
+                        Toggle("Allow Save", isOn: $allowSave)
+                            .font(.subheadline)
+                    }
                 }
                 .foregroundColor(theme.colors.secondary)
                 .padding(.horizontal, 12)
