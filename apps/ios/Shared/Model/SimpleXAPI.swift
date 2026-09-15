@@ -680,6 +680,24 @@ func apiDeleteReceivedReports(groupId: Int64, itemIds: [Int64], mode: CIDeleteMo
     throw r.unexpected
 }
 
+private let defaultXauXatNotificationModeIntent = "xauXatNotificationModeIntent"
+private let maxXauXatNotificationRegistrationRetries = 2
+
+func xauXatNotificationModeIntent() -> NotificationsMode? {
+    guard let rawValue = UserDefaults.standard.string(forKey: defaultXauXatNotificationModeIntent) else { return nil }
+    return NotificationsMode(rawValue: rawValue)
+}
+
+func xauXatSetNotificationModeIntent(_ mode: NotificationsMode) {
+    UserDefaults.standard.set(mode.rawValue, forKey: defaultXauXatNotificationModeIntent)
+}
+
+func xauXatMigrateNotificationModeIntentIfNeeded(_ actualMode: NotificationsMode) {
+    if xauXatNotificationModeIntent() == nil {
+        xauXatSetNotificationModeIntent(actualMode)
+    }
+}
+
 func apiGetNtfToken() -> (DeviceToken?, NtfTknStatus?, NotificationsMode, String?) {
     let r: APIResult<ChatResponse2> = chatApiSendCmdSync(.apiGetNtfToken)
     switch r {
@@ -697,26 +715,98 @@ func apiRegisterToken(token: DeviceToken, notificationMode: NotificationsMode) a
     throw r.unexpected
 }
 
-func registerToken(token: DeviceToken) {
-    let m = ChatModel.shared
-    let mode = m.notificationMode
-    if mode != .off && !m.tokenRegistered {
-        m.tokenRegistered = true
-        logger.debug("registerToken \(mode.rawValue)")
-        Task {
-            do {
-                let status = try await apiRegisterToken(token: token, notificationMode: mode)
-                await MainActor.run {
-                    m.tokenStatus = status
-                    if !status.workingToken {
-                        m.reRegisterTknStatus = status
-                    }
+func reconcileXauXatNotificationRegistration(token: DeviceToken? = nil, retryAttempt: Int = 0) {
+    Task { @MainActor in
+        let m = ChatModel.shared
+        if let token { m.deviceToken = token }
+
+        guard m.chatRunning == true, !m.notificationRegistrationInFlight else { return }
+        let mode = xauXatNotificationModeIntent() ?? m.notificationMode
+        let currentToken = m.deviceToken ?? m.savedToken
+        let tokenChanged = if let currentToken, let savedToken = m.savedToken {
+            currentToken.cmdString != savedToken.cmdString
+        } else {
+            currentToken != nil && m.savedToken == nil
+        }
+
+        if mode != .off && m.tokenRegistered && !tokenChanged { return }
+        if mode != .off && currentToken == nil {
+            m.notificationMode = mode
+            m.notificationRegistrationError = nil
+            return
+        }
+        if mode == .off && m.savedToken == nil {
+            m.notificationMode = .off
+            m.tokenRegistered = false
+            m.notificationRegistrationError = nil
+            return
+        }
+
+        m.notificationRegistrationInFlight = true
+        m.notificationRegistrationError = nil
+        logger.debug("reconcileXauXatNotificationRegistration \(mode.rawValue), attempt \(retryAttempt + 1)")
+
+        do {
+            let status: NtfTknStatus?
+            if mode == .off {
+                if let savedToken = m.savedToken {
+                    try await apiDeleteToken(token: savedToken)
                 }
-            } catch let error {
-                logger.error("registerToken apiRegisterToken error: \(responseError(error))")
+                status = nil
+            } else if let currentToken {
+                status = try await apiRegisterToken(token: currentToken, notificationMode: mode)
+            } else {
+                status = nil
+            }
+
+            let (savedToken, actualStatus, _, server) = apiGetNtfToken()
+            m.savedToken = mode == .off ? nil : savedToken ?? currentToken
+            m.tokenStatus = mode == .off ? .new : actualStatus ?? status
+            m.notificationMode = mode
+            m.notificationServer = server
+            m.tokenRegistered = mode != .off && (actualStatus ?? status)?.workingToken == true
+            m.reRegisterTknStatus = m.tokenRegistered ? nil : actualStatus ?? status
+            m.notificationRegistrationInFlight = false
+
+            let latestTokenChanged = if let latestToken = m.deviceToken, let savedToken = m.savedToken {
+                latestToken.cmdString != savedToken.cmdString
+            } else {
+                m.deviceToken != nil && m.savedToken == nil
+            }
+            if xauXatNotificationModeIntent() != mode || latestTokenChanged {
+                reconcileXauXatNotificationRegistration(token: m.deviceToken)
+            } else if mode != .off,
+                      m.tokenRegistered == false,
+                      retryAttempt < maxXauXatNotificationRegistrationRetries {
+                scheduleXauXatNotificationRegistrationRetry(retryAttempt: retryAttempt + 1)
+            }
+        } catch {
+            let message = responseError(error)
+            logger.error("reconcileXauXatNotificationRegistration error: \(message)")
+            m.tokenRegistered = false
+            m.notificationRegistrationInFlight = false
+            m.notificationRegistrationError = message
+
+            if xauXatNotificationModeIntent() == mode,
+               retryAttempt < maxXauXatNotificationRegistrationRetries {
+                scheduleXauXatNotificationRegistrationRetry(retryAttempt: retryAttempt + 1)
             }
         }
     }
+}
+
+@MainActor
+private func scheduleXauXatNotificationRegistrationRetry(retryAttempt: Int) {
+    Task {
+        let delay: UInt64 = retryAttempt == 1 ? 2_000_000_000 : 8_000_000_000
+        try? await Task.sleep(nanoseconds: delay)
+        guard !Task.isCancelled else { return }
+        reconcileXauXatNotificationRegistration(retryAttempt: retryAttempt)
+    }
+}
+
+func registerToken(token: DeviceToken) {
+    reconcileXauXatNotificationRegistration(token: token)
 }
 
 func tokenStatusInfo(_ status: NtfTknStatus, register: Bool) -> String {
@@ -2356,12 +2446,8 @@ func startChat(refreshInvitations: Bool = true, onboarding: Bool = false) throws
             Task { try await refreshCallInvitations() }
         }
         (m.savedToken, m.tokenStatus, m.notificationMode, m.notificationServer) = apiGetNtfToken()
+        xauXatMigrateNotificationModeIntentIfNeeded(m.notificationMode)
         _ = try apiStartChat()
-        // deviceToken is set when AppDelegate.application(didRegisterForRemoteNotificationsWithDeviceToken:) is called,
-        // when it is called before startChat
-        if let token = m.deviceToken {
-            registerToken(token: token)
-        }
         if !onboarding {
             withAnimation {
                 let savedOnboardingStage = onboardingStageDefault.get()
@@ -2376,6 +2462,7 @@ func startChat(refreshInvitations: Bool = true, onboarding: Bool = false) throws
     }
     ChatReceiver.shared.start()
     m.chatRunning = true
+    reconcileXauXatNotificationRegistration(token: m.deviceToken)
     chatLastStartGroupDefault.set(Date.now)
 }
 
