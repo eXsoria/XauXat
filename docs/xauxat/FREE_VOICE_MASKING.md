@@ -17,6 +17,10 @@ After finishing a recording, the composer offers **Mask voice**. While the file
 is being transformed, sending and cancellation are disabled. When complete, the
 composer shows **Voice masked · Veil** and the user can preview or send it.
 
+The preset chooser also shows the additional XauXat Plus transformations. Free
+users can see that they exist, but Veil remains the only selectable preset until
+Plus is active.
+
 Voice masking is deliberately unavailable while editing an already-sent voice
 message. To undo the transformation before sending, discard the draft and record
 a new message.

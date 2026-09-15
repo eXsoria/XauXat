@@ -34,11 +34,11 @@ enum VoiceMessageRecordingState {
     case finished
 }
 
-enum VoiceMaskingState {
+enum VoiceMaskingState: Equatable {
     case unavailable
     case available
     case processing
-    case applied
+    case applied(XauXatVoiceMaskPreset)
 }
 
 // Spec: spec/client/compose.md#LiveMessage
@@ -2326,7 +2326,7 @@ struct ComposeView: View {
         }
     }
 
-    private func applyVoiceMask() {
+    private func applyVoiceMask(_ preset: XauXatVoiceMaskPreset, rememberSelection: Bool) {
         guard composeState.voiceMaskingState == .available,
               let fileName = composeState.voiceMessageRecordingFileName else { return }
 
@@ -2337,10 +2337,13 @@ struct ComposeView: View {
         Task {
             do {
                 try await Task.detached(priority: .userInitiated) {
-                    try XauXatVoiceMask.apply(to: recordingURL)
+                    try XauXatVoiceMask.apply(to: recordingURL, preset: preset)
                 }.value
                 guard composeState.voiceMessageRecordingFileName == fileName else { return }
-                composeState = composeState.copy(voiceMaskingState: .applied)
+                if rememberSelection {
+                    UserDefaults.standard.set(preset.rawValue, forKey: XauXatVoiceMaskPreset.defaultPreferenceKey)
+                }
+                composeState = composeState.copy(voiceMaskingState: .applied(preset))
             } catch {
                 guard composeState.voiceMessageRecordingFileName == fileName else { return }
                 composeState = composeState.copy(voiceMaskingState: .available)
