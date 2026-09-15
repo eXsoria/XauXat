@@ -461,19 +461,9 @@ struct XauXatWelcomeView: View {
     }
 
     private func applyDefaultNotificationMode() {
-        guard let token = chatModel.deviceToken else { return }
-        Task {
-            do {
-                let status = try await apiRegisterToken(token: token, notificationMode: .instant)
-                await MainActor.run {
-                    chatModel.savedToken = token
-                    chatModel.tokenStatus = status
-                    chatModel.notificationMode = .instant
-                }
-            } catch {
-                logger.error("XauXat onboarding could not apply the default notification mode: \(responseError(error))")
-            }
-        }
+        xauXatSetNotificationModeIntent(.instant)
+        chatModel.notificationMode = .instant
+        reconcileXauXatNotificationRegistration(token: chatModel.deviceToken)
     }
 }
 
@@ -1016,7 +1006,6 @@ private struct XauXatNotificationsView: View {
     @EnvironmentObject private var chatModel: ChatModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var mode = ChatModel.shared.notificationMode
-    @State private var changing = false
     @State private var errorMessage: String?
 
     private var palette: XauXatPalette { XauXatPalette(colorScheme) }
@@ -1036,7 +1025,7 @@ private struct XauXatNotificationsView: View {
                                 selected: mode == candidate
                             )
                         }
-                        .disabled(changing)
+                        .disabled(chatModel.notificationRegistrationInFlight)
                     }
                 }
 
@@ -1046,6 +1035,13 @@ private struct XauXatNotificationsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 5)
                     .padding(.top, 18)
+
+                Text(registrationStatus)
+                    .font(.custom("Courier", size: 11))
+                    .foregroundStyle(errorMessage == nil ? palette.muted : palette.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 5)
+                    .padding(.top, 10)
             }
             .padding(22)
         }
@@ -1054,14 +1050,22 @@ private struct XauXatNotificationsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .buttonStyle(.plain)
         .overlay {
-            if changing {
+            if chatModel.notificationRegistrationInFlight {
                 ProgressView()
                     .tint(palette.ivory)
             }
         }
         .onAppear {
             (chatModel.savedToken, chatModel.tokenStatus, chatModel.notificationMode, chatModel.notificationServer) = apiGetNtfToken()
-            mode = chatModel.notificationMode
+            xauXatMigrateNotificationModeIntentIfNeeded(chatModel.notificationMode)
+            mode = xauXatNotificationModeIntent() ?? chatModel.notificationMode
+            reconcileXauXatNotificationRegistration(token: chatModel.deviceToken)
+        }
+        .onChange(of: chatModel.notificationRegistrationInFlight) { inFlight in
+            if !inFlight {
+                mode = xauXatNotificationModeIntent() ?? chatModel.notificationMode
+                errorMessage = chatModel.notificationRegistrationError
+            }
         }
         .alert("Notification error", isPresented: Binding(
             get: { errorMessage != nil },
@@ -1074,38 +1078,22 @@ private struct XauXatNotificationsView: View {
     }
 
     private func update(_ newMode: NotificationsMode) {
-        guard newMode != mode, let token = chatModel.deviceToken else {
-            if chatModel.deviceToken == nil { errorMessage = "No notification token is available on this device yet." }
-            return
-        }
-        changing = true
-        Task {
-            do {
-                if newMode == .off {
-                    try await apiDeleteToken(token: token)
-                    await MainActor.run {
-                        chatModel.tokenStatus = .new
-                        chatModel.notificationServer = nil
-                    }
-                } else {
-                    _ = try await apiRegisterToken(token: token, notificationMode: newMode)
-                }
-                let (_, tokenStatus, actualMode, server) = apiGetNtfToken()
-                await MainActor.run {
-                    chatModel.tokenStatus = tokenStatus
-                    chatModel.notificationMode = actualMode
-                    chatModel.notificationServer = server
-                    mode = actualMode
-                    changing = false
-                }
-            } catch {
-                await MainActor.run {
-                    errorMessage = responseError(error)
-                    mode = chatModel.notificationMode
-                    changing = false
-                }
-            }
-        }
+        guard newMode != mode else { return }
+        xauXatSetNotificationModeIntent(newMode)
+        mode = newMode
+        chatModel.notificationMode = newMode
+        chatModel.notificationRegistrationError = nil
+        errorMessage = nil
+        reconcileXauXatNotificationRegistration(token: chatModel.deviceToken)
+    }
+
+    private var registrationStatus: String {
+        if let errorMessage { return "Registration failed: \(errorMessage)" }
+        if chatModel.notificationRegistrationInFlight { return "Updating notification registration…" }
+        if mode == .off { return "Notifications are off." }
+        if chatModel.deviceToken == nil { return "Waiting for an APNs token from iOS. This choice will be applied automatically." }
+        if let status = chatModel.tokenStatus { return "APNs token status: \(status.text)." }
+        return "Waiting for notification registration."
     }
 }
 
