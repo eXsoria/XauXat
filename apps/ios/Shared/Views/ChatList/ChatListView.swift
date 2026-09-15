@@ -713,7 +713,7 @@ struct ChatListSearchBar: View {
             } else {
                 let s = t.trimmingCharacters(in: .whitespaces)
                 switch strConnectTarget(s) {
-                case let .link(text, _, linkText):
+                case let .link(_, _, linkText):
                     nameSearchTask?.cancel()
                     nameSearchTask = nil
                     searchFocussed = false
@@ -722,7 +722,7 @@ struct ChatListSearchBar: View {
                     searchShowingSimplexLink = true
                     searchChatFilteredBySimplexLink = []
                     connectNameCandidate = nil
-                    connect(text)
+                    connect(s)
                 default:
                     // not a link: a recognized SimpleX name shows the connect-by-name row (in place of the
                     // list tags) and, debounced, resolves locally per keystroke to narrow the list to the
