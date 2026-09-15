@@ -47,9 +47,28 @@ struct CIVideoView: View {
         self._showFullScreenPlayer = showFullscreenPlayer
     }
 
+    private var codeLockedVideo: Bool {
+        xauXatIsCodeLockedFile(chatItem.content.text, kind: .video)
+    }
+
+    @ViewBuilder
     var body: some View {
+        if codeLockedVideo {
+            XauXatCodeLockedVideoView(
+                chatItem: chatItem,
+                senderProfile: senderProfile,
+                preview: preview,
+                maxWidth: maxWidth,
+                smallView: smallView
+            )
+        } else {
+            standardVideoBody
+        }
+    }
+
+    private var standardVideoBody: some View {
         let file = chatItem.file
-        ZStack(alignment: smallView ? .topLeading : .center) {
+        return ZStack(alignment: smallView ? .topLeading : .center) {
             ZStack(alignment: .topLeading) {
                 if let file, let preview {
                     if let urlDecrypted {
@@ -536,5 +555,291 @@ struct CIVideoView: View {
             player?.removeTimeObserver(timeObserver)
         }
         timeObserver = nil
+    }
+}
+
+private enum XauXatCodeLockedVideoLoadState {
+    case idle
+    case loading
+    case loaded(XauXatCodeLockedEnvelope)
+    case invalid
+}
+
+private struct XauXatCodeLockedVideoView: View {
+    @EnvironmentObject private var chatModel: ChatModel
+    let chatItem: ChatItem
+    let senderProfile: LocalProfile?
+    let preview: UIImage?
+    let maxWidth: CGFloat
+    let smallView: Bool
+    @State private var loadState: XauXatCodeLockedVideoLoadState = .idle
+
+    private var file: CIFile? { chatItem.file }
+    private var loadedSource: CryptoFile? { getLoadedFileSource(file) }
+    private var sourceKey: String? { loadedSource?.filePath }
+
+    var body: some View {
+        Group {
+            if smallView {
+                protectedPoster(label: nil, icon: "lock.fill")
+                    .allowsHitTesting(false)
+            } else if file?.loaded == true {
+                switch loadState {
+                case let .loaded(envelope):
+                    XauXatUnlockedVideoView(
+                        envelope: envelope,
+                        preview: preview,
+                        maxWidth: maxWidth
+                    )
+                case .invalid:
+                    protectedPoster(label: "Protected video unavailable", icon: "video.slash.fill")
+                case .idle, .loading:
+                    protectedPoster(label: "Loading protected video", icon: "lock.fill")
+                        .overlay(alignment: .topTrailing) {
+                            ProgressView()
+                                .tint(.white)
+                                .padding(12)
+                        }
+                }
+            } else {
+                Button(action: download) {
+                    protectedPoster(
+                        label: canDownload ? "Download protected video" : "Protected video",
+                        icon: canDownload ? "arrow.down" : "lock.fill"
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canDownload)
+            }
+        }
+        .privacySensitive()
+        .task(id: sourceKey) {
+            await loadEnvelope()
+        }
+    }
+
+    private var canDownload: Bool {
+        guard let file else { return false }
+        return switch file.fileStatus {
+        case .rcvInvitation, .rcvAborted: true
+        default: false
+        }
+    }
+
+    private func download() {
+        guard canDownload, let file, let user = chatModel.currentUser else { return }
+        guard fileSizeValid(file, senderProfile) else {
+            let maximum = ByteCountFormatter.string(
+                fromByteCount: getMaxFileSize(file.fileProtocol, senderProfile),
+                countStyle: .binary
+            )
+            AlertManager.shared.showAlertMsg(
+                title: "Large file!",
+                message: "Your contact sent a file that is larger than currently supported maximum size (\(maximum))."
+            )
+            return
+        }
+        Task { await receiveFile(user: user, fileId: file.fileId) }
+    }
+
+    @MainActor
+    private func loadEnvelope() async {
+        guard !smallView, let source = loadedSource else {
+            loadState = .idle
+            return
+        }
+        loadState = .loading
+        let envelope = await Task.detached(priority: .userInitiated) {
+            guard let data = try? getFileData(getAppFilePath(source.filePath), source.cryptoArgs),
+                  let envelope = try? XauXatCodeLockedEnvelope.decode(data),
+                  envelope.kind == .video else { return nil as XauXatCodeLockedEnvelope? }
+            return envelope
+        }.value
+        guard !Task.isCancelled else { return }
+        loadState = envelope.map(XauXatCodeLockedVideoLoadState.loaded) ?? .invalid
+    }
+
+    private func protectedPoster(label: LocalizedStringKey?, icon: String) -> some View {
+        let height = smallView ? maxWidth : maxWidth * 9 / 16
+        return ZStack {
+            if let preview {
+                Image(uiImage: preview)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.black
+            }
+            VStack(spacing: 9) {
+                Image(systemName: icon)
+                    .font(.system(size: smallView ? 18 : 28, weight: .semibold))
+                if let label, !smallView {
+                    Text(label)
+                        .font(.body.weight(.medium))
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .foregroundColor(.white)
+            .padding(16)
+        }
+        .frame(width: maxWidth, height: height)
+        .clipped()
+        .contentShape(Rectangle())
+    }
+}
+
+private struct XauXatUnlockedVideoView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var session: XauXatCodeLockedSession
+    let preview: UIImage?
+    let maxWidth: CGFloat
+    @State private var showUnlock = false
+    @State private var player: AVPlayer?
+    @State private var clearURL: URL?
+    @State private var revealOperation = UUID()
+
+    init(envelope: XauXatCodeLockedEnvelope, preview: UIImage?, maxWidth: CGFloat) {
+        _session = StateObject(wrappedValue: XauXatCodeLockedSession(envelope: envelope))
+        self.preview = preview
+        self.maxWidth = maxWidth
+    }
+
+    var body: some View {
+        Group {
+            switch session.state {
+            case let .unlocked(payload):
+                if payload.kind == .video {
+                    XauXatPressToPreview(
+                        onReveal: { reveal(payload) },
+                        onHide: removeClearVideo,
+                        protectedContent: { revealedVideo(payload) },
+                        placeholder: {
+                            protectedPoster(label: "Press and hold to view", icon: "hand.tap.fill")
+                        }
+                    )
+                } else {
+                    protectedPoster(label: "Protected video unavailable", icon: "video.slash.fill")
+                }
+            case .unlocking:
+                protectedPoster(label: "Checking code", icon: "lock.fill")
+                    .overlay(alignment: .topTrailing) {
+                        ProgressView()
+                            .tint(.white)
+                            .padding(12)
+                    }
+            case .locked, .rejected:
+                Button { showUnlock = true } label: {
+                    protectedPoster(label: "Tap to unlock video", icon: "lock.fill")
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens code entry")
+            }
+        }
+        .privacySensitive()
+        .sheet(isPresented: $showUnlock) {
+            XauXatCodeUnlockView(session: session)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active {
+                removeClearVideo()
+                session.lock()
+            }
+        }
+        .onDisappear {
+            removeClearVideo()
+            session.lock()
+        }
+    }
+
+    @ViewBuilder
+    private func revealedVideo(_ payload: XauXatCodeLockedPayload) -> some View {
+        if let player, let clearURL {
+            VStack(alignment: .leading, spacing: 8) {
+                VideoPlayerView(player: player, url: clearURL, showControls: false)
+                    .frame(width: maxWidth, height: maxWidth * 9 / 16)
+                    .clipped()
+                if let caption = payload.caption, !caption.isEmpty {
+                    Text(caption)
+                        .font(.body)
+                        .padding(.horizontal, 12)
+                }
+            }
+        } else {
+            protectedPoster(label: "Preparing protected video", icon: "lock.open.fill")
+                .overlay(alignment: .topTrailing) {
+                    ProgressView()
+                        .tint(.white)
+                        .padding(12)
+                }
+        }
+    }
+
+    private func protectedPoster(label: LocalizedStringKey, icon: String) -> some View {
+        ZStack {
+            if let preview {
+                Image(uiImage: preview)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.black
+            }
+            VStack(spacing: 9) {
+                Image(systemName: icon)
+                    .font(.system(size: 28, weight: .semibold))
+                Text(label)
+                    .font(.body.weight(.medium))
+                    .multilineTextAlignment(.center)
+            }
+            .foregroundColor(.white)
+            .padding(16)
+        }
+        .frame(width: maxWidth, height: maxWidth * 9 / 16)
+        .clipped()
+        .contentShape(Rectangle())
+    }
+
+    private func reveal(_ payload: XauXatCodeLockedPayload) {
+        guard player == nil, clearURL == nil else {
+            player?.play()
+            return
+        }
+        let operation = UUID()
+        revealOperation = operation
+        Task {
+            let url: URL? = await Task.detached(priority: .userInitiated) { () -> URL? in
+                let directory = getTempFilesDirectory()
+                do {
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let url = xauXatProtectedVideoTempURL()
+                    try payload.body.write(to: url, options: [.atomic, .completeFileProtection])
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                    return url
+                } catch {
+                    logger.error("Unable to prepare protected XauXat video: \(error.localizedDescription)")
+                    return nil
+                }
+            }.value
+            guard let url else { return }
+            guard revealOperation == operation else {
+                try? FileManager.default.removeItem(at: url)
+                return
+            }
+            ChatModel.shared.filesToDelete.insert(url)
+            clearURL = url
+            let videoPlayer = AVPlayer(url: url)
+            player = videoPlayer
+            videoPlayer.play()
+        }
+    }
+
+    private func removeClearVideo() {
+        revealOperation = UUID()
+        player?.pause()
+        player?.seek(to: .zero)
+        player = nil
+        if let clearURL {
+            ChatModel.shared.filesToDelete.remove(clearURL)
+            try? FileManager.default.removeItem(at: clearURL)
+        }
+        clearURL = nil
     }
 }

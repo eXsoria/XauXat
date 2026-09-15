@@ -8,6 +8,7 @@
 
 import SwiftUI
 import OSLog
+import StoreKit
 import SimpleXChat
 
 let logger = Logger()
@@ -17,6 +18,7 @@ let logger = Logger()
 struct SimpleXApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var chatModel = ChatModel.shared
+    @StateObject private var plusEntitlements = XauXatPlusEntitlements.shared
     @ObservedObject var alertManager = AlertManager.shared
 
     @Environment(\.scenePhase) var scenePhase
@@ -30,6 +32,9 @@ struct SimpleXApp: App {
         UserDefaults.standard.register(defaults: appDefaults)
         setGroupDefaults()
         registerGroupDefaults()
+        // The real store is the neutral launch default. When a decoy PIN is
+        // configured, neither store is opened until the user enters a PIN.
+        setXauXatStorageScope(.primary)
         // A SOCKS port persisted by a previous process is never trusted.
         // Every launch remains offline until this process boots embedded Tor.
         setXauXatTorSocksPort(nil)
@@ -44,6 +49,7 @@ struct SimpleXApp: App {
             // so that it's computed by the time view renders, and not on event after rendering
             ContentView(contentAccessAuthenticationExtended: !authenticationExpired())
                 .environmentObject(chatModel)
+                .environmentObject(plusEntitlements)
                 .environmentObject(AppTheme.shared)
                 .onOpenURL { url in
                     logger.debug("ContentView.onOpenURL: \(url)")
@@ -54,6 +60,7 @@ struct SimpleXApp: App {
                     }
                 }
                 .onAppear() {
+                    plusEntitlements.start()
                     // Present screen for continue migration if it wasn't finished yet
                     if chatModel.migrationState != nil {
                         // It's important, otherwise, user may be locked in undefined state
@@ -61,8 +68,9 @@ struct SimpleXApp: App {
                         chatModel.onboardingStage = onboardingStageDefault.get()
                     }
                     startEmbeddedTor(showError: true) {
+                        let hasAlternatePIN = kcSelfDestructPassword.get() != nil || kcDecoyPassword.get() != nil
                         if chatModel.migrationState == nil &&
-                           (kcAppPassword.get() == nil || kcSelfDestructPassword.get() == nil) {
+                           (kcAppPassword.get() == nil || !hasAlternatePIN) {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                                 initChatAndMigrate()
                             }
@@ -123,6 +131,11 @@ struct SimpleXApp: App {
     }
 
     private func resumeChatAfterTor() {
+        // With a decoy PIN configured, the unlock PIN must select the storage
+        // scope before the native core is allowed to open either database.
+        if kcDecoyPassword.get() != nil && !chatModel.contentViewAccessAuthenticated {
+            return
+        }
         let appState = AppChatState.shared.value
         guard appState != .stopped else { return }
 
@@ -211,5 +224,297 @@ struct SimpleXApp: App {
         } catch let error {
             logger.error("apiGetCallInvitations: cannot update call invitations \(responseError(error))")
         }
+    }
+}
+
+enum XauXatPlusFeature: String, CaseIterable {
+    case decoyPIN
+    case duressPIN
+    case conversationLock
+    case hiddenChats
+    case protectedProfiles
+    case pressToPreview
+    case codeLockedContent
+    case advancedVoiceMasking
+    case realTimeVoiceMasking
+    case advancedContactInvites
+    case multipleIdentities
+    case largeGroups
+    case secureGroupAccess
+}
+
+@MainActor
+protocol XauXatPlusAuthorizing: AnyObject {
+    func isAuthorized(for feature: XauXatPlusFeature) -> Bool
+}
+
+enum XauXatPlusStatus: Equatable {
+    case checking
+    case notPurchased
+    case active(expiresAt: Date?, willAutoRenew: Bool)
+    case expired(expiresAt: Date?)
+    case revoked(at: Date?)
+    case unverified
+    case unavailable
+
+    var hasAccess: Bool {
+        if case .active = self { true } else { false }
+    }
+}
+
+enum XauXatPlusConfiguration {
+    static let fallbackProductID = "pt.exsoria.xauxat.plus.monthly"
+
+    static var productID: String {
+        if let override = ProcessInfo.processInfo.environment["XAUXAT_PLUS_PRODUCT_ID"],
+           !override.isEmpty {
+            return override
+        }
+        if let configured = Bundle.main.object(forInfoDictionaryKey: "XauXatPlusProductID") as? String,
+           !configured.isEmpty,
+           !configured.contains("$(") {
+            return configured
+        }
+        return fallbackProductID
+    }
+}
+
+@MainActor
+final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
+    static let shared = XauXatPlusEntitlements()
+
+    @Published private(set) var status: XauXatPlusStatus = .checking
+    @Published private(set) var product: Product?
+    @Published private(set) var isPurchasing = false
+    @Published private(set) var isRestoring = false
+    @Published var presentedError: String?
+
+    private var updatesTask: Task<Void, Never>?
+    private var enforceFreeDefaultsTask: Task<Void, Never>?
+    private var started = false
+
+    var productID: String { XauXatPlusConfiguration.productID }
+
+    var displayPrice: String {
+        product.map { "\($0.displayPrice) / month" } ?? "€2.99 / month"
+    }
+
+    var hasAccess: Bool {
+#if DEBUG
+        true
+#else
+        status.hasAccess
+#endif
+    }
+
+    var hasLocalDebugAccess: Bool {
+#if DEBUG
+        true
+#else
+        false
+#endif
+    }
+
+    func isAuthorized(for feature: XauXatPlusFeature) -> Bool {
+        hasAccess
+    }
+
+    func start() {
+        guard !started else { return }
+        started = true
+        updatesTask = Task { [weak self] in
+            guard let self else { return }
+            for await verification in Transaction.updates {
+                guard !Task.isCancelled else { return }
+                if case let .verified(transaction) = verification,
+                   transaction.productID == self.productID {
+                    await self.refresh()
+                    await transaction.finish()
+                } else if case let .unverified(transaction, _) = verification,
+                          transaction.productID == self.productID {
+                    self.updateStatus(.unverified)
+                }
+            }
+        }
+        Task { await refresh() }
+    }
+
+    func refresh() async {
+        status = .checking
+        do {
+            let candidate = try await Product.products(for: [productID]).first
+            if candidate?.type == .autoRenewable,
+               let period = candidate?.subscription?.subscriptionPeriod,
+               period.unit == .month,
+               period.value == 1 {
+                product = candidate
+            } else {
+                product = nil
+            }
+        } catch {
+            product = nil
+        }
+
+        var foundUnverified = false
+        for await verification in Transaction.currentEntitlements {
+            switch verification {
+            case let .verified(transaction) where transaction.productID == productID:
+                // StoreKit includes subscriptions in billing grace period in
+                // currentEntitlements, so presence here is the source of truth
+                // even when the original expiration date has passed.
+                if transaction.revocationDate == nil {
+                    let willAutoRenew = await renewalWillAutoRenew(for: transaction.id) ?? true
+                    updateStatus(.active(expiresAt: transaction.expirationDate, willAutoRenew: willAutoRenew))
+                    return
+                }
+            case let .unverified(transaction, _) where transaction.productID == productID:
+                foundUnverified = true
+            default:
+                break
+            }
+        }
+
+        if foundUnverified {
+            updateStatus(.unverified)
+            return
+        }
+
+        if let latest = await Transaction.latest(for: productID) {
+            switch latest {
+            case let .verified(transaction):
+                if let revokedAt = transaction.revocationDate {
+                    updateStatus(.revoked(at: revokedAt))
+                } else if let expiresAt = transaction.expirationDate, expiresAt <= Date() {
+                    updateStatus(.expired(expiresAt: expiresAt))
+                } else {
+                    updateStatus(.notPurchased)
+                }
+            case .unverified:
+                updateStatus(.unverified)
+            }
+        } else {
+            updateStatus(product == nil ? .unavailable : .notPurchased)
+        }
+    }
+
+    func purchase() async {
+        guard let product else {
+            presentedError = NSLocalizedString("XauXat Plus is not available from the App Store in this build.", comment: "StoreKit product unavailable")
+            return
+        }
+        guard AppStore.canMakePayments else {
+            presentedError = NSLocalizedString("Purchases are disabled on this device.", comment: "StoreKit payments unavailable")
+            return
+        }
+
+        isPurchasing = true
+        defer { isPurchasing = false }
+        do {
+            switch try await product.purchase() {
+            case let .success(.verified(transaction)):
+                guard transaction.productID == productID else {
+                    presentedError = NSLocalizedString("The App Store returned an unexpected product.", comment: "StoreKit wrong product")
+                    return
+                }
+                await refresh()
+                await transaction.finish()
+            case .success(.unverified):
+                updateStatus(.unverified)
+                presentedError = NSLocalizedString("The purchase could not be verified by the App Store.", comment: "StoreKit unverified transaction")
+            case .pending:
+                presentedError = NSLocalizedString("The purchase is pending approval. Access will unlock automatically when the App Store confirms it.", comment: "StoreKit pending purchase")
+            case .userCancelled:
+                break
+            @unknown default:
+                await refresh()
+            }
+        } catch {
+            presentedError = error.localizedDescription
+            await refresh()
+        }
+    }
+
+    func restorePurchases() async {
+        isRestoring = true
+        defer { isRestoring = false }
+        do {
+            try await AppStore.sync()
+            await refresh()
+        } catch {
+            presentedError = error.localizedDescription
+        }
+    }
+
+    private func renewalWillAutoRenew(for transactionID: UInt64) async -> Bool? {
+        guard let subscription = product?.subscription,
+              let statuses = try? await subscription.status else { return nil }
+        for subscriptionStatus in statuses {
+            guard case let .verified(transaction) = subscriptionStatus.transaction,
+                  transaction.id == transactionID,
+                  case let .verified(renewalInfo) = subscriptionStatus.renewalInfo else { continue }
+            return renewalInfo.willAutoRenew
+        }
+        return nil
+    }
+
+    private func updateStatus(_ nextStatus: XauXatPlusStatus) {
+        status = nextStatus
+#if !DEBUG
+        if nextStatus.hasAccess {
+            enforceFreeDefaultsTask?.cancel()
+            enforceFreeDefaultsTask = nil
+        } else {
+            enforceFreeDefaultsTask?.cancel()
+            enforceFreeDefaultsTask = Task { [weak self] in
+                guard let self else { return }
+                await self.enforceFreeDefaults()
+            }
+        }
+#endif
+    }
+
+    private func enforceFreeDefaults() async {
+        guard !status.hasAccess else { return }
+
+        _ = xauXatRemoveConversationLocks(.primary)
+        _ = xauXatRemoveConversationLocks(.decoy)
+        _ = xauXatRemoveHiddenChats(.primary)
+        _ = xauXatRemoveHiddenChats(.decoy)
+        _ = kcSelfDestructPassword.remove()
+        UserDefaults.standard.removeObject(forKey: DEFAULT_LA_SELF_DESTRUCT)
+        UserDefaults.standard.removeObject(forKey: DEFAULT_LA_SELF_DESTRUCT_DISPLAY_NAME)
+        UserDefaults.standard.removeObject(forKey: DEFAULT_LA_DURESS_SCOPE)
+
+        if xauXatStorageScope() == .primary {
+            deleteDecoyStorage()
+        }
+        _ = kcDecoyPassword.remove()
+        UserDefaults.standard.removeObject(forKey: DEFAULT_LA_DECOY_DISPLAY_NAME)
+
+        let chatModel = ChatModel.shared
+        chatModel.objectWillChange.send()
+        await NtfManager.shared.removeAllNotifications()
+
+        for _ in 0..<120 {
+            if chatModel.chatRunning == true { break }
+            guard !Task.isCancelled, !status.hasAccess else { return }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        guard chatModel.chatRunning == true, !Task.isCancelled, !status.hasAccess else { return }
+
+        for userInfo in chatModel.users where userInfo.user.hidden {
+            guard let password = xauXatProtectedProfilePassword(userInfo.user.userId) else { continue }
+            do {
+                let user = try await apiUnhideUser(userInfo.user.userId, viewPwd: password)
+                chatModel.updateUser(user)
+                _ = xauXatSetProtectedProfilePassword(user.userId, password: nil)
+            } catch {
+                logger.error("Unable to restore Free profile visibility: \(error.localizedDescription)")
+            }
+        }
+        _ = xauXatRemoveProtectedProfiles(.primary)
+        _ = xauXatRemoveProtectedProfiles(.decoy)
+        _ = xauXatRemoveProtectedProfilePasswords(.decoy)
+        NtfManager.shared.setNtfBadgeCount(chatModel.totalUnreadCountForAllUsers())
     }
 }

@@ -24,6 +24,8 @@ let DEFAULT_LA_MODE = "localAuthenticationMode"
 let DEFAULT_LA_LOCK_DELAY = "localAuthenticationLockDelay"
 let DEFAULT_LA_SELF_DESTRUCT = "localAuthenticationSelfDestruct"
 let DEFAULT_LA_SELF_DESTRUCT_DISPLAY_NAME = "localAuthenticationSelfDestructDisplayName"
+let DEFAULT_LA_DECOY_DISPLAY_NAME = "localAuthenticationLocalProfileDisplayName"
+let DEFAULT_LA_DURESS_SCOPE = "localAuthenticationDuressScope"
 let DEFAULT_NOTIFICATION_ALERT_SHOWN = "notificationAlertShown"
 let DEFAULT_WEBRTC_POLICY_RELAY = "webrtcPolicyRelay"
 let DEFAULT_WEBRTC_ICE_SERVERS = "webrtcICEServers"
@@ -284,6 +286,7 @@ struct SettingsView: View {
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var sceneDelegate: SceneDelegate
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     @State private var showProgress: Bool = false
 
     var body: some View {
@@ -317,6 +320,21 @@ struct SettingsView: View {
                     settingsRow("lock", color: theme.colors.secondary) { Text("Your privacy") }
                 }
                 .disabled(chatModel.chatRunning != true)
+
+                NavigationLink {
+                    XauXatPlusView()
+                        .navigationTitle("XauXat Plus")
+                        .modifier(ThemedBackground(grouped: true))
+                } label: {
+                    settingsRow("plus.circle", color: theme.colors.secondary) {
+                        HStack {
+                            Text("XauXat Plus")
+                            Spacer()
+                            Text(plusStatusLabel)
+                                .foregroundColor(theme.colors.secondary)
+                        }
+                    }
+                }
 
                 NavigationLink {
                     helpAndSupportView
@@ -502,6 +520,17 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity )
     }
 
+    private var plusStatusLabel: LocalizedStringKey {
+        switch plusEntitlements.status {
+        case .active: "Active"
+        case .checking: "Checking…"
+        case .expired: "Expired"
+        case .revoked: "Revoked"
+        case .unverified: "Unverified"
+        case .notPurchased, .unavailable: "Free"
+        }
+    }
+
     private enum NotificationAlert {
         case enable
         case error(LocalizedStringKey, String)
@@ -540,6 +569,141 @@ struct SettingsView: View {
         return Image(systemName: icon)
             .padding(.trailing, 9)
             .foregroundColor(color)
+    }
+}
+
+struct XauXatPlusLockedLabel: View {
+    let title: LocalizedStringKey
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: systemImage)
+            Spacer(minLength: 12)
+            Text("Plus")
+                .foregroundStyle(.secondary)
+            Image(systemName: "lock.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct XauXatPlusView: View {
+    @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
+
+    var body: some View {
+        List {
+            Section {
+                HStack {
+                    Text("Monthly plan")
+                    Spacer()
+                    Text(plusEntitlements.displayPrice)
+                        .foregroundColor(theme.colors.secondary)
+                }
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Status")
+                    Spacer()
+                    statusText
+                        .foregroundColor(theme.colors.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+            } footer: {
+                if plusEntitlements.hasLocalDebugAccess {
+                    Text("This local Debug build includes XauXat Plus automatically.")
+                } else {
+                    Text("The App Store provides the localized price and cryptographically verifies access. XauXat does not unlock Plus from a local setting.")
+                }
+            }
+
+            Section {
+                if plusEntitlements.hasLocalDebugAccess {
+                    Button {
+                        Task { await plusEntitlements.purchase() }
+                    } label: {
+                        HStack {
+                            Text("Test App Store purchase")
+                            Spacer()
+                            if plusEntitlements.isPurchasing { ProgressView() }
+                        }
+                    }
+                    .disabled(plusEntitlements.product == nil || plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
+                } else if !plusEntitlements.hasAccess {
+                    Button {
+                        Task { await plusEntitlements.purchase() }
+                    } label: {
+                        HStack {
+                            Text("Subscribe for \(plusEntitlements.displayPrice)")
+                            Spacer()
+                            if plusEntitlements.isPurchasing { ProgressView() }
+                        }
+                    }
+                    .disabled(plusEntitlements.product == nil || plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
+                }
+
+                Button {
+                    Task { await plusEntitlements.restorePurchases() }
+                } label: {
+                    HStack {
+                        Text("Restore purchases")
+                        Spacer()
+                        if plusEntitlements.isRestoring { ProgressView() }
+                    }
+                }
+                .disabled(plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
+            } footer: {
+                if plusEntitlements.hasLocalDebugAccess {
+                    Text("Plus stays included in this Debug build. The test purchase uses the configured StoreKit environment; App Store and TestFlight builds still require a verified subscription.")
+                } else if plusEntitlements.product == nil {
+                    Text("The product is not available in this build or App Store environment. Configure \(plusEntitlements.productID) before testing purchases.")
+                } else {
+                    Text("Payment and subscription management are handled by Apple. Restoring may ask you to authenticate with the App Store.")
+                }
+            }
+        }
+        .modifier(ThemedBackground(grouped: true))
+        .task { await plusEntitlements.refresh() }
+        .alert("XauXat Plus", isPresented: Binding(
+            get: { plusEntitlements.presentedError != nil },
+            set: { if !$0 { plusEntitlements.presentedError = nil } }
+        )) {
+            Button("OK") { plusEntitlements.presentedError = nil }
+        } message: {
+            Text(plusEntitlements.presentedError ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private var statusText: some View {
+#if DEBUG
+        Text("Included in local build")
+#else
+        switch plusEntitlements.status {
+        case .checking:
+            Text("Checking App Store…")
+        case .notPurchased:
+            Text("Free plan")
+        case let .active(expiresAt, willAutoRenew):
+            if let expiresAt {
+                Text(willAutoRenew ? "Active, renews \(expiresAt.formatted(date: .abbreviated, time: .omitted))" : "Active until \(expiresAt.formatted(date: .abbreviated, time: .omitted)), cancelled")
+            } else {
+                Text("Active")
+            }
+        case let .expired(expiresAt):
+            if let expiresAt {
+                Text("Expired \(expiresAt.formatted(date: .abbreviated, time: .omitted))")
+            } else {
+                Text("Expired")
+            }
+        case .revoked:
+            Text("Revoked")
+        case .unverified:
+            Text("Could not verify")
+        case .unavailable:
+            Text("Unavailable")
+        }
+#endif
     }
 }
 
@@ -582,5 +746,6 @@ struct SettingsView_Previews: PreviewProvider {
         chatModel.currentUser = User.sampleData
         return SettingsView()
             .environmentObject(chatModel)
+            .environmentObject(XauXatPlusEntitlements.shared)
     }
 }

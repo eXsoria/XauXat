@@ -623,7 +623,9 @@ private struct XauXatChatsView: View {
     @Binding var showNewChatSheet: Bool
 
     private var chats: [Chat] {
-        chatModel.chats.filter { !$0.chatInfo.chatDeleted && !$0.chatInfo.contactCard }
+        chatModel.chats.filter {
+            !$0.chatInfo.chatDeleted && !$0.chatInfo.contactCard && !xauXatIsChatHidden($0.id)
+        }
     }
 
     var body: some View {
@@ -669,7 +671,9 @@ private struct XauXatContactsView: View {
             guard case let .direct(contact) = chat.chatInfo,
                   contact.active,
                   !contact.chatDeleted,
-                  !contact.isContactCard else { return false }
+                  !contact.isContactCard,
+                  !xauXatIsChatLocked(chat.id),
+                  !xauXatIsChatHidden(chat.id) else { return false }
             return query.isEmpty || contact.chatViewName.localizedLowercase.contains(query)
         }
     }
@@ -760,6 +764,9 @@ private struct XauXatChatRow: View {
     }
 
     private var detail: String {
+        if xauXatIsChatLocked(chat.id) {
+            return "Locked conversation"
+        }
         if contactStyle {
             return chat.chatInfo.shortDescr?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "No bio info"
         }
@@ -785,6 +792,11 @@ private struct XauXatChatRow: View {
                 }
 
                 HStack(spacing: 8) {
+                    if xauXatIsChatLocked(chat.id) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(palette.muted)
+                    }
                     Text(detail)
                         .font(.custom("Courier", size: 13))
                         .foregroundStyle(palette.muted)
@@ -852,6 +864,7 @@ private struct XauXatEmptyState: View {
 
 private struct XauXatSettingsHome: View {
     @EnvironmentObject private var chatModel: ChatModel
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     let palette: XauXatPalette
     @Binding var activeUserPickerSheet: UserPickerSheet?
 
@@ -882,6 +895,24 @@ private struct XauXatSettingsHome: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Open your profile")
+                }
+
+                XauXatSectionTitle("PLAN", palette: palette)
+                    .padding(.top, 26)
+                XauXatSettingsCard(palette: palette) {
+                    NavigationLink {
+                        XauXatPlusView()
+                            .navigationTitle("XauXat Plus")
+                            .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        XauXatSettingsRow(
+                            palette: palette,
+                            symbol: "plus.circle",
+                            title: "XauXat Plus",
+                            value: plusStatusLabel
+                        )
+                    }
+                    .accessibilityHint("View subscription details, subscribe, or restore purchases")
                 }
 
                 XauXatSectionTitle("APP", palette: palette)
@@ -950,6 +981,15 @@ private struct XauXatSettingsHome: View {
         }
         .buttonStyle(.plain)
     }
+
+    private var plusStatusLabel: String {
+        if plusEntitlements.hasLocalDebugAccess { return "Included" }
+        switch plusEntitlements.status {
+        case .active: return "Active"
+        case .checking: return "Checking"
+        case .notPurchased, .expired, .revoked, .unverified, .unavailable: return "Free"
+        }
+    }
 }
 
 private struct XauXatHelpDestination: View {
@@ -961,9 +1001,11 @@ private struct XauXatHelpDestination: View {
 }
 
 private struct XauXatPrivacyView: View {
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DEFAULT_PERFORM_LA) private var appLock = false
     @State private var localAuthMode = privacyLocalAuthModeDefault.get()
+    @State private var showHiddenConversations = false
 
     private var palette: XauXatPalette { XauXatPalette(colorScheme) }
 
@@ -984,6 +1026,70 @@ private struct XauXatPrivacyView: View {
                             value: appLock ? (localAuthMode == .system ? "System" : "Passcode") : "Off"
                         )
                     }
+                    if canManageHiddenConversations {
+                        Button {
+                            authenticate(
+                                title: "Hidden conversations",
+                                reason: NSLocalizedString("Authenticate to manage hidden conversations", comment: "hidden conversations")
+                            ) { result in
+                                if case .success = result { showHiddenConversations = true }
+                            }
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "eye.slash",
+                                title: "Hidden conversations"
+                            )
+                        }
+                        .background {
+                            NavigationLink(
+                                destination: XauXatHiddenChatsView(),
+                                isActive: $showHiddenConversations,
+                                label: { EmptyView() }
+                            )
+                            .hidden()
+                        }
+                    } else {
+                        NavigationLink {
+                            XauXatPlusView()
+                                .navigationTitle("XauXat Plus")
+                                .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "eye.slash",
+                                title: "Hidden conversations",
+                                value: "Plus"
+                            )
+                        }
+                    }
+                    if canManageProtectedProfiles {
+                        NavigationLink {
+                            UserProfilesView(
+                                allowsProfileCreation: false,
+                                title: "Protected profiles"
+                            )
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "person.crop.circle.badge.checkmark",
+                                title: "Protected profiles"
+                            )
+                        }
+                    } else {
+                        NavigationLink {
+                            XauXatPlusView()
+                                .navigationTitle("XauXat Plus")
+                                .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "person.crop.circle.badge.checkmark",
+                                title: "Protected profiles",
+                                value: "Plus"
+                            )
+                        }
+                    }
                 }
 
                 Text("XauXat always hides its content in the App Switcher. Your security settings stay on this device.")
@@ -999,6 +1105,75 @@ private struct XauXatPrivacyView: View {
         .navigationTitle("Privacy & Security")
         .navigationBarTitleDisplayMode(.inline)
         .buttonStyle(.plain)
+    }
+
+    private var canManageHiddenConversations: Bool {
+        plusEntitlements.isAuthorized(for: .hiddenChats)
+    }
+
+    private var canManageProtectedProfiles: Bool {
+        plusEntitlements.isAuthorized(for: .protectedProfiles)
+    }
+}
+
+private struct XauXatHiddenChatsView: View {
+    @EnvironmentObject private var chatModel: ChatModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hiddenIDs = xauXatHiddenChatIDs()
+
+    private var palette: XauXatPalette { XauXatPalette(colorScheme) }
+    private var chats: [Chat] {
+        chatModel.chats.filter { hiddenIDs.contains($0.id) && !$0.chatInfo.chatDeleted }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if chats.isEmpty {
+                    Text("No hidden conversations.")
+                        .font(.custom("Courier", size: 14))
+                        .foregroundStyle(palette.muted)
+                        .frame(maxWidth: .infinity, minHeight: 160)
+                } else {
+                    XauXatSettingsCard(palette: palette) {
+                        ForEach(chats, id: \.viewId) { chat in
+                            Button {
+                                if chatModel.setXauXatChatHidden(chat.id, hidden: false) {
+                                    hiddenIDs.remove(chat.id)
+                                }
+                            } label: {
+                                HStack(spacing: 13) {
+                                    ChatInfoImage(chat: chat, size: 42, color: palette.raised)
+                                    Text(chat.chatInfo.chatViewName)
+                                        .font(.custom("Courier", size: 14).weight(.bold))
+                                        .foregroundStyle(palette.ink)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 12)
+                                    Text("Show")
+                                        .font(.custom("Courier", size: 12).weight(.bold))
+                                        .foregroundStyle(palette.muted)
+                                }
+                                .padding(.horizontal, 16)
+                                .frame(minHeight: 64)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    Text("Showing a conversation returns it to the normal list without deleting messages or changing the contact.")
+                        .font(.custom("Courier", size: 11))
+                        .foregroundStyle(palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 5)
+                        .padding(.top, 18)
+                }
+            }
+            .padding(22)
+        }
+        .background(palette.background.ignoresSafeArea())
+        .navigationTitle("Hidden conversations")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

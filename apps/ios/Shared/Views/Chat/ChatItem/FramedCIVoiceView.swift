@@ -77,6 +77,222 @@ struct FramedCIVoiceView: View {
     }
 }
 
+struct XauXatCodeLockedVoiceView: View {
+    @EnvironmentObject private var chatModel: ChatModel
+    @EnvironmentObject private var theme: AppTheme
+    @ObservedObject var chat: Chat
+    let chatItem: ChatItem
+    let recordingFile: CIFile?
+    @Binding var allowMenu: Bool
+
+    var body: some View {
+        Group {
+            if let data = loadedData,
+               let envelope = try? XauXatCodeLockedEnvelope.decode(data),
+               envelope.kind == .audio {
+                XauXatUnlockedVoiceView(chat: chat, chatItem: chatItem, envelope: envelope, allowMenu: $allowMenu)
+            } else if recordingFile?.loaded == true {
+                protectedRow(label: "Protected audio unavailable", icon: "speaker.slash.fill")
+            } else {
+                Button(action: download) {
+                    protectedRow(
+                        label: canDownload ? "Download protected audio" : "Protected audio",
+                        icon: canDownload ? "arrow.down" : "lock.fill"
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canDownload)
+            }
+        }
+        .privacySensitive()
+    }
+
+    private var loadedData: Data? {
+        guard let source = getLoadedFileSource(recordingFile) else { return nil }
+        return try? getFileData(getAppFilePath(source.filePath), source.cryptoArgs)
+    }
+
+    private var canDownload: Bool {
+        guard let recordingFile else { return false }
+        return switch recordingFile.fileStatus {
+        case .rcvInvitation, .rcvAborted: true
+        default: false
+        }
+    }
+
+    private func download() {
+        guard canDownload, let recordingFile, let user = chatModel.currentUser else { return }
+        Task { await receiveFile(user: user, fileId: recordingFile.fileId) }
+    }
+
+    private func protectedRow(label: LocalizedStringKey, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .medium))
+                .frame(width: 36, height: 36)
+            Text(label)
+                .font(.body.weight(.medium))
+            Spacer(minLength: 12)
+            Text("--:--")
+                .foregroundColor(theme.colors.secondary)
+        }
+        .foregroundColor(theme.colors.primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+}
+
+private struct XauXatUnlockedVoiceView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var theme: AppTheme
+    @ObservedObject var chat: Chat
+    let chatItem: ChatItem
+    @StateObject private var session: XauXatCodeLockedSession
+    @Binding var allowMenu: Bool
+    @State private var showUnlock = false
+    @State private var audioPlayer: AudioPlayer?
+    @State private var playbackState: VoiceMessagePlaybackState = .noPlayback
+    @State private var playbackTime: TimeInterval? = 0
+
+    init(chat: Chat, chatItem: ChatItem, envelope: XauXatCodeLockedEnvelope, allowMenu: Binding<Bool>) {
+        self.chat = chat
+        self.chatItem = chatItem
+        _session = StateObject(wrappedValue: XauXatCodeLockedSession(envelope: envelope))
+        _allowMenu = allowMenu
+    }
+
+    var body: some View {
+        Group {
+            switch session.state {
+            case let .unlocked(payload):
+                if payload.kind == .audio, let duration = payload.duration, duration > 0 {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 10) {
+                            playbackButton(data: payload.body)
+                            VoiceMessagePlayerTime(
+                                recordingTime: TimeInterval(duration),
+                                playbackState: $playbackState,
+                                playbackTime: $playbackTime
+                            )
+                            .foregroundColor(theme.colors.secondary)
+                            .frame(width: 50, alignment: .leading)
+                            if playbackState != .noPlayback || (playbackTime ?? 0) > 0 {
+                                ComposeVoiceView.SliderBar(
+                                    length: TimeInterval(duration),
+                                    progress: $playbackTime,
+                                    seek: seek
+                                )
+                                .tint(theme.colors.primary)
+                            }
+                        }
+                        if let caption = payload.caption, !caption.isEmpty {
+                            Text(caption)
+                                .font(.body)
+                                .padding(.horizontal, 12)
+                        }
+                        CIMetaView(chat: chat, chatItem: chatItem, metaColor: theme.colors.secondary)
+                            .padding(.leading, 6)
+                    }
+                    .padding(.vertical, 8)
+                } else {
+                    protectedRow(label: "Protected audio unavailable", icon: "speaker.slash.fill")
+                }
+            case .unlocking:
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Checking code")
+                }
+                .padding(12)
+            case .locked, .rejected:
+                Button { showUnlock = true } label: {
+                    protectedRow(label: "Tap to unlock audio", icon: "lock.fill")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .privacySensitive()
+        .sheet(isPresented: $showUnlock) {
+            XauXatCodeUnlockView(session: session)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active {
+                stopPlayback()
+                session.lock()
+            }
+        }
+        .onDisappear {
+            stopPlayback()
+            session.lock()
+        }
+    }
+
+    private func protectedRow(label: LocalizedStringKey, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .medium))
+                .frame(width: 36, height: 36)
+            Text(label)
+                .font(.body.weight(.medium))
+            Spacer(minLength: 12)
+            Text("--:--")
+                .foregroundColor(theme.colors.secondary)
+        }
+        .foregroundColor(theme.colors.primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private func playbackButton(data: Data) -> some View {
+        Button {
+            switch playbackState {
+            case .noPlayback:
+                let player = AudioPlayer(
+                    onTimer: { playbackTime = $0 },
+                    onFinishPlayback: {
+                        playbackState = .noPlayback
+                        playbackTime = 0
+                        allowMenu = true
+                    }
+                )
+                audioPlayer = player
+                player.start(data: data)
+                playbackState = .playing
+                allowMenu = false
+            case .playing:
+                audioPlayer?.pause()
+                playbackState = .paused
+                allowMenu = true
+            case .paused:
+                audioPlayer?.play()
+                playbackState = .playing
+                allowMenu = false
+            }
+        } label: {
+            Image(systemName: playbackState == .playing ? "pause.fill" : "play.fill")
+                .font(.system(size: 20, weight: .medium))
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(theme.colors.primary)
+        .accessibilityLabel(playbackState == .playing ? "Pause protected audio" : "Play protected audio")
+    }
+
+    private func seek(_ time: TimeInterval) {
+        let safeTime = max(0.0001, time)
+        audioPlayer?.seek(safeTime)
+        playbackTime = safeTime
+    }
+
+    private func stopPlayback() {
+        audioPlayer?.stop()
+        audioPlayer = nil
+        playbackState = .noPlayback
+        playbackTime = 0
+        allowMenu = true
+    }
+}
+
 struct FramedCIVoiceView_Previews: PreviewProvider {
     static var previews: some View {
         let im = ItemsModel.shared

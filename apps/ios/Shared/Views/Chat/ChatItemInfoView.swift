@@ -254,14 +254,16 @@ struct ChatItemInfoView: View {
 
     private func itemVersionView(_ itemVersion: ChatItemVersion, _ maxWidth: CGFloat, current: Bool) -> some View {
         let backgroundColor = chatItemFrameColor(ci, theme)
+        let codeLocked = xauXatIsAnyCodeLockedContent(itemVersion.msgContent.text)
+        let displayText = codeLocked ? xauXatCodeLockedPreviewText(itemVersion.msgContent.text) : itemVersion.msgContent.text
         return VStack(alignment: .leading, spacing: 4) {
-            textBubble(itemVersion.msgContent.text, itemVersion.formattedText, nil, backgroundColor: backgroundColor)
+            textBubble(displayText, codeLocked ? nil : itemVersion.formattedText, nil, backgroundColor: backgroundColor)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(backgroundColor)
                 .modifier(ChatItemClipped())
                 .contextMenu {
-                    if itemVersion.msgContent.text != "" {
+                    if itemVersion.msgContent.text != "" && !codeLocked {
                         Button {
                             showShareSheet(items: [itemVersion.msgContent.text])
                         } label: {
@@ -329,14 +331,16 @@ struct ChatItemInfoView: View {
 
     private func quotedMsgView(_ qi: CIQuote, _ maxWidth: CGFloat) -> some View {
         let backgroundColor = quotedMsgFrameColor(qi, theme)
+        let codeLocked = xauXatIsAnyCodeLockedContent(qi.text)
+        let displayText = codeLocked ? xauXatCodeLockedPreviewText(qi.text) : qi.text
         return VStack(alignment: .leading, spacing: 4) {
-            textBubble(qi.text, qi.formattedText, qi.getSender(nil), backgroundColor: backgroundColor)
+            textBubble(displayText, codeLocked ? nil : qi.formattedText, qi.getSender(nil), backgroundColor: backgroundColor)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(quotedMsgFrameColor(qi, theme))
                 .modifier(ChatItemClipped())
                 .contextMenu {
-                    if qi.text != "" {
+                    if qi.text != "" && !codeLocked {
                         Button {
                             showShareSheet(items: [qi.text])
                         } label: {

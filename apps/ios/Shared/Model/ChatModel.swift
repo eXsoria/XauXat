@@ -115,6 +115,12 @@ class ItemsModel: ObservableObject {
 
     // Spec: spec/state.md#loadOpenChat
     func loadOpenChat(_ chatId: ChatId, willNavigate: @escaping () -> Void = {}) {
+        authorizeChatOpen(chatId) { [weak self] in
+            self?.loadOpenChatAuthorized(chatId, willNavigate: willNavigate)
+        }
+    }
+
+    private func loadOpenChatAuthorized(_ chatId: ChatId, willNavigate: @escaping () -> Void = {}) {
         navigationTimeoutTask?.cancel()
         loadChatTask?.cancel()
         navigationTimeoutTask = Task {
@@ -141,6 +147,12 @@ class ItemsModel: ObservableObject {
 
     // Spec: spec/state.md#loadOpenChatNoWait
     func loadOpenChatNoWait(_ chatId: ChatId, _ openAroundItemId: ChatItem.ID? = nil) {
+        authorizeChatOpen(chatId) { [weak self] in
+            self?.loadOpenChatNoWaitAuthorized(chatId, openAroundItemId)
+        }
+    }
+
+    private func loadOpenChatNoWaitAuthorized(_ chatId: ChatId, _ openAroundItemId: ChatItem.ID? = nil) {
         navigationTimeoutTask?.cancel()
         loadChatTask?.cancel()
         loadChatTask = Task {
@@ -153,6 +165,19 @@ class ItemsModel: ObservableObject {
                     }
                 }
             }
+        }
+    }
+
+    private func authorizeChatOpen(_ chatId: ChatId, open: @escaping () -> Void) {
+        guard xauXatIsChatLocked(chatId) || xauXatIsChatHidden(chatId) else {
+            open()
+            return
+        }
+        authenticate(
+            title: xauXatIsChatHidden(chatId) ? "Hidden conversation" : "Locked conversation",
+            reason: NSLocalizedString("Authenticate to open this conversation", comment: "protected conversation")
+        ) { result in
+            if case .success = result { open() }
         }
     }
 
@@ -369,7 +394,11 @@ final class ChatModel: ObservableObject {
             ThemeManager.applyTheme(currentThemeDefault.get())
         }
     }
-    @Published var users: [UserInfo] = []
+    @Published var users: [UserInfo] = [] {
+        didSet {
+            _ = xauXatSyncProtectedProfileIDs(Set(users.compactMap { $0.user.hidden ? $0.user.userId : nil }))
+        }
+    }
     @Published var chatInitialized = false
     @Published var chatRunning: Bool?
     @Published var chatDbChanged = false
@@ -1109,7 +1138,9 @@ final class ChatModel: ObservableObject {
         chats[chatIndex].chatStats.unreadCount = stats.unreadCount + count
         chats[chatIndex].chatStats.unreadMentions = stats.unreadMentions + unreadMentions
         ChatTagsModel.shared.updateChatTagRead(chats[chatIndex], wasUnread: wasUnread)
-        changeUnreadCounter(user: currentUser!, by: count)
+        if !xauXatIsChatHidden(chats[chatIndex].id) {
+            changeUnreadCounter(user: currentUser!, by: count)
+        }
     }
 
     func increaseUnreadCounter(user: any UserLike) {
@@ -1117,6 +1148,7 @@ final class ChatModel: ObservableObject {
     }
 
     func decreaseUnreadCounter(user: any UserLike, chat: Chat) {
+        if xauXatIsChatHidden(chat.id) { return }
         let by = chat.chatInfo.chatSettings?.enableNtfs == .mentions
                 ? chat.chatStats.unreadMentions
                 : chat.chatStats.unreadCount
@@ -1128,6 +1160,9 @@ final class ChatModel: ObservableObject {
     }
 
     private func changeUnreadCounter(user: any UserLike, by: Int) {
+        if (user as? User)?.hidden == true || users.first(where: { $0.user.userId == user.userId })?.user.hidden == true {
+            return
+        }
         if let i = users.firstIndex(where: { $0.user.userId == user.userId }) {
             users[i].unreadCount += by
         }
@@ -1135,21 +1170,41 @@ final class ChatModel: ObservableObject {
     }
 
     // Spec: spec/state.md#totalUnreadCountForAllUsers
-    func totalUnreadCountForAllUsers() -> Int {
-        var unread: Int = 0
-        for chat in chats {
+    func xauXatVisibleUnreadCountForCurrentUser() -> Int {
+        chats.reduce(into: 0) { unread, chat in
+            guard !xauXatIsChatHidden(chat.id) else { return }
             switch chat.chatInfo.chatSettings?.enableNtfs {
             case .all: unread += chat.chatStats.unreadCount
             case .mentions: unread += chat.chatStats.unreadMentions
             default: ()
             }
         }
+    }
+
+    func xauXatIsProtectedProfile(_ userId: Int64) -> Bool {
+        users.first(where: { $0.user.userId == userId })?.user.hidden == true || xauXatIsProfileProtected(userId)
+    }
+
+    func totalUnreadCountForAllUsers() -> Int {
+        var unread = xauXatVisibleUnreadCountForCurrentUser()
         for u in users {
-            if !u.user.activeUser {
+            if !u.user.activeUser && !u.user.hidden {
                 unread += u.unreadCount
             }
         }
         return unread
+    }
+
+    @discardableResult
+    func setXauXatChatHidden(_ chatId: ChatId, hidden: Bool) -> Bool {
+        guard xauXatSetChatHidden(chatId, hidden: hidden) else { return false }
+        objectWillChange.send()
+        NtfManager.shared.setNtfBadgeCount(totalUnreadCountForAllUsers())
+        Task { await NtfManager.shared.removeAllNotifications() }
+        if hidden && self.chatId == chatId {
+            self.chatId = nil
+        }
+        return true
     }
 
     func increaseGroupReportsCounter(_ chatId: ChatId) {

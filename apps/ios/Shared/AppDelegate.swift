@@ -16,6 +16,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         logger.debug("AppDelegate: didFinishLaunchingWithOptions")
         application.registerForRemoteNotifications()
+        removeStaleXauXatProtectedVideoFiles()
         removePasscodesIfReinstalled()
         prepareForLaunch()
         deleteOldChatArchive()
@@ -110,11 +111,21 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // will be saved and restored by iOS when a user deletes and re-installs the app.
         // In this case the database and settings will be deleted, but the passcodes won't be.
         // Deleting passcodes ensures that the user will not get stuck on "Opening app..." screen.
-        if (kcAppPassword.get() != nil || kcSelfDestructPassword.get() != nil) &&
-           !UserDefaults.standard.bool(forKey: DEFAULT_PERFORM_LA) && !hasDatabase() {
+        if (kcAppPassword.get() != nil || kcSelfDestructPassword.get() != nil || kcDecoyPassword.get() != nil) &&
+           !UserDefaults.standard.bool(forKey: DEFAULT_PERFORM_LA) && !hasDatabase() && !hasDecoyDatabase() {
             _ = kcAppPassword.remove()
             _ = kcSelfDestructPassword.remove()
-            _ = kcDatabasePassword.remove()
+            _ = kcDecoyPassword.remove()
+            _ = kcPrimaryDatabasePassword.remove()
+            _ = kcDecoyDatabasePassword.remove()
+            _ = xauXatRemoveConversationLocks(.primary)
+            _ = xauXatRemoveConversationLocks(.decoy)
+            _ = xauXatRemoveHiddenChats(.primary)
+            _ = xauXatRemoveHiddenChats(.decoy)
+            _ = xauXatRemoveProtectedProfiles(.primary)
+            _ = xauXatRemoveProtectedProfiles(.decoy)
+            _ = xauXatRemoveProtectedProfilePasswords(.primary)
+            _ = xauXatRemoveProtectedProfilePasswords(.decoy)
         }
     }
 

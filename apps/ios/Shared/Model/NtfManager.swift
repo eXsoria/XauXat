@@ -58,6 +58,10 @@ class NtfManager: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
         logger.debug("NtfManager.processNotificationResponse: didReceive: action \(action), categoryIdentifier \(content.categoryIdentifier)")
         if let userId = content.userInfo["userId"] as? Int64,
            userId != chatModel.currentUser?.userId {
+            if chatModel.xauXatIsProtectedProfile(userId) || xauXatIsProfileProtected(userId) {
+                logger.debug("NtfManager.processNotificationResponse: ignored protected profile")
+                return
+            }
             logger.debug("NtfManager.processNotificationResponse changeActiveUser")
             changeActiveUser(userId, viewPwd: nil)
         }
@@ -241,18 +245,20 @@ class NtfManager: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
     // Spec: spec/services/notifications.md#notifyContactRequest
     func notifyContactRequest(_ user: any UserLike, _ contactRequest: UserContactRequest) {
         logger.debug("NtfManager.notifyContactRequest")
+        if isXauXatProtectedProfile(user) { return }
         addNotification(createContactRequestNtf(user, contactRequest, 0))
     }
 
     func notifyContactConnected(_ user: any UserLike, _ contact: Contact) {
         logger.debug("NtfManager.notifyContactConnected")
+        if isXauXatProtectedProfile(user) { return }
         addNotification(createContactConnectedNtf(user, contact, 0))
     }
 
     // Spec: spec/services/notifications.md#notifyMessageReceived
     func notifyMessageReceived(_ user: any UserLike, _ cInfo: ChatInfo, _ cItem: ChatItem) {
         logger.debug("NtfManager.notifyMessageReceived")
-        if cInfo.ntfsEnabled(chatItem: cItem) {
+        if cInfo.ntfsEnabled(chatItem: cItem) && !xauXatIsChatHidden(cInfo.id) && !isXauXatProtectedProfile(user) {
             addNotification(createMessageReceivedNtf(user, cInfo, cItem, 0))
         }
     }
@@ -260,7 +266,13 @@ class NtfManager: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
     // Spec: spec/services/notifications.md#notifyCallInvitation
     func notifyCallInvitation(_ invitation: RcvCallInvitation) {
         logger.debug("NtfManager.notifyCallInvitation")
+        if xauXatIsChatHidden(invitation.contact.id) || invitation.user.hidden { return }
         addNotification(createCallInvitationNtf(invitation, 0, mediaOverride: .audio))
+    }
+
+    private func isXauXatProtectedProfile(_ user: any UserLike) -> Bool {
+        if let user = user as? User, user.hidden { return true }
+        return ChatModel.shared.xauXatIsProtectedProfile(user.userId) || xauXatIsProfileProtected(user.userId)
     }
 
     // Spec: spec/services/notifications.md#setNtfBadgeCount

@@ -73,10 +73,23 @@ public func getLoadedImage(_ file: CIFile?) -> UIImage? {
 }
 
 public func getLoadedXauXatImage(_ chatItem: ChatItem) -> UIImage? {
-    guard case let .xauXatImage(_, _, privacy) = chatItem.content.msgContent,
-          let fileSource = getLoadedFileSource(chatItem.file) else {
+    guard case .xauXatImage = chatItem.content.msgContent else {
         return getLoadedImage(chatItem.file)
     }
+
+    guard let data = getLoadedXauXatFileData(chatItem) else { return nil }
+    let image = UIImage(data: data)
+    do {
+        try image?.setGifFromData(data, levelOfIntegrity: 1.0)
+        return image
+    } catch {
+        return UIImage(data: data)
+    }
+}
+
+public func getLoadedXauXatFileData(_ chatItem: ChatItem) -> Data? {
+    guard case let .xauXatImage(_, _, privacy) = chatItem.content.msgContent,
+          let fileSource = getLoadedFileSource(chatItem.file) else { return nil }
 
     let storedPath = getAppFilePath(fileSource.filePath)
     var envelopePath = storedPath
@@ -94,16 +107,9 @@ public func getLoadedXauXatImage(_ chatItem: ChatItem) -> UIImage? {
             temporaryPath = temp
             envelopePath = temp
         }
-        let data = try readCryptoFile(path: envelopePath.path, cryptoArgs: privacy.fileCrypto)
-        let image = UIImage(data: data)
-        do {
-            try image?.setGifFromData(data, levelOfIntegrity: 1.0)
-            return image
-        } catch {
-            return UIImage(data: data)
-        }
+        return try readCryptoFile(path: envelopePath.path, cryptoArgs: privacy.fileCrypto)
     } catch {
-        logger.error("Unable to decrypt XauXat one-time photo: \(error.localizedDescription)")
+        logger.error("Unable to decrypt XauXat protected photo file: \(error.localizedDescription)")
         return nil
     }
 }
@@ -136,10 +142,42 @@ public func saveAnimImage(_ image: UIImage, oneTimeAllowSave: Bool? = nil) -> Cr
 public func saveXauXatOneTimeAnimImage(_ image: UIImage, allowSave: Bool) -> XauXatPreparedOneTimePhoto? {
     guard let imageData = image.imageData,
           let sanitizedData = xauxatSanitizeAnimatedImageData(imageData) else { return nil }
-    return saveXauXatOneTimePhotoData(sanitizedData, allowSave: allowSave)
+    return saveXauXatProtectedPhotoData(sanitizedData, allowSave: allowSave)
 }
 
-private func xauxatSanitizeAnimatedImageData(_ data: Data) -> Data? {
+@MainActor
+public func xauxatCodeLockedPhotoPreview() -> String? {
+    let size = CGSize(width: 400, height: 300)
+    let renderer = UIGraphicsImageRenderer(size: size)
+    let image = renderer.image { context in
+        UIColor(white: 0.08, alpha: 1).setFill()
+        context.fill(CGRect(origin: .zero, size: size))
+        let configuration = UIImage.SymbolConfiguration(pointSize: 52, weight: .medium)
+        guard let lock = UIImage(systemName: "lock.fill", withConfiguration: configuration)?
+            .withTintColor(.white, renderingMode: .alwaysOriginal) else { return }
+        let origin = CGPoint(x: (size.width - lock.size.width) / 2, y: (size.height - lock.size.height) / 2)
+        lock.draw(at: origin)
+    }
+    return resizeImageToStrSizeSync(image, maxDataSize: 14_000)
+}
+
+@MainActor
+public func xauxatCodeLockedVideoPreview() -> String? {
+    let size = CGSize(width: 400, height: 225)
+    let renderer = UIGraphicsImageRenderer(size: size)
+    let image = renderer.image { context in
+        UIColor(white: 0.08, alpha: 1).setFill()
+        context.fill(CGRect(origin: .zero, size: size))
+        let configuration = UIImage.SymbolConfiguration(pointSize: 48, weight: .medium)
+        guard let lock = UIImage(systemName: "lock.fill", withConfiguration: configuration)?
+            .withTintColor(.white, renderingMode: .alwaysOriginal) else { return }
+        let origin = CGPoint(x: (size.width - lock.size.width) / 2, y: (size.height - lock.size.height) / 2)
+        lock.draw(at: origin)
+    }
+    return resizeImageToStrSizeSync(image, maxDataSize: 14_000)
+}
+
+public func xauxatSanitizeAnimatedImageData(_ data: Data) -> Data? {
     guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
     let frameCount = CGImageSourceGetCount(source)
     guard frameCount > 0 else { return nil }
@@ -190,10 +228,10 @@ public func saveImage(_ uiImage: UIImage, oneTimeAllowSave: Bool? = nil) -> Cryp
 public func saveXauXatOneTimeImage(_ image: UIImage, allowSave: Bool) -> XauXatPreparedOneTimePhoto? {
     let hasAlpha = imageHasAlpha(image)
     guard let sanitizedData = resizeImageToDataSize(image, maxDataSize: MAX_IMAGE_SIZE, hasAlpha: hasAlpha) else { return nil }
-    return saveXauXatOneTimePhotoData(sanitizedData, allowSave: allowSave)
+    return saveXauXatProtectedPhotoData(sanitizedData, allowSave: allowSave)
 }
 
-private func saveXauXatOneTimePhotoData(_ data: Data, allowSave: Bool) -> XauXatPreparedOneTimePhoto? {
+public func saveXauXatProtectedPhotoData(_ data: Data, allowSave: Bool) -> XauXatPreparedOneTimePhoto? {
     let fileName = generateNewFileName("photo", "xauxat")
     let path = getAppFilePath(fileName)
     do {

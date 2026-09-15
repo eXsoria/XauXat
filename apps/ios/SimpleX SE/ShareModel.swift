@@ -67,9 +67,10 @@ class ShareModel: ObservableObject {
     }
 
     var filteredChats: [SEChatData] {
-        search.isEmpty
-        ? filterChatsToForwardTo(chats: chats)
-        : filterChatsToForwardTo(chats: chats)
+        let visibleChats = chats.filter { !xauXatIsChatLocked($0.id) && !xauXatIsChatHidden($0.id) }
+        return search.isEmpty
+        ? filterChatsToForwardTo(chats: visibleChats)
+        : filterChatsToForwardTo(chats: visibleChats)
             .filter { foundChat($0, search.localizedLowercase) }
     }
 
@@ -539,4 +540,3 @@ fileprivate func isFileTooLarge(for url: URL) -> Bool {
         .map { $0 > getMaxFileSize(.xftp) }
         ?? false
 }
-

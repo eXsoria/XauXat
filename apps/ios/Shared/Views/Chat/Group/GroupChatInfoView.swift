@@ -170,6 +170,18 @@ struct GroupChatInfoView: View {
                     }
 
                     Section {
+                        XauXatConversationLockButton(chatID: chat.id)
+                    } footer: {
+                        Text("Locked conversations hide message previews and require the authentication mode selected in App Lock.")
+                    }
+
+                    Section {
+                        XauXatHiddenChatButton(chatID: chat.id)
+                    } footer: {
+                        Text("Hidden conversations are removed from lists, search, sharing destinations and notification badges.")
+                    }
+
+                    Section {
                         if groupInfo.isOwner && groupInfo.businessChat == nil {
                             editGroupButton()
                         }

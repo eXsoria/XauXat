@@ -144,7 +144,7 @@ struct FramedItemView: View {
             case let .xauXatImage(text, _, _):
                 CIImageView(chatItem: chatItem, senderProfile: ciSenderProfile(chatItem, chat.chatInfo), scrollToItem: scrollToItem, preview: preview, maxWidth: maxWidth, imgWidth: imgWidth, showFullScreenImage: $showFullscreenGallery)
                     .overlay(DetermineWidth())
-                if text == "" && !chatItem.meta.isLive {
+                if (text == "" || XauXatCodeLockedEnvelope.isFileWireText(text)) && !chatItem.meta.isLive {
                     Color.clear
                         .frame(width: 0, height: 0)
                         .onAppear { useWhiteMetaColor = true }
@@ -155,7 +155,7 @@ struct FramedItemView: View {
             case let .video(text, _, duration):
                 CIVideoView(chatItem: chatItem, senderProfile: ciSenderProfile(chatItem, chat.chatInfo), preview: preview, duration: duration, maxWidth: maxWidth, videoWidth: videoWidth, showFullscreenPlayer: $showFullscreenGallery)
                 .overlay(DetermineWidth())
-                if text == "" && !chatItem.meta.isLive {
+                if (text == "" || xauXatIsCodeLockedFile(text, kind: .video)) && !chatItem.meta.isLive {
                     Color.clear
                     .frame(width: 0, height: 0)
                     .onAppear {
@@ -168,9 +168,14 @@ struct FramedItemView: View {
                     ciMsgContentView(chatItem)
                 }
             case let .voice(text, duration):
-                FramedCIVoiceView(chat: chat, chatItem: chatItem, recordingFile: chatItem.file, duration: duration, allowMenu: $allowMenu)
-                    .overlay(DetermineWidth())
-                if text != "" {
+                if XauXatCodeLockedEnvelope.isFileWireText(text) {
+                    XauXatCodeLockedVoiceView(chat: chat, chatItem: chatItem, recordingFile: chatItem.file, allowMenu: $allowMenu)
+                        .overlay(DetermineWidth())
+                } else {
+                    FramedCIVoiceView(chat: chat, chatItem: chatItem, recordingFile: chatItem.file, duration: duration, allowMenu: $allowMenu)
+                        .overlay(DetermineWidth())
+                }
+                if text != "" && !XauXatCodeLockedEnvelope.isFileWireText(text) {
                     ciMsgContentView(chatItem)
                 }
             case let .file(text):
@@ -398,7 +403,8 @@ func onlyImageOrVideo(_ ci: ChatItem) -> Bool {
     if case let .image(text, _) = ci.content.msgContent {
         return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil && text == ""
     } else if case let .xauXatImage(text, _, _) = ci.content.msgContent {
-        return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil && text == ""
+        return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil
+            && (text == "" || XauXatCodeLockedEnvelope.isFileWireText(text))
     } else if case let .video(text, _, _) = ci.content.msgContent {
         return ci.meta.itemDeleted == nil && !ci.meta.isLive && ci.quotedItem == nil && ci.meta.itemForwarded == nil && text == ""
     }

@@ -50,23 +50,44 @@ struct MsgContentView: View {
     @AppStorage(DEFAULT_SHOW_SENT_VIA_RPOXY) private var showSentViaProxy = false
     @AppStorage(DEFAULT_PRIVACY_SHOW_SIGNATURE) private var showSignature = true
 
+    private var codeLockedEnvelope: XauXatCodeLockedEnvelope? {
+        guard let envelope = try? XauXatCodeLockedEnvelope.fromWireText(text), envelope.kind == .text else { return nil }
+        return envelope
+    }
+
     var body: some View {
-        let v = msgContentView()
-        if meta?.isLive == true {
-            v.onAppear {
-                let descr = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .body)
-                noTyping = NSAttributedString(string: "   ", attributes: [
-                    .font: UIFont.monospacedSystemFont(ofSize: descr.pointSize, weight: .regular),
-                    .kern: -2 as NSNumber,
-                    .foregroundColor: UIColor(theme.colors.secondary)
-                ])
-                switchTyping()
-            }
-            .onDisappear(perform: stopTyping)
-            .onChange(of: meta?.isLive, perform: switchTyping)
-            .onChange(of: meta?.recent, perform: switchTyping)
+        if let envelope = codeLockedEnvelope {
+            XauXatCodeLockedTextView(
+                chat: chat,
+                envelope: envelope,
+                textStyle: textStyle,
+                meta: meta,
+                rightToLeft: rightToLeft,
+                prefix: prefix
+            )
+        } else if xauXatIsAnyCodeLockedContent(text) {
+            (Text(Image(systemName: "lock.fill")) + Text(" ") + Text(xauXatCodeLockedPreviewText(text)))
+                .font(Font(UIFont.preferredFont(forTextStyle: textStyle)))
+                .foregroundColor(theme.colors.secondary)
+                .privacySensitive()
         } else {
-            v
+            let v = msgContentView()
+            if meta?.isLive == true {
+                v.onAppear {
+                    let descr = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .body)
+                    noTyping = NSAttributedString(string: "   ", attributes: [
+                        .font: UIFont.monospacedSystemFont(ofSize: descr.pointSize, weight: .regular),
+                        .kern: -2 as NSNumber,
+                        .foregroundColor: UIColor(theme.colors.secondary)
+                    ])
+                    switchTyping()
+                }
+                .onDisappear(perform: stopTyping)
+                .onChange(of: meta?.isLive, perform: switchTyping)
+                .onChange(of: meta?.recent, perform: switchTyping)
+            } else {
+                v
+            }
         }
     }
 
@@ -133,6 +154,161 @@ struct MsgContentView: View {
     @inline(__always)
     private func reserveSpaceForMeta(_ mt: CIMeta) -> Text {
         (rightToLeft ? textNewLine : Text(verbatim: "   ")) + ciMetaText(mt, chatTTL: chat.chatInfo.timedMessagesTTL, encrypted: nil, colorMode: .transparent, showViaProxy: showSentViaProxy, showTimesamp: showTimestamp, showSignature: showSignature)
+    }
+}
+
+private struct XauXatCodeLockedTextView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.showTimestamp) private var showTimestamp
+    @EnvironmentObject private var theme: AppTheme
+    @ObservedObject var chat: Chat
+    @StateObject private var session: XauXatCodeLockedSession
+    @State private var showUnlock = false
+
+    let textStyle: UIFont.TextStyle
+    let meta: CIMeta?
+    let rightToLeft: Bool
+    let prefix: NSAttributedString?
+
+    @AppStorage(DEFAULT_SHOW_SENT_VIA_RPOXY) private var showSentViaProxy = false
+    @AppStorage(DEFAULT_PRIVACY_SHOW_SIGNATURE) private var showSignature = true
+
+    init(
+        chat: Chat,
+        envelope: XauXatCodeLockedEnvelope,
+        textStyle: UIFont.TextStyle,
+        meta: CIMeta?,
+        rightToLeft: Bool,
+        prefix: NSAttributedString?
+    ) {
+        self.chat = chat
+        _session = StateObject(wrappedValue: XauXatCodeLockedSession(envelope: envelope))
+        self.textStyle = textStyle
+        self.meta = meta
+        self.rightToLeft = rightToLeft
+        self.prefix = prefix
+    }
+
+    var body: some View {
+        Group {
+            switch session.state {
+            case let .unlocked(payload):
+                if let clearText = payload.text {
+                    XauXatPressToPreview(
+                        onReveal: {},
+                        onHide: {},
+                        protectedContent: {
+                            MsgContentView(
+                                chat: chat,
+                                text: clearText,
+                                formattedText: parseSimpleXMarkdown(clearText),
+                                textStyle: textStyle,
+                                meta: meta,
+                                rightToLeft: isRightToLeft(clearText),
+                                prefix: prefix
+                            )
+                        },
+                        placeholder: { protectedPlaceholder("Press and hold to view") }
+                    )
+                } else {
+                    protectedPlaceholder("Protected message unavailable")
+                }
+            case .unlocking:
+                HStack(spacing: 8) {
+                    ProgressView()
+                    protectedLabel("Checking code")
+                }
+            case .locked, .rejected:
+                Button { showUnlock = true } label: {
+                    protectedLabel("Protected message")
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens code entry")
+            }
+        }
+        .privacySensitive()
+        .sheet(isPresented: $showUnlock) {
+            XauXatCodeUnlockView(session: session)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active { session.lock() }
+        }
+        .onDisappear { session.lock() }
+    }
+
+    private func protectedPlaceholder(_ label: LocalizedStringKey) -> some View {
+        protectedLabel(label)
+            .frame(minHeight: 34)
+    }
+
+    private func protectedLabel(_ label: LocalizedStringKey) -> some View {
+        var value = Text(Image(systemName: "lock.fill")) + Text(" ") + Text(label)
+        if let meta {
+            value = value + (rightToLeft ? textNewLine : Text(verbatim: "   "))
+                + ciMetaText(
+                    meta,
+                    chatTTL: chat.chatInfo.timedMessagesTTL,
+                    encrypted: nil,
+                    colorMode: .transparent,
+                    showViaProxy: showSentViaProxy,
+                    showTimesamp: showTimestamp,
+                    showSignature: showSignature
+                )
+        }
+        return value
+            .font(Font(UIFont.preferredFont(forTextStyle: textStyle)))
+            .foregroundColor(theme.colors.secondary)
+    }
+}
+
+struct XauXatCodeUnlockView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var session: XauXatCodeLockedSession
+    @State private var code = ""
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    SecureField("Code", text: $code)
+                        .textContentType(.password)
+                        .privacySensitive()
+                        .onSubmit(unlock)
+                } footer: {
+                    Text("The code is checked on this device and is never sent.")
+                }
+
+                if case let .rejected(attempts) = session.state {
+                    Text("Incorrect code. Failed attempts: \(attempts).")
+                        .foregroundColor(.red)
+                }
+            }
+            .navigationTitle("Unlock content")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Unlock", action: unlock)
+                        .disabled(code.isEmpty || session.state == .unlocking)
+                }
+            }
+        }
+        .interactiveDismissDisabled(session.state == .unlocking)
+        .modifier(XauXatAppSwitcherProtection())
+        .onChange(of: session.state) { state in
+            if case .unlocked = state {
+                code = ""
+                dismiss()
+            }
+        }
+    }
+
+    private func unlock() {
+        guard !code.isEmpty, session.state != .unlocking else { return }
+        session.unlock(code: code)
+        code = ""
     }
 }
 

@@ -37,6 +37,90 @@ func localizedInfoRow(_ title: LocalizedStringKey, _ value: LocalizedStringKey) 
     }
 }
 
+struct XauXatConversationLockButton: View {
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
+    let chatID: ChatId
+    @State private var locked: Bool
+
+    init(chatID: ChatId) {
+        self.chatID = chatID
+        _locked = State(initialValue: xauXatIsChatLocked(chatID))
+    }
+
+    var body: some View {
+        if plusEntitlements.isAuthorized(for: .conversationLock) {
+            Button {
+                authenticate(
+                    title: locked ? "Unlock conversation" : "Lock conversation",
+                    reason: NSLocalizedString("Authenticate to change conversation protection", comment: "conversation lock")
+                ) { result in
+                    guard case .success = result else { return }
+                    let next = !locked
+                    if xauXatSetChatLocked(chatID, locked: next) {
+                        locked = next
+                        if next {
+                            dismissAllSheets(animated: false) {
+                                ChatModel.shared.chatId = nil
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Label(locked ? "Remove conversation lock" : "Lock conversation", systemImage: locked ? "lock.open" : "lock")
+            }
+        } else {
+            NavigationLink {
+                XauXatPlusView()
+                    .navigationTitle("XauXat Plus")
+                    .navigationBarTitleDisplayMode(.inline)
+            } label: {
+                XauXatPlusLockedLabel(title: "Lock conversation", systemImage: "lock")
+            }
+        }
+    }
+}
+
+struct XauXatHiddenChatButton: View {
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
+    let chatID: ChatId
+    @State private var hidden: Bool
+
+    init(chatID: ChatId) {
+        self.chatID = chatID
+        _hidden = State(initialValue: xauXatIsChatHidden(chatID))
+    }
+
+    var body: some View {
+        if plusEntitlements.isAuthorized(for: .hiddenChats) {
+            Button {
+                authenticate(
+                    title: hidden ? "Show conversation" : "Hide conversation",
+                    reason: NSLocalizedString("Authenticate to change conversation visibility", comment: "hidden conversation")
+                ) { result in
+                    guard case .success = result else { return }
+                    let next = !hidden
+                    if ChatModel.shared.setXauXatChatHidden(chatID, hidden: next) {
+                        hidden = next
+                        if next {
+                            dismissAllSheets(animated: false)
+                        }
+                    }
+                }
+            } label: {
+                Label(hidden ? "Show conversation" : "Hide conversation", systemImage: hidden ? "eye" : "eye.slash")
+            }
+        } else {
+            NavigationLink {
+                XauXatPlusView()
+                    .navigationTitle("XauXat Plus")
+                    .navigationBarTitleDisplayMode(.inline)
+            } label: {
+                XauXatPlusLockedLabel(title: "Hide conversation", systemImage: "eye.slash")
+            }
+        }
+    }
+}
+
 @ViewBuilder func smpServers(_ title: LocalizedStringKey, _ servers: [String], _ secondaryColor: Color) -> some View {
     if servers.count > 0 {
         HStack {
@@ -208,6 +292,18 @@ struct ChatInfoView: View {
                         //                    }
                     }
                     .disabled(!contact.ready || !contact.active)
+
+                    Section {
+                        XauXatConversationLockButton(chatID: chat.id)
+                    } footer: {
+                        Text("Locked conversations hide message previews and require the authentication mode selected in App Lock.")
+                    }
+
+                    Section {
+                        XauXatHiddenChatButton(chatID: chat.id)
+                    } footer: {
+                        Text("Hidden conversations are removed from lists, search, sharing destinations and notification badges.")
+                    }
 
                     Section {
                         ChatTTLOption(chat: chat, progressIndicator: $progressIndicator)
