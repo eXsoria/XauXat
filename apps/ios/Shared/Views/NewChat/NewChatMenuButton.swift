@@ -234,7 +234,9 @@ struct ContactsList: View {
     @AppStorage(DEFAULT_SHOW_UNREAD_AND_FAVORITES) private var showUnreadAndFavorites = false
     
     var body: some View {
-        let contactChats = chatModel.chats.filter { chat in chatPredicate(chat, !searchText.isEmpty) }
+        let contactChats = chatModel.chats.filter {
+            !xauXatIsChatHidden($0.id) && chatPredicate($0, !searchText.isEmpty)
+        }
         let filteredContactChats = filteredContactChats(
             showUnreadAndFavorites: showUnreadAndFavorites,
             searchShowingSimplexLink: searchShowingSimplexLink,

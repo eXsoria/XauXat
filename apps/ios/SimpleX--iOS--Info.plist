@@ -58,5 +58,7 @@
 	</array>
 	<key>UIDesignRequiresCompatibility</key>
 	<true/>
+	<key>XauXatPlusProductID</key>
+	<string>$(XAUXAT_PLUS_PRODUCT_ID)</string>
 </dict>
 </plist>

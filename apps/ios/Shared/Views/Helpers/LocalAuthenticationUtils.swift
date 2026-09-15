@@ -16,6 +16,36 @@ enum LAResult {
     case unavailable(authError: String?)
 }
 
+enum XauXatDuressScope: String, CaseIterable, Identifiable {
+    case primary
+    case decoy
+    case all
+
+    var id: Self { self }
+
+    var label: LocalizedStringKey {
+        switch self {
+        case .primary: "Main environment"
+        case .decoy: "Decoy environment"
+        case .all: "Both environments"
+        }
+    }
+
+    var storageScopes: [XauXatStorageScope] {
+        switch self {
+        case .primary: [.primary]
+        case .decoy: [.decoy]
+        case .all: [.primary, .decoy]
+        }
+    }
+
+    static var configured: XauXatDuressScope {
+        guard let rawValue = UserDefaults.standard.string(forKey: DEFAULT_LA_DURESS_SCOPE),
+              let scope = XauXatDuressScope(rawValue: rawValue) else { return .primary }
+        return scope
+    }
+}
+
 func authorize(_ text: String, _ authorized: Binding<Bool>) {
     authenticate(reason: text) { laResult in
         switch laResult {
@@ -38,6 +68,24 @@ struct LocalAuthRequest {
 
 func authenticate(title: LocalizedStringKey? = nil, reason: String, selfDestruct: Bool = false, completed: @escaping (LAResult) -> Void) {
     logger.debug("DEBUGGING: authenticate")
+    // When a decoy profile exists, app unlock always asks for a PIN. Face ID or
+    // the device passcode cannot choose which local database should be opened.
+    if selfDestruct, kcDecoyPassword.get() != nil {
+        if let password = kcAppPassword.get() {
+            DispatchQueue.main.async {
+                ChatModel.shared.laRequest = LocalAuthRequest(
+                    title: title,
+                    reason: reason,
+                    password: password,
+                    selfDestruct: true,
+                    completed: completed
+                )
+            }
+        } else {
+            completed(.unavailable(authError: NSLocalizedString("No app password", comment: "Authentication unavailable")))
+        }
+        return
+    }
     switch privacyLocalAuthModeDefault.get() {
     case .system: systemAuthenticate(reason, completed)
     case .passcode:
@@ -114,4 +162,3 @@ func laUnavailableTurningOffAlert() -> Alert {
         message: "Device authentication is disabled. Turning off SimpleX Lock."
     )
 }
-

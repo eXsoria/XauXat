@@ -312,6 +312,9 @@ struct ChatPreviewView: View {
                 let text = chatLink.displayName + descr
                 return (text, nil)
             }
+            if xauXatIsAnyCodeLockedContent(ci.content.text) {
+                return (xauXatCodeLockedPreviewText(ci.content.text), nil)
+            }
             return (ci.text(isChannel: chat.chatInfo.isChannel), ci.formattedText)
         }
 
@@ -436,9 +439,18 @@ struct ChatPreviewView: View {
             smallContentPreview(size: dynamicMediaSize) {
                 CIVideoView(chatItem: ci, senderProfile: ciSenderProfile(ci, chat.chatInfo), preview: imageFromBase64(image), duration: duration, maxWidth: dynamicMediaSize, videoWidth: nil, smallView: true, showFullscreenPlayer: $showFullscreenGallery)
             }
-        case let .voice(_, duration):
-            smallContentPreviewVoice(size: dynamicMediaSize) {
-                CIVoiceView(chat: chat, chatItem: ci, recordingFile: ci.file, duration: duration, allowMenu: Binding.constant(true), smallViewSize: dynamicMediaSize)
+        case let .voice(text, duration):
+            if XauXatCodeLockedEnvelope.isFileWireText(text) {
+                smallContentPreview(size: dynamicMediaSize) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundColor(theme.colors.secondary)
+                        .privacySensitive()
+                }
+            } else {
+                smallContentPreviewVoice(size: dynamicMediaSize) {
+                    CIVoiceView(chat: chat, chatItem: ci, recordingFile: ci.file, duration: duration, allowMenu: Binding.constant(true), smallViewSize: dynamicMediaSize)
+                }
             }
         case .file:
             smallContentPreviewFile(size: dynamicMediaSize) {

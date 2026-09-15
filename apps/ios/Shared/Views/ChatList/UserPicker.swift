@@ -109,11 +109,16 @@ struct UserPicker: View {
     }
 
     private func userView(_ u: UserInfo, size: CGFloat) -> some View {
-        HStack {
+        let unreadCount = u.user.activeUser ? m.xauXatVisibleUnreadCountForCurrentUser() : u.unreadCount
+        return HStack {
             ZStack(alignment: .topTrailing) {
                 ProfileImage(imageStr: u.user.image, size: size, color: Color(uiColor: .tertiarySystemGroupedBackground))
-                if (u.unreadCount > 0) {
-                    userUnreadBadge(u, theme: theme).offset(x: 4, y: -4)
+                if unreadCount > 0 {
+                    UnreadBadge(
+                        count: unreadCount,
+                        color: u.user.showNtfs ? theme.colors.primary : theme.colors.secondary
+                    )
+                    .offset(x: 4, y: -4)
                 }
             }
             .padding(.trailing, 6)

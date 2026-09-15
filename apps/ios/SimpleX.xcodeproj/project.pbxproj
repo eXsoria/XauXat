@@ -225,6 +225,7 @@
 		A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000133D1000100000001 /* EmbeddedTorManager.swift */; };
 		A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000333D2000100000003 /* XauXatHomeView.swift */; };
 		A11E001233D3000100000012 /* NSEEmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */; };
+		A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */; };
 		B70A39732D24090D00E80A5F /* TagListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70A39722D24090D00E80A5F /* TagListView.swift */; };
 		B70CE9E62D4BE5930080F36D /* GroupMentions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70CE9E52D4BE5930080F36D /* GroupMentions.swift */; };
 		B728945B2D0C62BF00F7A19A /* ElegantEmojiPicker in Frameworks */ = {isa = PBXBuildFile; productRef = B728945A2D0C62BF00F7A19A /* ElegantEmojiPicker */; };
@@ -613,6 +614,7 @@
 		A11E000333D2000100000003 /* XauXatHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatHomeView.swift; sourceTree = "<group>"; };
 		A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEEmbeddedTorManager.swift; sourceTree = "<group>"; };
 		B3B79D8F8E95FE108F604F0D /* Pods-SimpleX NSE.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SimpleX NSE.debug.xcconfig"; path = "Target Support Files/Pods-SimpleX NSE/Pods-SimpleX NSE.debug.xcconfig"; sourceTree = "<group>"; };
+		A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatCodeLockedContent.swift; sourceTree = "<group>"; };
 		B5D5FB384075FF4C67AA7A2A /* Pods_SimpleX__iOS_.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_SimpleX__iOS_.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70A39722D24090D00E80A5F /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
 		B70CE9E52D4BE5930080F36D /* GroupMentions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupMentions.swift; sourceTree = "<group>"; };
@@ -863,6 +865,7 @@
 			isa = PBXGroup;
 			children = (
 				A11E000133D1000100000001 /* EmbeddedTorManager.swift */,
+				A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */,
 				E5DDBE6D2DC4106200A0EFF0 /* AppAPITypes.swift */,
 				5C764E88279CBCB3000C6508 /* ChatModel.swift */,
 				5C2E260627A2941F00F70299 /* SimpleXAPI.swift */,
@@ -1616,6 +1619,7 @@
 			files = (
 				A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */,
 				A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */,
+				A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */,
 				64C06EB52A0A4A7C00792D4D /* ChatItemInfoView.swift in Sources */,
 				8CC317442D4FEB9B00292A20 /* EndlessScrollView.swift in Sources */,
 				640417CE2B29B8C200CCB412 /* NewChatView.swift in Sources */,
@@ -2221,6 +2225,7 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
+				XAUXAT_PLUS_PRODUCT_ID = pt.exsoria.xauxat.plus.monthly;
 			};
 			name = Debug;
 		};
@@ -2276,6 +2281,7 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				VALIDATE_PRODUCT = YES;
+				XAUXAT_PLUS_PRODUCT_ID = pt.exsoria.xauxat.plus.monthly;
 			};
 			name = Release;
 		};

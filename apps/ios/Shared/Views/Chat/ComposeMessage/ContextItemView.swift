@@ -71,7 +71,9 @@ struct ContextItemView: View {
     }
 
     private func contextMsgPreview(_ contextItem: ChatItem) -> some View {
-        let r = messageText(contextItem.text, contextItem.formattedText, sender: nil, preview: true, mentions: contextItem.mentions, userMemberId: nil, showSecrets: nil, backgroundColor: UIColor(background), stripLink: contextItem.content.msgContent?.chatLinkStr)
+        let protected = xauXatIsAnyCodeLockedContent(contextItem.text)
+        let text = protected ? xauXatCodeLockedPreviewText(contextItem.text) : contextItem.text
+        let r = messageText(text, protected ? nil : contextItem.formattedText, sender: nil, preview: true, mentions: protected ? nil : contextItem.mentions, userMemberId: nil, showSecrets: nil, backgroundColor: UIColor(background), stripLink: protected ? nil : contextItem.content.msgContent?.chatLinkStr)
         let t = attachment() + Text(AttributedString(r.string))
         return t.if(r.hasSecrets, transform: hiddenSecretsView)
 

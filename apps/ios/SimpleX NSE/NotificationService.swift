@@ -73,6 +73,37 @@ public enum NSENotificationData {
         default: nil
         }
     }
+
+    @inline(__always)
+    var xauXatShouldSuppress: Bool {
+        let protectedProfile = switch self {
+        case let .connectionEvent(user, _): user.hidden
+        case let .contactConnected(user, _): (user as? User)?.hidden == true
+        case let .contactRequest(user, _): (user as? User)?.hidden == true
+        case let .messageReceived(user, _, _): (user as? User)?.hidden == true
+        case let .callInvitation(invitation): invitation.user.hidden
+        default: false
+        }
+        let chatId: ChatId? = switch self {
+        case let .messageReceived(_, chatInfo, _): chatInfo.id
+        case let .callInvitation(invitation): invitation.contact.id
+        case let .connectionEvent(_, entity): switch entity {
+            case let .rcvDirectMsgConnection(_, contact): contact?.id
+            case let .rcvGroupMsgConnection(_, groupInfo, _): groupInfo.id
+            case .userContactConnection: nil
+            }
+        default: nil
+        }
+        let protectedUserId: Int64? = switch self {
+        case let .connectionEvent(user, _): user.userId
+        case let .contactConnected(user, _): user.userId
+        case let .contactRequest(user, _): user.userId
+        case let .messageReceived(user, _, _): user.userId
+        case let .callInvitation(invitation): invitation.user.userId
+        default: nil
+        }
+        return protectedProfile || (protectedUserId.map(xauXatIsProfileProtected) ?? false) || (chatId.map(xauXatIsChatHidden) ?? false)
+    }
 }
 
 // Once the last thread in the process completes processing chat controller is suspended, and the database is closed, to avoid
@@ -690,10 +721,13 @@ class NotificationService: UNNotificationServiceExtension {
             serviceBestAttemptNtf = nil
             contentHandler = nil
             if let callInv {
+                if xauXatIsChatHidden(callInv.contact.id) || callInv.user.hidden || xauXatIsProfileProtected(callInv.user.userId) {
+                    removeHiddenEventFromBadge()
+                }
                 if useCallKit() {
                     logger.debug("NotificationService reportNewIncomingVoIPPushPayload for \(callInv.contact.id)")
                     CXProvider.reportNewIncomingVoIPPushPayload([
-                        "displayName": callInv.contact.displayName,
+                        "displayName": xauXatIsChatHidden(callInv.contact.id) || callInv.user.hidden || xauXatIsProfileProtected(callInv.user.userId) ? NSLocalizedString("XauXat call", comment: "protected profile callkit banner") : callInv.contact.displayName,
                         "contactId": callInv.contact.id,
                         "callUUID": callInv.callUUID ?? "",
                         "media": CallMediaType.audio.rawValue,
@@ -718,7 +752,11 @@ class NotificationService: UNNotificationServiceExtension {
         // uncomment localDisplayName in ConnectionEntity
         // let conns = self.notificationEntities.compactMap { $0.value.ntfConn.connEntity.localDisplayName }
         // logger.debug("NotificationService prepareNotification for \(String(describing: conns))")
-        let ntfs = notificationEntities.compactMap { $0.value.msgBestAttemptNtf.notificationEvent }
+        let allNtfs = notificationEntities.compactMap { $0.value.msgBestAttemptNtf.notificationEvent }
+        let ntfs = allNtfs.filter { !$0.xauXatShouldSuppress }
+        if !allNtfs.isEmpty && ntfs.isEmpty {
+            removeHiddenEventFromBadge()
+        }
         let newMsgNtfs = ntfs.compactMap({ $0.newMsgNtf })
         let useNtfs = if newMsgNtfs.isEmpty { ntfs } else { newMsgNtfs }
         return createNtf(useNtfs)
@@ -731,6 +769,11 @@ class NotificationService: UNNotificationServiceExtension {
             default: createJointNtf(ntfs)
             }
         }
+    }
+
+    private func removeHiddenEventFromBadge() {
+        badgeCount = max(0, badgeCount - 1)
+        ntfBadgeCountGroupDefault.set(badgeCount)
     }
 
     // NOTE: this can be improved when there are two or more connection entity events when no messages were delivered.

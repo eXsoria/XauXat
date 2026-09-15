@@ -436,6 +436,7 @@ struct SimplexLockView: View {
     @Binding var currentLAMode: LAMode
     @EnvironmentObject var m: ChatModel
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     @AppStorage(DEFAULT_LA_NOTICE_SHOWN) private var prefLANoticeShown = false
     @State private var laMode: LAMode = privacyLocalAuthModeDefault.get()
     @AppStorage(DEFAULT_LA_LOCK_DELAY) private var laLockDelay = 30
@@ -443,12 +444,16 @@ struct SimplexLockView: View {
     @State private var selfDestruct: Bool = UserDefaults.standard.bool(forKey: DEFAULT_LA_SELF_DESTRUCT)
     @State private var currentSelfDestruct: Bool = UserDefaults.standard.bool(forKey: DEFAULT_LA_SELF_DESTRUCT)
     @AppStorage(DEFAULT_LA_SELF_DESTRUCT_DISPLAY_NAME) private var selfDestructDisplayName = ""
+    @AppStorage(DEFAULT_LA_DURESS_SCOPE) private var duressScope = XauXatDuressScope.primary.rawValue
+    @AppStorage(DEFAULT_LA_DECOY_DISPLAY_NAME) private var decoyDisplayName = "Alex"
     @AppStorage(GROUP_DEFAULT_ALLOW_SHARE_EXTENSION, store: groupDefaults) private var allowShareExtension = false
     @State private var performLAToggleReset = false
     @State private var performLAModeReset = false
     @State private var performLASelfDestructReset = false
     @State private var showPasswordAction: PasswordAction? = nil
     @State private var showChangePassword = false
+    @State private var decoyEnabled = kcDecoyPassword.get() != nil
+    @State private var continuingDuressSetup = false
     @State var laAlert: LASettingViewAlert? = nil
 
     enum LASettingViewAlert: Identifiable {
@@ -461,6 +466,10 @@ struct SimplexLockView: View {
         case laSelfDestructPasscodeSetAlert
         case laSelfDestructPasscodeChangedAlert
         case laPasscodeNotChangedAlert
+        case decoyPasscodeSetAlert
+        case decoyPasscodeChangedAlert
+        case removeDecoyConfirmation
+        case decoyRemovedAlert
 
         var id: Self { self }
     }
@@ -472,6 +481,8 @@ struct SimplexLockView: View {
         case enableSelfDestruct
         case changeSelfDestructPasscode
         case selfDestructInfo
+        case enableDecoy
+        case changeDecoyPasscode
 
         var id: Self { self }
     }
@@ -493,12 +504,14 @@ struct SimplexLockView: View {
             List {
                 Section("") {
                     Toggle("Enable lock", isOn: $performLA)
+                        .disabled(decoyEnabled)
                     Picker("Lock mode", selection: $laMode) {
                         ForEach(LAMode.allCases) { mode in
                             Text(mode.text)
                         }
                     }
                     .frame(height: 36)
+                    .disabled(decoyEnabled)
                     if performLA {
                         Picker("Lock after", selection: $laLockDelay) {
                             let delays = laDelays.contains(laLockDelay) ? laDelays : [laLockDelay] + laDelays
@@ -522,22 +535,94 @@ struct SimplexLockView: View {
                 }
 
                 if performLA && laMode == .passcode {
-                    Section(header: Text("Self-destruct passcode").foregroundColor(theme.colors.secondary)) {
-                        Toggle(isOn: $selfDestruct) {
-                            HStack(spacing: 6) {
-                                Text("Enable self-destruct")
-                                Image(systemName: "info.circle")
-                                    .foregroundColor(theme.colors.primary)
-                                    .font(.system(size: 14))
+                    if xauXatStorageScope() == .primary {
+                        if plusEntitlements.isAuthorized(for: .decoyPIN) {
+                            Section {
+                                TextField("Decoy profile display name", text: $decoyDisplayName)
+                                    .disabled(hasDecoyDatabase())
+                                if decoyEnabled {
+                                    Button("Change decoy PIN") {
+                                        changeDecoyPassword()
+                                    }
+                                    Button("Remove decoy environment", role: .destructive) {
+                                        laAlert = .removeDecoyConfirmation
+                                    }
+                                } else {
+                                    Button("Set up decoy PIN") {
+                                        showPasswordAction = .enableDecoy
+                                    }
+                                }
+                            } header: {
+                                Text("Decoy environment")
+                                    .foregroundColor(theme.colors.secondary)
+                            } footer: {
+                                Text("Entering this PIN at app unlock opens a separate local profile. While it is configured, app unlock always uses PIN entry so biometrics cannot select the real environment.")
                             }
-                            .onTapGesture {
-                                showPasswordAction = .selfDestructInfo
+                        } else {
+                            Section {
+                                NavigationLink {
+                                    XauXatPlusView()
+                                        .navigationTitle("XauXat Plus")
+                                        .navigationBarTitleDisplayMode(.inline)
+                                } label: {
+                                    XauXatPlusLockedLabel(title: "Set up decoy PIN", systemImage: "person.crop.circle.badge.questionmark")
+                                }
+                            } header: {
+                                Text("Decoy environment")
+                                    .foregroundColor(theme.colors.secondary)
+                            } footer: {
+                                Text("Open XauXat Plus to use an alternate PIN that opens a separate local profile.")
                             }
                         }
-                        if selfDestruct {
-                            TextField("New display name", text: $selfDestructDisplayName)
-                            Button("Change self-destruct passcode") {
-                                changeSelfDestructPassword()
+                    }
+
+                    if xauXatStorageScope() == .primary {
+                        if plusEntitlements.isAuthorized(for: .duressPIN) {
+                            Section {
+                                Picker("Destroy when used", selection: $duressScope) {
+                                    Text(XauXatDuressScope.primary.label).tag(XauXatDuressScope.primary.rawValue)
+                                    if kcDecoyPassword.get() != nil {
+                                        Text(XauXatDuressScope.decoy.label).tag(XauXatDuressScope.decoy.rawValue)
+                                        Text(XauXatDuressScope.all.label).tag(XauXatDuressScope.all.rawValue)
+                                    }
+                                }
+                                Toggle(isOn: $selfDestruct) {
+                                    HStack(spacing: 6) {
+                                        Text("Enable Duress PIN")
+                                        Image(systemName: "info.circle")
+                                            .foregroundColor(theme.colors.primary)
+                                            .font(.system(size: 14))
+                                    }
+                                    .onTapGesture {
+                                        showPasswordAction = .selfDestructInfo
+                                    }
+                                }
+                                if selfDestruct {
+                                    TextField("Replacement profile name", text: $selfDestructDisplayName)
+                                    Button("Change Duress PIN") {
+                                        changeSelfDestructPassword()
+                                    }
+                                }
+                            } header: {
+                                Text("Duress PIN")
+                                    .foregroundColor(theme.colors.secondary)
+                            } footer: {
+                                Text("Entering this PIN at app unlock immediately destroys the selected encryption keys without showing a confirmation, then opens an ordinary replacement profile.")
+                            }
+                        } else {
+                            Section {
+                                NavigationLink {
+                                    XauXatPlusView()
+                                        .navigationTitle("XauXat Plus")
+                                        .navigationBarTitleDisplayMode(.inline)
+                                } label: {
+                                    XauXatPlusLockedLabel(title: "Enable Duress PIN", systemImage: "exclamationmark.shield")
+                                }
+                            } header: {
+                                Text("Duress PIN")
+                                    .foregroundColor(theme.colors.secondary)
+                            } footer: {
+                                Text("Open XauXat Plus to configure a PIN that destroys the selected encryption keys under coercion.")
                             }
                         }
                     }
@@ -577,6 +662,17 @@ struct SimplexLockView: View {
                 toggleSelfDestruct()
             }
         }
+        .onChange(of: plusEntitlements.status) { _ in
+            guard !plusEntitlements.hasAccess else { return }
+            decoyEnabled = false
+            decoyDisplayName = "Alex"
+            currentSelfDestruct = false
+            duressScope = XauXatDuressScope.primary.rawValue
+            if selfDestruct {
+                performLASelfDestructReset = true
+                selfDestruct = false
+            }
+        }
         .alert(item: $laAlert) { alertItem in
             switch alertItem {
             case .laTurnedOnAlert: return laTurnedOnAlert()
@@ -585,9 +681,19 @@ struct SimplexLockView: View {
             case .laUnavailableTurningOffAlert: return laUnavailableTurningOffAlert()
             case .laPasscodeSetAlert: return passcodeAlert("Passcode set!")
             case .laPasscodeChangedAlert: return passcodeAlert("Passcode changed!")
-            case .laSelfDestructPasscodeSetAlert: return selfDestructPasscodeAlert("Self-destruct passcode enabled!")
-            case .laSelfDestructPasscodeChangedAlert: return selfDestructPasscodeAlert("Self-destruct passcode changed!")
+            case .laSelfDestructPasscodeSetAlert: return selfDestructPasscodeAlert("Duress PIN enabled!")
+            case .laSelfDestructPasscodeChangedAlert: return selfDestructPasscodeAlert("Duress PIN changed!")
             case .laPasscodeNotChangedAlert: return mkAlert(title: "Passcode not changed!")
+            case .decoyPasscodeSetAlert: return passcodeAlert("Decoy PIN set!")
+            case .decoyPasscodeChangedAlert: return passcodeAlert("Decoy PIN changed!")
+            case .removeDecoyConfirmation:
+                return Alert(
+                    title: Text("Remove decoy environment?"),
+                    message: Text("The separate decoy profile, its conversations and local files will be permanently deleted. Your main environment is not affected."),
+                    primaryButton: .destructive(Text("Remove")) { removeDecoy() },
+                    secondaryButton: .cancel()
+                )
+            case .decoyRemovedAlert: return mkAlert(title: "Decoy environment removed")
             }
         }
         .sheet(item: $showPasswordAction) { a in
@@ -621,8 +727,9 @@ struct SimplexLockView: View {
                 SetAppPasscodeView(
                     passcodeKeychain: kcSelfDestructPassword,
                     prohibitedPasscodeKeychain: kcAppPassword,
+                    additionalProhibitedPasscodeKeychains: [kcDecoyPassword],
                     title: "Set passcode",
-                    reason: NSLocalizedString("Enable self-destruct passcode", comment: "set passcode view")
+                    reason: NSLocalizedString("Enable Duress PIN", comment: "set passcode view")
                 ) {
                     updateSelfDestruct()
                     showLAAlert(.laSelfDestructPasscodeSetAlert)
@@ -633,7 +740,8 @@ struct SimplexLockView: View {
                 SetAppPasscodeView(
                     passcodeKeychain: kcSelfDestructPassword,
                     prohibitedPasscodeKeychain: kcAppPassword,
-                    reason: NSLocalizedString("Change self-destruct passcode", comment: "set passcode view")
+                    additionalProhibitedPasscodeKeychains: [kcDecoyPassword],
+                    reason: NSLocalizedString("Change Duress PIN", comment: "set passcode view")
                 ) {
                     showLAAlert(.laSelfDestructPasscodeChangedAlert)
                 } cancel: {
@@ -641,10 +749,36 @@ struct SimplexLockView: View {
                 }
             case .selfDestructInfo:
                 selfDestructInfoView()
+            case .enableDecoy:
+                SetAppPasscodeView(
+                    passcodeKeychain: kcDecoyPassword,
+                    prohibitedPasscodeKeychain: kcAppPassword,
+                    additionalProhibitedPasscodeKeychains: [kcSelfDestructPassword],
+                    title: "Set decoy PIN",
+                    reason: NSLocalizedString("Create a separate decoy environment", comment: "set passcode view")
+                ) {
+                    decoyEnabled = true
+                    showLAAlert(.decoyPasscodeSetAlert)
+                } cancel: {}
+            case .changeDecoyPasscode:
+                SetAppPasscodeView(
+                    passcodeKeychain: kcDecoyPassword,
+                    prohibitedPasscodeKeychain: kcAppPassword,
+                    additionalProhibitedPasscodeKeychains: [kcSelfDestructPassword],
+                    title: "New decoy PIN",
+                    reason: NSLocalizedString("Change decoy PIN", comment: "set passcode view")
+                ) {
+                    showLAAlert(.decoyPasscodeChangedAlert)
+                } cancel: {
+                    showLAAlert(.laPasscodeNotChangedAlert)
+                }
             }
         }
         .onAppear {
             showChangePassword = prefPerformLA && currentLAMode == .passcode
+            if kcDecoyPassword.get() == nil && duressScope != XauXatDuressScope.primary.rawValue {
+                duressScope = XauXatDuressScope.primary.rawValue
+            }
         }
         .onDisappear() {
             m.laRequest = nil
@@ -653,26 +787,47 @@ struct SimplexLockView: View {
 
     private func selfDestructInfoView() -> some View {
         VStack(alignment: .leading) {
-            Text("Self-destruct")
+            Text("Duress PIN")
                 .font(.largeTitle)
                 .bold()
                 .padding(.vertical)
             ScrollView {
                 VStack(alignment: .leading) {
                     Group {
-                        Text("If you enter your self-destruct passcode while opening the app:")
+                        Text("Use this only if you understand that recovery is impossible. When the Duress PIN is entered at app unlock:")
                         VStack(spacing: 8) {
-                            textListItem("1.", "All app data is deleted.")
-                            textListItem("2.", "App passcode is replaced with self-destruct passcode.")
-                            textListItem("3.", "An empty chat profile with the provided name is created, and the app opens as usual.")
+                            textListItem("1.", "The encryption keys for the environment you selected are deleted immediately.")
+                            textListItem("2.", "There is no confirmation on the lock screen and the action cannot be undone.")
+                            textListItem("3.", "XauXat has no automatic iCloud backup. Only an export you created earlier could contain a separate copy.")
+                            textListItem("4.", "An ordinary empty profile opens so the app does not reveal that a destructive action occurred.")
                         }
                     }
                     .padding(.bottom)
+                    if selfDestruct && kcSelfDestructPassword.get() == nil {
+                        Button("I understand, set Duress PIN") {
+                            continuingDuressSetup = true
+                            showPasswordAction = nil
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                showPasswordAction = .enableSelfDestruct
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Cancel") {
+                            revertSelfDestruct()
+                            showPasswordAction = nil
+                        }
+                        .padding(.top, 4)
+                    }
                 }
             }
         }
         .frame(maxWidth: .infinity)
         .padding()
+        .onDisappear {
+            if selfDestruct && kcSelfDestructPassword.get() == nil && !continuingDuressSetup {
+                revertSelfDestruct()
+            }
+        }
     }
 
     private func  showLAAlert(_ a: LASettingViewAlert) {
@@ -714,14 +869,19 @@ struct SimplexLockView: View {
     }
 
     private func toggleSelfDestruct() {
-        authenticate(reason: NSLocalizedString("Change self-destruct mode", comment: "authentication reason")) { laResult in
+        if selfDestruct && !plusEntitlements.isAuthorized(for: .duressPIN) {
+            revertSelfDestruct()
+            return
+        }
+        authenticate(reason: NSLocalizedString("Change Duress PIN mode", comment: "authentication reason")) { laResult in
             switch laResult {
             case .failed:
                 revertSelfDestruct()
                 laAlert = .laFailedAlert
             case .success:
                 if selfDestruct {
-                    showPasswordAction = .enableSelfDestruct
+                    continuingDuressSetup = false
+                    showPasswordAction = .selfDestructInfo
                 } else {
                     resetSelfDestruct()
                 }
@@ -742,11 +902,41 @@ struct SimplexLockView: View {
     }
 
     private func changeSelfDestructPassword() {
-        authenticate(reason: NSLocalizedString("Change self-destruct passcode", comment: "authentication reason")) { laResult in
+        authenticate(reason: NSLocalizedString("Change Duress PIN", comment: "authentication reason")) { laResult in
             switch laResult {
             case .failed: laAlert = .laFailedAlert
             case .success: showPasswordAction = .changeSelfDestructPasscode
             case .unavailable: disableUnavailableLA()
+            }
+        }
+    }
+
+    private func changeDecoyPassword() {
+        authenticate(reason: NSLocalizedString("Change decoy PIN", comment: "authentication reason")) { laResult in
+            switch laResult {
+            case .failed: laAlert = .laFailedAlert
+            case .success: showPasswordAction = .changeDecoyPasscode
+            case .unavailable: disableUnavailableLA()
+            }
+        }
+    }
+
+    private func removeDecoy() {
+        authenticate(reason: NSLocalizedString("Remove decoy environment", comment: "authentication reason")) { laResult in
+            switch laResult {
+            case .failed:
+                laAlert = .laFailedAlert
+            case .success:
+                deleteDecoyStorage()
+                _ = kcDecoyPassword.remove()
+                decoyEnabled = false
+                decoyDisplayName = "Alex"
+                if duressScope != XauXatDuressScope.primary.rawValue {
+                    duressScope = XauXatDuressScope.primary.rawValue
+                }
+                showLAAlert(.decoyRemovedAlert)
+            case .unavailable:
+                laAlert = .laUnavailableInstructionAlert
             }
         }
     }
@@ -817,6 +1007,7 @@ struct SimplexLockView: View {
     private func resetSelfDestruct() {
         _ = kcSelfDestructPassword.remove()
         selfDestruct = false
+        duressScope = XauXatDuressScope.primary.rawValue
         updateSelfDestruct()
     }
 
@@ -835,7 +1026,7 @@ struct SimplexLockView: View {
     }
 
     private func selfDestructPasscodeAlert(_ title: LocalizedStringKey) -> Alert {
-        mkAlert(title: title, message: "If you enter this passcode when opening the app, all app data will be irreversibly removed!")
+        mkAlert(title: title, message: "Entering this PIN at app unlock permanently destroys the selected encryption keys without confirmation. XauXat has no automatic iCloud backup.")
     }
 }
 

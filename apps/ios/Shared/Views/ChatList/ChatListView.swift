@@ -521,15 +521,16 @@ struct ChatListView: View {
     
     // Spec: spec/client/chat-list.md#filteredChats
     private func filteredChats() -> [Chat] {
+        let visibleChats = chatModel.chats.filter { !xauXatIsChatHidden($0.id) }
         if !searchChatFilteredBySimplexLink.isEmpty {
-            return chatModel.chats.filter { searchChatFilteredBySimplexLink.contains($0.id) }
+            return visibleChats.filter { searchChatFilteredBySimplexLink.contains($0.id) }
         } else {
             let s = searchString()
             return s == ""
-            ? chatModel.chats.filter { chat in
+            ? visibleChats.filter { chat in
                 !chat.chatInfo.chatDeleted && !chat.chatInfo.contactCard && filtered(chat)
             }
-            : chatModel.chats.filter { chat in
+            : visibleChats.filter { chat in
                 let cInfo = chat.chatInfo
                 return switch cInfo {
                 case let .direct(contact):
