@@ -4,6 +4,7 @@ import SwiftUI
 import SimpleXChat
 import SwiftyGif
 import PhotosUI
+import UniformTypeIdentifiers
 
 let MAX_NUMBER_OF_MENTIONS = 3
 
@@ -457,6 +458,43 @@ private func saveXauXatCodeLockedVideo(
         return protectedFile
     } catch {
         logger.error("Unable to protect XauXat video: \(error.localizedDescription)")
+        return nil
+    }
+}
+
+private func saveXauXatCodeLockedFile(
+    url: URL,
+    code: String,
+    caption: String
+) async -> CryptoFile? {
+    guard url.startAccessingSecurityScopedResource() else {
+        logger.error("Unable to access selected file for XauXat protection")
+        return nil
+    }
+    defer { url.stopAccessingSecurityScopedResource() }
+
+    let originalFileName = url.lastPathComponent
+    let mimeType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
+    do {
+        let envelopeData = try await Task.detached(priority: .userInitiated) {
+            let fileData = try Data(contentsOf: url, options: [.mappedIfSafe, .uncached])
+            let payload = XauXatCodeLockedPayload(
+                kind: .file,
+                body: fileData,
+                fileName: originalFileName,
+                mimeType: mimeType,
+                caption: caption.isEmpty ? nil : caption
+            )
+            return try XauXatCodeLockedEnvelope.seal(payload, code: code).encoded()
+        }.value
+        let protectedFileName = generateNewFileName("document", "xauxat")
+        return saveFile(
+            envelopeData,
+            protectedFileName,
+            encrypted: privacyEncryptLocalFilesGroupDefault.get()
+        )
+    } catch {
+        logger.error("Unable to protect XauXat file: \(error.localizedDescription)")
         return nil
     }
 }
@@ -1336,6 +1374,8 @@ struct ComposeView: View {
             }
         case .voicePreview:
             composeState.voiceMessageRecordingState == .finished
+        case .filePreview:
+            true
         default: false
         }
     }
@@ -1745,7 +1785,7 @@ struct ComposeView: View {
                 await MainActor.run {
                     AlertManager.shared.showAlertMsg(
                         title: "Cannot protect this content",
-                        message: "Code-Locked Content cannot be combined with editing, forwarding, replies, live messages, or files yet."
+                        message: "Code-Locked Content cannot be combined with editing, forwarding, replies, or live messages."
                     )
                 }
                 return nil
@@ -1870,7 +1910,27 @@ struct ComposeView: View {
                     sent = await send(.voice(text: msgText, duration: duration), quoted: quoted, file: file, ttl: ttl, mentions: mentions, sign: sign)
                 }
             case let .filePreview(_, file):
-                if let savedFile = saveFileFromURL(file) {
+                if let code = codeLockCode {
+                    guard let savedFile = await saveXauXatCodeLockedFile(url: file, code: code, caption: msgText) else {
+                        await MainActor.run {
+                            composeState.inProgress = false
+                            AlertManager.shared.showAlertMsg(
+                                title: "Could not protect file",
+                                message: "Nothing was sent. Please try again."
+                            )
+                        }
+                        return nil
+                    }
+                    sent = await send(
+                        .file(XauXatCodeLockedEnvelope.fileWireText(kind: .file)),
+                        quoted: quoted,
+                        file: savedFile,
+                        live: live,
+                        ttl: ttl,
+                        mentions: [:],
+                        sign: sign
+                    )
+                } else if let savedFile = saveFileFromURL(file) {
                     sent = await send(.file(msgText), quoted: quoted, file: savedFile, live: live, ttl: ttl, mentions: mentions, sign: sign)
                 }
             }
