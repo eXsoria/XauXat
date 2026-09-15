@@ -65,8 +65,11 @@ public func createContactConnectedNtf(_ user: any UserLike, _ contact: Contact, 
 // Spec: spec/services/notifications.md#createMessageReceivedNtf
 public func createMessageReceivedNtf(_ user: any UserLike, _ cInfo: ChatInfo, _ cItem: ChatItem, _ badgeCount: Int) -> UNMutableNotificationContent {
     let previewMode = xauXatNtfPreviewMode
+    let locked = xauXatIsChatLocked(cInfo.id)
     var title: String
-    if case let .group(groupInfo, _) = cInfo, case let .groupRcv(groupMember) = cItem.chatDir {
+    if locked {
+        title = NSLocalizedString("XauXat", comment: "locked conversation notification title")
+    } else if case let .group(groupInfo, _) = cInfo, case let .groupRcv(groupMember) = cItem.chatDir {
         title = groupMsgNtfTitle(groupInfo, groupMember, hideContent: previewMode == .hidden)
     } else {
         title = previewMode == .hidden ? contactHidden : "\(cInfo.chatViewName):"
@@ -74,7 +77,7 @@ public func createMessageReceivedNtf(_ user: any UserLike, _ cInfo: ChatInfo, _ 
     return createNotification(
         categoryIdentifier: ntfCategoryMessageReceived,
         title: title,
-        body: previewMode == .message ? hideSecrets(cItem, isChannel: cInfo.isChannel) : NSLocalizedString("new message", comment: "notification"),
+        body: !locked && previewMode == .message ? hideSecrets(cItem, isChannel: cInfo.isChannel) : NSLocalizedString("new message", comment: "notification"),
         targetContentIdentifier: cInfo.id,
         userInfo: ["userId": user.userId],
 //            userInfo: ["chatId": cInfo.id, "chatItemId": cItem.id]
@@ -88,10 +91,11 @@ public func createCallInvitationNtf(_ invitation: RcvCallInvitation, _ badgeCoun
                 ? NSLocalizedString("Incoming video call", comment: "notification")
                 : NSLocalizedString("Incoming audio call", comment: "notification")
     let hideContent = xauXatNtfPreviewMode == .hidden
+    let locked = xauXatIsChatLocked(invitation.contact.id)
     return createNotification(
         categoryIdentifier: ntfCategoryCallInvitation,
-        title: hideContent ? contactHidden : "\(invitation.contact.chatViewName):",
-        body: text,
+        title: locked ? NSLocalizedString("XauXat", comment: "locked conversation notification title") : hideContent ? contactHidden : "\(invitation.contact.chatViewName):",
+        body: locked ? NSLocalizedString("new activity", comment: "locked conversation notification") : text,
         targetContentIdentifier: nil,
         userInfo: ["chatId": invitation.contact.id, "userId": invitation.user.userId],
         badgeCount: badgeCount
@@ -119,6 +123,10 @@ public func createConnectionEventNtf(_ user: User, _ connEntity: ConnectionEntit
         targetContentIdentifier = groupInfo.id
     case .userContactConnection:
         title = NSLocalizedString("New contact request", comment: "notification")
+    }
+    if let chatID = targetContentIdentifier, xauXatIsChatLocked(chatID) {
+        title = NSLocalizedString("XauXat", comment: "locked conversation notification title")
+        body = NSLocalizedString("new message", comment: "notification")
     }
     return createNotification(
         categoryIdentifier: ntfCategoryConnectionEvent,

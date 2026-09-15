@@ -115,6 +115,12 @@ class ItemsModel: ObservableObject {
 
     // Spec: spec/state.md#loadOpenChat
     func loadOpenChat(_ chatId: ChatId, willNavigate: @escaping () -> Void = {}) {
+        authorizeChatOpen(chatId) { [weak self] in
+            self?.loadOpenChatAuthorized(chatId, willNavigate: willNavigate)
+        }
+    }
+
+    private func loadOpenChatAuthorized(_ chatId: ChatId, willNavigate: @escaping () -> Void = {}) {
         navigationTimeoutTask?.cancel()
         loadChatTask?.cancel()
         navigationTimeoutTask = Task {
@@ -141,6 +147,12 @@ class ItemsModel: ObservableObject {
 
     // Spec: spec/state.md#loadOpenChatNoWait
     func loadOpenChatNoWait(_ chatId: ChatId, _ openAroundItemId: ChatItem.ID? = nil) {
+        authorizeChatOpen(chatId) { [weak self] in
+            self?.loadOpenChatNoWaitAuthorized(chatId, openAroundItemId)
+        }
+    }
+
+    private func loadOpenChatNoWaitAuthorized(_ chatId: ChatId, _ openAroundItemId: ChatItem.ID? = nil) {
         navigationTimeoutTask?.cancel()
         loadChatTask?.cancel()
         loadChatTask = Task {
@@ -153,6 +165,19 @@ class ItemsModel: ObservableObject {
                     }
                 }
             }
+        }
+    }
+
+    private func authorizeChatOpen(_ chatId: ChatId, open: @escaping () -> Void) {
+        guard xauXatIsChatLocked(chatId) else {
+            open()
+            return
+        }
+        authenticate(
+            title: "Locked conversation",
+            reason: NSLocalizedString("Authenticate to open this conversation", comment: "conversation lock")
+        ) { result in
+            if case .success = result { open() }
         }
     }
 

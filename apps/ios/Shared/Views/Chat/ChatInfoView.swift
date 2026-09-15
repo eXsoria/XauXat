@@ -37,6 +37,41 @@ func localizedInfoRow(_ title: LocalizedStringKey, _ value: LocalizedStringKey) 
     }
 }
 
+struct XauXatConversationLockButton: View {
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
+    let chatID: ChatId
+    @State private var locked: Bool
+
+    init(chatID: ChatId) {
+        self.chatID = chatID
+        _locked = State(initialValue: xauXatIsChatLocked(chatID))
+    }
+
+    var body: some View {
+        if locked || plusEntitlements.isAuthorized(for: .conversationLock) {
+            Button {
+                authenticate(
+                    title: locked ? "Unlock conversation" : "Lock conversation",
+                    reason: NSLocalizedString("Authenticate to change conversation protection", comment: "conversation lock")
+                ) { result in
+                    guard case .success = result else { return }
+                    let next = !locked
+                    if xauXatSetChatLocked(chatID, locked: next) {
+                        locked = next
+                        if next {
+                            dismissAllSheets(animated: false) {
+                                ChatModel.shared.chatId = nil
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Label(locked ? "Remove conversation lock" : "Lock conversation", systemImage: locked ? "lock.open" : "lock")
+            }
+        }
+    }
+}
+
 @ViewBuilder func smpServers(_ title: LocalizedStringKey, _ servers: [String], _ secondaryColor: Color) -> some View {
     if servers.count > 0 {
         HStack {
@@ -93,6 +128,7 @@ enum SendReceipts: Identifiable, Hashable {
 struct ChatInfoView: View {
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     @Environment(\.dismiss) var dismiss: DismissAction
     @ObservedObject var chat: Chat
     @State var contact: Contact
@@ -208,6 +244,14 @@ struct ChatInfoView: View {
                         //                    }
                     }
                     .disabled(!contact.ready || !contact.active)
+
+                    if xauXatIsChatLocked(chat.id) || plusEntitlements.isAuthorized(for: .conversationLock) {
+                        Section {
+                            XauXatConversationLockButton(chatID: chat.id)
+                        } footer: {
+                            Text("Locked conversations hide message previews and require the authentication mode selected in App Lock.")
+                        }
+                    }
 
                     Section {
                         ChatTTLOption(chat: chat, progressIndicator: $progressIndicator)

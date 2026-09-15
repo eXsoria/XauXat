@@ -679,7 +679,8 @@ private struct XauXatContactsView: View {
             guard case let .direct(contact) = chat.chatInfo,
                   contact.active,
                   !contact.chatDeleted,
-                  !contact.isContactCard else { return false }
+                  !contact.isContactCard,
+                  !xauXatIsChatLocked(chat.id) else { return false }
             return query.isEmpty || contact.chatViewName.localizedLowercase.contains(query)
         }
     }
@@ -770,6 +771,9 @@ private struct XauXatChatRow: View {
     }
 
     private var detail: String {
+        if xauXatIsChatLocked(chat.id) {
+            return "Locked conversation"
+        }
         if contactStyle {
             return chat.chatInfo.shortDescr?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "No bio info"
         }
@@ -795,6 +799,11 @@ private struct XauXatChatRow: View {
                 }
 
                 HStack(spacing: 8) {
+                    if xauXatIsChatLocked(chat.id) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(palette.muted)
+                    }
                     Text(detail)
                         .font(.custom("Courier", size: 13))
                         .foregroundStyle(palette.muted)
