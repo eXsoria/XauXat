@@ -78,6 +78,7 @@ func showKeepInvitationAlert() {
 struct NewChatView: View {
     @EnvironmentObject var m: ChatModel
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @State var selection: NewChatOption
     @State var showQRCodeScanner = false
     var onboarding: Bool = false
@@ -94,7 +95,10 @@ struct NewChatView: View {
         VStack(alignment: .leading) {
             if !onboarding {
                 Picker("New chat", selection: $selection) {
-                    Label("1-time link", systemImage: "link")
+                    Label(
+                        "1-time link",
+                        systemImage: plusEntitlements.isAuthorized(for: .advancedContactInvites) ? "link" : "lock.fill"
+                    )
                         .tag(NewChatOption.invite)
                     Label("Connect via link", systemImage: "qrcode")
                         .tag(NewChatOption.connect)
@@ -112,10 +116,18 @@ struct NewChatView: View {
                 // it seems there's a bug in iOS 15 if several views in switch (or if-else) statement have different transitions
                 // https://developer.apple.com/forums/thread/714977?answerId=731615022#731615022
                 if case .invite = selection {
-                    prepareAndInviteView()
+                    Group {
+                        if plusEntitlements.isAuthorized(for: .advancedContactInvites) {
+                            prepareAndInviteView()
+                        } else {
+                            lockedOneTimeInviteView()
+                        }
+                    }
                         .transition(.move(edge: .leading))
                         .onAppear {
-                            createInvitation()
+                            if plusEntitlements.isAuthorized(for: .advancedContactInvites) {
+                                createInvitation()
+                            }
                         }
                 }
                 if case .connect = selection {
@@ -199,7 +211,33 @@ struct NewChatView: View {
         }
     }
 
+    private func lockedOneTimeInviteView() -> some View {
+        VStack(spacing: 18) {
+            Image(systemName: "link.badge.plus")
+                .font(.system(size: 38, weight: .regular))
+                .foregroundStyle(theme.colors.secondary)
+                .accessibilityHidden(true)
+            Text("One-time contact invites")
+                .font(.title2.weight(.semibold))
+            Text("Create a link that becomes invalid as soon as the first contact uses it.")
+                .foregroundStyle(theme.colors.secondary)
+                .multilineTextAlignment(.center)
+            NavigationLink {
+                XauXatPlusView()
+                    .navigationTitle("XauXat Plus")
+                    .navigationBarTitleDisplayMode(.inline)
+            } label: {
+                Label("Open XauXat Plus", systemImage: "lock.open")
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private func createInvitation() {
+        guard plusEntitlements.isAuthorized(for: .advancedContactInvites) else { return }
         if connLinkInvitation.connFullLink == "" && contactConnection == nil && !creatingConnReq {
             creatingConnReq = true
             Task {

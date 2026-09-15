@@ -317,6 +317,16 @@ struct ChatInfoView: View {
                         }
                     }
 
+                    if contact.connectedViaCreatedOneTimeInvite {
+                        Section {
+                            infoRow("Status", "Used")
+                        } header: {
+                            Text("One-time invite")
+                        } footer: {
+                            Text("This contact consumed the invite. The link cannot be used again.")
+                        }
+                    }
+
                     if let contactLink = contact.contactLink {
                         Section {
                             SimpleXLinkQRCode(uri: contactLink)
