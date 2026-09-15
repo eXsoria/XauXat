@@ -224,6 +224,7 @@
 		8CE848A32C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */; };
 		A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000133D1000100000001 /* EmbeddedTorManager.swift */; };
 		A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000333D2000100000003 /* XauXatHomeView.swift */; };
+		A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */; };
 		B70A39732D24090D00E80A5F /* TagListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70A39722D24090D00E80A5F /* TagListView.swift */; };
 		B70CE9E62D4BE5930080F36D /* GroupMentions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70CE9E52D4BE5930080F36D /* GroupMentions.swift */; };
 		B728945B2D0C62BF00F7A19A /* ElegantEmojiPicker in Frameworks */ = {isa = PBXBuildFile; productRef = B728945A2D0C62BF00F7A19A /* ElegantEmojiPicker */; };
@@ -607,6 +608,7 @@
 		8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableChatItemToolbars.swift; sourceTree = "<group>"; };
 		A11E000133D1000100000001 /* EmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedTorManager.swift; sourceTree = "<group>"; };
 		A11E000333D2000100000003 /* XauXatHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatHomeView.swift; sourceTree = "<group>"; };
+		A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatCodeLockedContent.swift; sourceTree = "<group>"; };
 		B5D5FB384075FF4C67AA7A2A /* Pods_SimpleX__iOS_.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_SimpleX__iOS_.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70A39722D24090D00E80A5F /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
 		B70CE9E52D4BE5930080F36D /* GroupMentions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupMentions.swift; sourceTree = "<group>"; };
@@ -855,6 +857,7 @@
 			isa = PBXGroup;
 			children = (
 				A11E000133D1000100000001 /* EmbeddedTorManager.swift */,
+				A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */,
 				E5DDBE6D2DC4106200A0EFF0 /* AppAPITypes.swift */,
 				5C764E88279CBCB3000C6508 /* ChatModel.swift */,
 				5C2E260627A2941F00F70299 /* SimpleXAPI.swift */,
@@ -1582,6 +1585,7 @@
 			files = (
 				A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */,
 				A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */,
+				A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */,
 				64C06EB52A0A4A7C00792D4D /* ChatItemInfoView.swift in Sources */,
 				8CC317442D4FEB9B00292A20 /* EndlessScrollView.swift in Sources */,
 				640417CE2B29B8C200CCB412 /* NewChatView.swift in Sources */,
