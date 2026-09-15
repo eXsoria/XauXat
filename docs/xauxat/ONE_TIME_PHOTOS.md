@@ -20,6 +20,10 @@ On a receiving XauXat client, opening the photo records consumption in local
 persistent state. Closing the viewer removes the local encrypted envelope. The
 sender's `allowSave` policy controls whether the save action is shown.
 
+The composer enables One-Time View by default and exposes it as a real toggle.
+Turning it off sends a regular SimpleX image. Sent one-time photos remain visible
+to their sender, but carry a clear One-Time View marker in the chat bubble.
+
 ## Compatibility
 
 Photos created by the initial iOS implementation used `xauxat-otv-ns-` or
