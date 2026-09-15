@@ -7,6 +7,12 @@ target 'SimpleX (iOS)' do
   pod 'Tor/CTor-NoLZMA', '409.11.2'
 end
 
+target 'SimpleX NSE' do
+  # A notification service extension runs in a separate process and cannot
+  # depend on the app's Tor thread still being alive while the app is suspended.
+  pod 'Tor/CTor-NoLZMA', '409.11.2'
+end
+
 # Tor 409.11.2 writes the argv terminator one element past its allocation.
 # Keep this patch bounded and fail dependency installation if upstream changes.
 post_install do |installer|

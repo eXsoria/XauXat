@@ -450,8 +450,22 @@ public func isXauXatManagedTorConfig(_ cfg: NetCfg) -> Bool {
 /// Retains every tunable network value supplied by upstream UI/code while
 /// replacing only the route fields that XauXat owns.
 public func xauXatManagedTorConfig(_ cfg: NetCfg) -> NetCfg {
+    xauXatManagedTorConfig(
+        cfg,
+        socksProxy: groupDefaults.string(forKey: GROUP_DEFAULT_XAUXAT_TOR_SOCKS_PROXY) ?? "127.0.0.1:1"
+    )
+}
+
+/// Applies XauXat's Tor-only route using a process-local endpoint. Extensions
+/// use this overload because they cannot rely on the main app's Tor process or
+/// publish their short-lived SOCKS port as if it belonged to the app.
+public func xauXatManagedTorConfig(_ cfg: NetCfg, socksProxy: String) -> NetCfg {
     var managed = cfg
-    managed.socksProxy = groupDefaults.string(forKey: GROUP_DEFAULT_XAUXAT_TOR_SOCKS_PROXY) ?? "127.0.0.1:1"
+    let endpoint = socksProxy.split(separator: ":", omittingEmptySubsequences: false)
+    let isValidLoopback = endpoint.count == 2 &&
+        endpoint[0] == "127.0.0.1" &&
+        UInt16(endpoint[1]).map { $0 > 0 } == true
+    managed.socksProxy = isValidLoopback ? socksProxy : "127.0.0.1:1"
     managed.socksMode = .always
     managed.hostMode = .onionHost
     managed.requiredHostMode = false
