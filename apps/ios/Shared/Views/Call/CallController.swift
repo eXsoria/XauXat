@@ -303,7 +303,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: invitation.contact.id)
         update.hasVideo = false
-        update.localizedCallerName = xauXatIsChatHidden(invitation.contact.id)
+        update.localizedCallerName = xauXatIsChatHidden(invitation.contact.id) || invitation.user.hidden || xauXatIsProfileProtected(invitation.user.userId)
             ? NSLocalizedString("XauXat call", comment: "hidden conversation callkit banner")
             : invitation.contact.displayName
         return update

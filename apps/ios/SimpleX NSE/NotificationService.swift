@@ -75,7 +75,15 @@ public enum NSENotificationData {
     }
 
     @inline(__always)
-    var xauXatHiddenConversation: Bool {
+    var xauXatShouldSuppress: Bool {
+        let protectedProfile = switch self {
+        case let .connectionEvent(user, _): user.hidden
+        case let .contactConnected(user, _): (user as? User)?.hidden == true
+        case let .contactRequest(user, _): (user as? User)?.hidden == true
+        case let .messageReceived(user, _, _): (user as? User)?.hidden == true
+        case let .callInvitation(invitation): invitation.user.hidden
+        default: false
+        }
         let chatId: ChatId? = switch self {
         case let .messageReceived(_, chatInfo, _): chatInfo.id
         case let .callInvitation(invitation): invitation.contact.id
@@ -86,7 +94,15 @@ public enum NSENotificationData {
             }
         default: nil
         }
-        return chatId.map(xauXatIsChatHidden) ?? false
+        let protectedUserId: Int64? = switch self {
+        case let .connectionEvent(user, _): user.userId
+        case let .contactConnected(user, _): user.userId
+        case let .contactRequest(user, _): user.userId
+        case let .messageReceived(user, _, _): user.userId
+        case let .callInvitation(invitation): invitation.user.userId
+        default: nil
+        }
+        return protectedProfile || (protectedUserId.map(xauXatIsProfileProtected) ?? false) || (chatId.map(xauXatIsChatHidden) ?? false)
     }
 }
 
@@ -684,13 +700,13 @@ class NotificationService: UNNotificationServiceExtension {
             serviceBestAttemptNtf = nil
             contentHandler = nil
             if let callInv {
-                if xauXatIsChatHidden(callInv.contact.id) {
+                if xauXatIsChatHidden(callInv.contact.id) || callInv.user.hidden || xauXatIsProfileProtected(callInv.user.userId) {
                     removeHiddenEventFromBadge()
                 }
                 if useCallKit() {
                     logger.debug("NotificationService reportNewIncomingVoIPPushPayload for \(callInv.contact.id)")
                     CXProvider.reportNewIncomingVoIPPushPayload([
-                        "displayName": xauXatIsChatHidden(callInv.contact.id) ? NSLocalizedString("XauXat call", comment: "hidden conversation callkit banner") : callInv.contact.displayName,
+                        "displayName": xauXatIsChatHidden(callInv.contact.id) || callInv.user.hidden || xauXatIsProfileProtected(callInv.user.userId) ? NSLocalizedString("XauXat call", comment: "protected profile callkit banner") : callInv.contact.displayName,
                         "contactId": callInv.contact.id,
                         "callUUID": callInv.callUUID ?? "",
                         "media": CallMediaType.audio.rawValue,
@@ -716,7 +732,7 @@ class NotificationService: UNNotificationServiceExtension {
         // let conns = self.notificationEntities.compactMap { $0.value.ntfConn.connEntity.localDisplayName }
         // logger.debug("NotificationService prepareNotification for \(String(describing: conns))")
         let allNtfs = notificationEntities.compactMap { $0.value.msgBestAttemptNtf.notificationEvent }
-        let ntfs = allNtfs.filter { !$0.xauXatHiddenConversation }
+        let ntfs = allNtfs.filter { !$0.xauXatShouldSuppress }
         if !allNtfs.isEmpty && ntfs.isEmpty {
             removeHiddenEventFromBadge()
         }
