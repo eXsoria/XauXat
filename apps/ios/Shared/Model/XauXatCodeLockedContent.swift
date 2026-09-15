@@ -16,17 +16,20 @@ struct XauXatCodeLockedPayload: Codable, Equatable {
     let body: Data
     let fileName: String?
     let mimeType: String?
+    let caption: String?
 
     init(
         kind: XauXatCodeLockedContentKind,
         body: Data,
         fileName: String? = nil,
-        mimeType: String? = nil
+        mimeType: String? = nil,
+        caption: String? = nil
     ) {
         self.kind = kind
         self.body = body
         self.fileName = fileName
         self.mimeType = mimeType
+        self.caption = caption
     }
 
     init(text: String) {
@@ -49,6 +52,7 @@ enum XauXatCodeLockedContentError: Error, Equatable {
 struct XauXatCodeLockedEnvelope: Codable, Equatable {
     static let currentVersion = 1
     static let wireMarker = "xauxat-code-lock:v1:"
+    static let fileWireMarker = "xauxat-code-lock-file:v1:"
     static let unsupportedClientMessage = "🔒 XauXat protected content. Update XauXat to unlock it."
 
     private static let kdfName = "pbkdf2-sha256"
@@ -144,6 +148,19 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
         (try? fromWireText(text)) != nil
     }
 
+    static func fileWireText(kind: XauXatCodeLockedContentKind) -> String {
+        "\(unsupportedClientMessage)\n\(fileWireMarker)\(kind.rawValue)"
+    }
+
+    static func fileKind(fromWireText text: String) -> XauXatCodeLockedContentKind? {
+        guard isFileWireText(text), let markerRange = text.range(of: fileWireMarker) else { return nil }
+        return XauXatCodeLockedContentKind(rawValue: String(text[markerRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    static func isFileWireText(_ text: String) -> Bool {
+        text.hasPrefix(unsupportedClientMessage) && text.contains(fileWireMarker)
+    }
+
     private static func normalized(_ code: String) throws -> String {
         let normalized = code.precomposedStringWithCanonicalMapping
         guard !normalized.isEmpty, normalized.utf8.count <= 128 else {
@@ -184,8 +201,23 @@ func xauXatIsCodeLockedText(_ text: String) -> Bool {
         && text.contains(XauXatCodeLockedEnvelope.wireMarker)
 }
 
+func xauXatIsCodeLockedFile(_ text: String, kind: XauXatCodeLockedContentKind? = nil) -> Bool {
+    guard let fileKind = XauXatCodeLockedEnvelope.fileKind(fromWireText: text) else { return false }
+    return kind == nil || fileKind == kind
+}
+
+func xauXatIsAnyCodeLockedContent(_ text: String) -> Bool {
+    xauXatIsCodeLockedText(text) || XauXatCodeLockedEnvelope.isFileWireText(text)
+}
+
 func xauXatCodeLockedPreviewText(_ text: String) -> String {
-    xauXatIsCodeLockedText(text)
+    if xauXatIsCodeLockedFile(text, kind: .image) {
+        return NSLocalizedString("Protected photo", comment: "code-locked photo placeholder")
+    }
+    if XauXatCodeLockedEnvelope.isFileWireText(text) {
+        return NSLocalizedString("Protected content", comment: "code-locked content placeholder")
+    }
+    return xauXatIsCodeLockedText(text)
         ? NSLocalizedString("Protected message", comment: "code-locked message placeholder")
         : text
 }

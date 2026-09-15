@@ -354,6 +354,46 @@ enum UploadContent: Equatable {
     }
 }
 
+private func saveXauXatCodeLockedPhoto(
+    _ image: UIImage,
+    animated: Bool,
+    code: String,
+    caption: String,
+    allowSave: Bool
+) async -> XauXatPreparedOneTimePhoto? {
+    let imageData: Data?
+    let fileName: String
+    let mimeType: String
+    if animated {
+        imageData = image.imageData.flatMap(xauxatSanitizeAnimatedImageData)
+        fileName = "photo.gif"
+        mimeType = "image/gif"
+    } else {
+        let hasAlpha = imageHasAlpha(image)
+        imageData = resizeImageToDataSize(image, maxDataSize: MAX_IMAGE_SIZE, hasAlpha: hasAlpha)
+        fileName = hasAlpha ? "photo.png" : "photo.jpg"
+        mimeType = hasAlpha ? "image/png" : "image/jpeg"
+    }
+    guard let imageData else { return nil }
+
+    do {
+        let envelopeData = try await Task.detached(priority: .userInitiated) {
+            let payload = XauXatCodeLockedPayload(
+                kind: .image,
+                body: imageData,
+                fileName: fileName,
+                mimeType: mimeType,
+                caption: caption.isEmpty ? nil : caption
+            )
+            return try XauXatCodeLockedEnvelope.seal(payload, code: code).encoded()
+        }.value
+        return saveXauXatProtectedPhotoData(envelopeData, allowSave: allowSave)
+    } catch {
+        logger.error("Unable to protect XauXat photo: \(error.localizedDescription)")
+        return nil
+    }
+}
+
 // Spec: spec/client/compose.md#ComposeView
 struct ComposeView: View {
     @EnvironmentObject var chatModel: ChatModel
@@ -666,8 +706,10 @@ struct ComposeView: View {
         .sheet(isPresented: $showCodeLockSetup) {
             XauXatCodeLockSetupView { code in
                 codeLockCode = code
-                resetLinkPreview()
-                composeState = composeState.copy(preview: .noPreview)
+                if case .linkPreview = composeState.preview {
+                    resetLinkPreview()
+                    composeState = composeState.copy(preview: .noPreview)
+                }
             }
         }
         .onChange(of: chosenMedia) { selected in
@@ -1205,6 +1247,13 @@ struct ComposeView: View {
     private var codeLockCompatiblePreview: Bool {
         switch composeState.preview {
         case .noPreview, .linkPreview: true
+        case let .mediaPreviews(media):
+            !media.isEmpty && media.allSatisfy { _, content in
+                switch content {
+                case .simpleImage, .animatedImage: true
+                case .video, .none: false
+                }
+            }
         default: false
         }
     }
@@ -1229,14 +1278,14 @@ struct ComposeView: View {
                 .contentShape(Rectangle())
         }
         .tint(theme.colors.primary)
-        .accessibilityLabel(codeLockCode == nil ? "Protect message with code" : "Remove message code")
+        .accessibilityLabel(codeLockCode == nil ? "Protect content with code" : "Remove content code")
     }
 
     private func codeLockStatusView() -> some View {
         HStack(spacing: 8) {
             Image(systemName: "lock.fill")
                 .font(.caption)
-            Text("Message protected by code")
+            Text("Content protected by code")
                 .font(.subheadline.weight(.medium))
             Spacer()
             Button("Remove") { codeLockCode = nil }
@@ -1607,16 +1656,18 @@ struct ComposeView: View {
         let msgText = text ?? composeState.message
         let liveMessage = composeState.liveMessage
         let protectedText: MsgContent?
-        if let code = codeLockCode {
-            guard !live, composeState.noPreview, composeState.contextItem == .noContextItem else {
+        if codeLockCode != nil {
+            guard !live, codeLockCompatiblePreview, composeState.contextItem == .noContextItem else {
                 await MainActor.run {
                     AlertManager.shared.showAlertMsg(
-                        title: "Cannot protect this message",
-                        message: "Code-Locked Text cannot be combined with editing, forwarding, replies, live messages, or attachments."
+                        title: "Cannot protect this content",
+                        message: "Code-Locked Content cannot be combined with editing, forwarding, replies, live messages, video, voice, or files yet."
                     )
                 }
                 return nil
             }
+        }
+        if let code = codeLockCode, composeState.noPreview {
             do {
                 let wireText = try await Task.detached(priority: .userInitiated) {
                     try XauXatCodeLockedEnvelope.seal(XauXatCodeLockedPayload(text: msgText), code: code).wireText()
@@ -1634,7 +1685,7 @@ struct ComposeView: View {
         } else {
             protectedText = nil
         }
-        let mentions = protectedText == nil ? composeState.memberMentions : [:]
+        let mentions = codeLockCode == nil ? composeState.memberMentions : [:]
         if !live {
             if liveMessage != nil { composeState = composeState.copy(liveMessage: nil) }
             await sending()
@@ -1676,13 +1727,28 @@ struct ComposeView: View {
                             // Sleep to allow `progressByTimeout` update be rendered
                             try? await Task.sleep(nanoseconds: 100_000000)
                         }
-                        if let (fileSource, msgContent) = mediaContent(media[i], text: "") {
+                        if let (fileSource, msgContent) = await mediaContent(media[i], text: "") {
                             msgs.append(ComposedMessage(fileSource: fileSource, msgContent: msgContent))
                         }
                     }
-                    if let (fileSource, msgContent) = mediaContent(media[last], text: msgText) {
+                    if let (fileSource, msgContent) = await mediaContent(media[last], text: msgText) {
                         msgs.append(ComposedMessage(fileSource: fileSource, quotedItemId: quoted, msgContent: msgContent))
                     }
+                }
+                if codeLockCode != nil && msgs.count != media.count {
+                    for message in msgs {
+                        if let fileName = message.fileSource?.filePath {
+                            removeFile(fileName)
+                        }
+                    }
+                    await MainActor.run {
+                        composeState.inProgress = false
+                        AlertManager.shared.showAlertMsg(
+                            title: "Could not protect photo",
+                            message: "Nothing was sent. Please try again."
+                        )
+                    }
+                    return nil
                 }
                 if msgs.isEmpty {
                     msgs = [ComposedMessage(quotedItemId: quoted, msgContent: .text(msgText))]
@@ -1710,23 +1776,55 @@ struct ComposeView: View {
         }
         return sent
 
-        func mediaContent(_ media: (String, UploadContent?), text: String) -> (CryptoFile?, MsgContent)? {
+        func mediaContent(_ media: (String, UploadContent?), text: String) async -> (CryptoFile?, MsgContent)? {
             let (previewImage, uploadContent) = media
             switch uploadContent {
             case let .simpleImage(image):
+                if let code = codeLockCode {
+                    guard let prepared = await saveXauXatCodeLockedPhoto(
+                        image,
+                        animated: false,
+                        code: code,
+                        caption: text,
+                        allowSave: allowOneTimePhotoSave
+                    ), let protectedPreview = xauxatCodeLockedPhotoPreview() else { return nil }
+                    return (
+                        prepared.file,
+                        .xauXatImage(
+                            text: XauXatCodeLockedEnvelope.fileWireText(kind: .image),
+                            image: protectedPreview,
+                            privacy: prepared.privacy
+                        )
+                    )
+                }
                 if oneTimePhotoEnabled {
                     guard let prepared = saveXauXatOneTimeImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
                     return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
-                } else {
-                    return (saveImage(image), .image(text: text, image: previewImage))
                 }
+                return (saveImage(image), .image(text: text, image: previewImage))
             case let .animatedImage(image):
+                if let code = codeLockCode {
+                    guard let prepared = await saveXauXatCodeLockedPhoto(
+                        image,
+                        animated: true,
+                        code: code,
+                        caption: text,
+                        allowSave: allowOneTimePhotoSave
+                    ), let protectedPreview = xauxatCodeLockedPhotoPreview() else { return nil }
+                    return (
+                        prepared.file,
+                        .xauXatImage(
+                            text: XauXatCodeLockedEnvelope.fileWireText(kind: .image),
+                            image: protectedPreview,
+                            privacy: prepared.privacy
+                        )
+                    )
+                }
                 if oneTimePhotoEnabled {
                     guard let prepared = saveXauXatOneTimeAnimImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
                     return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
-                } else {
-                    return (saveAnimImage(image), .image(text: text, image: previewImage))
                 }
+                return (saveAnimImage(image), .image(text: text, image: previewImage))
             case let .video(_, url, duration):
                 return (moveTempFileFromURL(url), .video(text: text, image: previewImage, duration: duration))
             case .none:
@@ -2185,7 +2283,7 @@ private struct XauXatCodeLockSetupView: View {
                         .textContentType(.newPassword)
                         .privacySensitive()
                 } header: {
-                    Text("Protect message")
+                    Text("Protect content")
                 } footer: {
                     Text("Share this code through a different secure channel. XauXat does not send or save it.")
                 }
@@ -2195,7 +2293,7 @@ private struct XauXatCodeLockSetupView: View {
                         .foregroundColor(.red)
                 }
             }
-            .navigationTitle("Message code")
+            .navigationTitle("Content code")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

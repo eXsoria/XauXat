@@ -65,8 +65,8 @@ struct MsgContentView: View {
                 rightToLeft: rightToLeft,
                 prefix: prefix
             )
-        } else if xauXatIsCodeLockedText(text) {
-            (Text(Image(systemName: "lock.fill")) + Text(" ") + Text("Protected message unavailable"))
+        } else if xauXatIsAnyCodeLockedContent(text) {
+            (Text(Image(systemName: "lock.fill")) + Text(" ") + Text(xauXatCodeLockedPreviewText(text)))
                 .font(Font(UIFont.preferredFont(forTextStyle: textStyle)))
                 .foregroundColor(theme.colors.secondary)
                 .privacySensitive()
@@ -261,7 +261,7 @@ private struct XauXatCodeLockedTextView: View {
     }
 }
 
-private struct XauXatCodeUnlockView: View {
+struct XauXatCodeUnlockView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var session: XauXatCodeLockedSession
     @State private var code = ""
@@ -283,7 +283,7 @@ private struct XauXatCodeUnlockView: View {
                         .foregroundColor(.red)
                 }
             }
-            .navigationTitle("Unlock message")
+            .navigationTitle("Unlock content")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
