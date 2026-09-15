@@ -428,6 +428,39 @@ private func saveXauXatCodeLockedAudio(
     }
 }
 
+private func saveXauXatCodeLockedVideo(
+    url: URL,
+    duration: Int,
+    code: String,
+    caption: String
+) async -> CryptoFile? {
+    do {
+        let envelopeData = try await Task.detached(priority: .userInitiated) {
+            let videoData = try Data(contentsOf: url, options: [.mappedIfSafe, .uncached])
+            let payload = XauXatCodeLockedPayload(
+                kind: .video,
+                body: videoData,
+                fileName: "video.mp4",
+                mimeType: "video/mp4",
+                caption: caption.isEmpty ? nil : caption,
+                duration: duration
+            )
+            return try XauXatCodeLockedEnvelope.seal(payload, code: code).encoded()
+        }.value
+        let protectedFileName = generateNewFileName("video", "xauxat")
+        guard let protectedFile = saveFile(
+            envelopeData,
+            protectedFileName,
+            encrypted: privacyEncryptLocalFilesGroupDefault.get()
+        ) else { return nil }
+        removeFile(url)
+        return protectedFile
+    } catch {
+        logger.error("Unable to protect XauXat video: \(error.localizedDescription)")
+        return nil
+    }
+}
+
 // Spec: spec/client/compose.md#ComposeView
 struct ComposeView: View {
     @EnvironmentObject var chatModel: ChatModel
@@ -1297,8 +1330,8 @@ struct ComposeView: View {
         case let .mediaPreviews(media):
             !media.isEmpty && media.allSatisfy { _, content in
                 switch content {
-                case .simpleImage, .animatedImage: true
-                case .video, .none: false
+                case .simpleImage, .animatedImage, .video: true
+                case .none: false
                 }
             }
         case .voicePreview:
@@ -1712,7 +1745,7 @@ struct ComposeView: View {
                 await MainActor.run {
                     AlertManager.shared.showAlertMsg(
                         title: "Cannot protect this content",
-                        message: "Code-Locked Content cannot be combined with editing, forwarding, replies, live messages, video, or files yet."
+                        message: "Code-Locked Content cannot be combined with editing, forwarding, replies, live messages, or files yet."
                     )
                 }
                 return nil
@@ -1795,7 +1828,7 @@ struct ComposeView: View {
                     await MainActor.run {
                         composeState.inProgress = false
                         AlertManager.shared.showAlertMsg(
-                            title: "Could not protect photo",
+                            title: "Could not protect media",
                             message: "Nothing was sent. Please try again."
                         )
                     }
@@ -1903,6 +1936,23 @@ struct ComposeView: View {
                 }
                 return (saveAnimImage(image), .image(text: text, image: previewImage))
             case let .video(_, url, duration):
+                if let code = codeLockCode {
+                    guard let file = await saveXauXatCodeLockedVideo(
+                        url: url,
+                        duration: duration,
+                        code: code,
+                        caption: text
+                    ), let protectedPreview = xauxatCodeLockedVideoPreview() else { return nil }
+                    chatModel.filesToDelete.remove(url)
+                    return (
+                        file,
+                        .video(
+                            text: XauXatCodeLockedEnvelope.fileWireText(kind: .video),
+                            image: protectedPreview,
+                            duration: 0
+                        )
+                    )
+                }
                 return (moveTempFileFromURL(url), .video(text: text, image: previewImage, duration: duration))
             case .none:
                 return nil

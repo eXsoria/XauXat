@@ -321,6 +321,22 @@ public func getTempFilesDirectory() -> URL {
     getAppDirectory().appendingPathComponent("temp_files", isDirectory: true)
 }
 
+private let xauXatProtectedVideoTempPrefix = "xauxat-protected-"
+
+public func xauXatProtectedVideoTempURL() -> URL {
+    getTempFilesDirectory().appendingPathComponent("\(xauXatProtectedVideoTempPrefix)\(UUID().uuidString).mp4")
+}
+
+public func removeStaleXauXatProtectedVideoFiles() {
+    guard let files = try? FileManager.default.contentsOfDirectory(
+        at: getTempFilesDirectory(),
+        includingPropertiesForKeys: nil
+    ) else { return }
+    for file in files where file.lastPathComponent.hasPrefix(xauXatProtectedVideoTempPrefix) {
+        try? FileManager.default.removeItem(at: file)
+    }
+}
+
 public func getMigrationTempFilesDirectory() -> URL {
     let base = xauXatStorageScope() == .decoy ? getAppDirectory(.decoy) : getDocumentsDirectory()
     return base.appendingPathComponent("migration_temp_files", isDirectory: true)

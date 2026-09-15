@@ -155,7 +155,7 @@ struct FramedItemView: View {
             case let .video(text, _, duration):
                 CIVideoView(chatItem: chatItem, senderProfile: ciSenderProfile(chatItem, chat.chatInfo), preview: preview, duration: duration, maxWidth: maxWidth, videoWidth: videoWidth, showFullscreenPlayer: $showFullscreenGallery)
                 .overlay(DetermineWidth())
-                if text == "" && !chatItem.meta.isLive {
+                if (text == "" || xauXatIsCodeLockedFile(text, kind: .video)) && !chatItem.meta.isLive {
                     Color.clear
                     .frame(width: 0, height: 0)
                     .onAppear {
