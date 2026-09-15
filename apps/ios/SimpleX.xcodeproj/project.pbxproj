@@ -2186,6 +2186,7 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
+				XAUXAT_PLUS_PRODUCT_ID = pt.exsoria.xauxat.plus.monthly;
 			};
 			name = Debug;
 		};
@@ -2241,6 +2242,7 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				VALIDATE_PRODUCT = YES;
+				XAUXAT_PLUS_PRODUCT_ID = pt.exsoria.xauxat.plus.monthly;
 			};
 			name = Release;
 		};
