@@ -451,6 +451,14 @@ private struct XauXatUnlockedFileView: View {
                     detail: Text("Protected file"),
                     icon: "lock.slash.fill"
                 )
+            case .destroyed:
+                XauXatProtectedFileRow(
+                    chat: chat,
+                    meta: meta,
+                    title: Text("Content destroyed"),
+                    detail: Text("Protected file"),
+                    icon: "trash.slash.fill"
+                )
             }
         }
         .privacySensitive()

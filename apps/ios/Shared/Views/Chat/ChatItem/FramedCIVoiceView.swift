@@ -210,6 +210,8 @@ private struct XauXatUnlockedVoiceView: View {
                 .buttonStyle(.plain)
             case .exhausted:
                 protectedRow(label: "No attempts remaining", icon: "lock.slash.fill")
+            case .destroyed:
+                protectedRow(label: "Content destroyed", icon: "trash.slash.fill")
             }
         }
         .privacySensitive()

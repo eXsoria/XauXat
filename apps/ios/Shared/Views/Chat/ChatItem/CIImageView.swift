@@ -452,6 +452,8 @@ private struct XauXatCodeLockedImageView: View {
                 .accessibilityHint("Opens code entry")
             case .exhausted:
                 protectedPlaceholder("No attempts remaining", icon: "lock.slash.fill")
+            case .destroyed:
+                protectedPlaceholder("Content destroyed", icon: "trash.slash.fill")
             }
         }
         .privacySensitive()

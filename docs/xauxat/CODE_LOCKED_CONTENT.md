@@ -63,5 +63,8 @@ XauXat, deleting and receiving the same message again, or reinstalling the app
 does not trivially reset the counter. The unlock sheet shows the remaining
 count and the session refuses further code checks at zero.
 
-Destruction after the authenticated limit is handled separately by its roadmap
-issue.
+The sender can also bind a destruction policy to a finite attempt limit. On the
+final failed attempt, the official XauXat client stores a durable Keychain
+tombstone for that exact envelope and permanently refuses to derive its key or
+materialize its payload on that device. See
+`CODE_LOCKED_AUTO_DESTRUCTION.md` for the lifecycle and threat boundary.
