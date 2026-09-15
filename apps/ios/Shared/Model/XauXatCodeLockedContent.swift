@@ -73,16 +73,22 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
     let salt: Data
     let sealedPayload: Data
     let maxAttempts: Int?
+    let destroyAfterMaxAttempts: Bool?
 
     static func seal(
         _ payload: XauXatCodeLockedPayload,
         code: String,
-        maxAttempts: Int? = nil
+        maxAttempts: Int? = nil,
+        destroyAfterMaxAttempts: Bool = false
     ) throws -> Self {
         let normalizedCode = try normalized(code)
         if let maxAttempts, !allowedAttemptLimits.contains(maxAttempts) {
             throw XauXatCodeLockedContentError.invalidAttemptLimit
         }
+        guard !destroyAfterMaxAttempts || maxAttempts != nil else {
+            throw XauXatCodeLockedContentError.invalidAttemptLimit
+        }
+        let destructionPolicy = destroyAfterMaxAttempts ? true : nil
         var salt = Data(count: saltBytes)
         let status = salt.withUnsafeMutableBytes { bytes in
             SecRandomCopyBytes(kSecRandomDefault, saltBytes, bytes.baseAddress!)
@@ -94,7 +100,12 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
         let box = try ChaChaPoly.seal(
             encodedPayload,
             using: key,
-            authenticating: authenticatedHeader(version: currentVersion, kind: payload.kind, maxAttempts: maxAttempts)
+            authenticating: authenticatedHeader(
+                version: currentVersion,
+                kind: payload.kind,
+                maxAttempts: maxAttempts,
+                destroyAfterMaxAttempts: destructionPolicy
+            )
         )
         return Self(
             version: currentVersion,
@@ -103,7 +114,8 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
             kdfIterations: iterations,
             salt: salt,
             sealedPayload: box.combined,
-            maxAttempts: maxAttempts
+            maxAttempts: maxAttempts,
+            destroyAfterMaxAttempts: destructionPolicy
         )
     }
 
@@ -112,7 +124,8 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
         guard kdf == Self.kdfName,
               kdfIterations == Self.iterations,
               salt.count == Self.saltBytes,
-              maxAttempts.map(Self.allowedAttemptLimits.contains) ?? true else {
+              maxAttempts.map(Self.allowedAttemptLimits.contains) ?? true,
+              destroyAfterMaxAttempts != true || maxAttempts != nil else {
             throw XauXatCodeLockedContentError.invalidEnvelope
         }
         let normalizedCode = try Self.normalized(code)
@@ -122,7 +135,12 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
             let cleartext = try ChaChaPoly.open(
                 box,
                 using: key,
-                authenticating: Self.authenticatedHeader(version: version, kind: kind, maxAttempts: maxAttempts)
+                authenticating: Self.authenticatedHeader(
+                    version: version,
+                    kind: kind,
+                    maxAttempts: maxAttempts,
+                    destroyAfterMaxAttempts: destroyAfterMaxAttempts
+                )
             )
             let payload = try JSONDecoder().decode(XauXatCodeLockedPayload.self, from: cleartext)
             guard payload.kind == kind else { throw XauXatCodeLockedContentError.invalidEnvelope }
@@ -193,10 +211,12 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
     private static func authenticatedHeader(
         version: Int,
         kind: XauXatCodeLockedContentKind,
-        maxAttempts: Int?
+        maxAttempts: Int?,
+        destroyAfterMaxAttempts: Bool?
     ) -> Data {
         let limit = maxAttempts.map { "|maxAttempts:\($0)" } ?? ""
-        return Data("xauxat.code-lock|\(version)|\(kind.rawValue)|\(kdfName)|\(iterations)\(limit)".utf8)
+        let destruction = destroyAfterMaxAttempts == true ? "|destroyAfterMaxAttempts:true" : ""
+        return Data("xauxat.code-lock|\(version)|\(kind.rawValue)|\(kdfName)|\(iterations)\(limit)\(destruction)".utf8)
     }
 
     private static func deriveKey(code: String, salt: Data, iterations: Int) throws -> SymmetricKey {
@@ -263,6 +283,7 @@ enum XauXatCodeLockedState: Equatable {
     case unlocked(XauXatCodeLockedPayload)
     case rejected(attempts: Int)
     case exhausted(attempts: Int)
+    case destroyed
 }
 
 @MainActor
@@ -276,7 +297,9 @@ final class XauXatCodeLockedSession: ObservableObject {
     init(envelope: XauXatCodeLockedEnvelope) {
         self.envelope = envelope
         attempts = xauXatCodeLockedAttemptCount(envelope.attemptID)
-        if let maximum = envelope.maxAttempts, attempts >= maximum {
+        if xauXatCodeLockedContentDestroyed(envelope.attemptID) {
+            state = .destroyed
+        } else if let maximum = envelope.maxAttempts, attempts >= maximum {
             state = .exhausted(attempts: attempts)
         }
     }
@@ -288,6 +311,10 @@ final class XauXatCodeLockedSession: ObservableObject {
     var maximumAttempts: Int? { envelope.maxAttempts }
 
     func unlock(code: String) {
+        if xauXatCodeLockedContentDestroyed(envelope.attemptID) {
+            state = .destroyed
+            return
+        }
         if let maximum = envelope.maxAttempts, attempts >= maximum {
             state = .exhausted(attempts: attempts)
             return
@@ -306,10 +333,20 @@ final class XauXatCodeLockedSession: ObservableObject {
                     self.state = .unlocked(payload)
                 case .failure:
                     self.attempts += 1
-                    _ = xauXatSetCodeLockedAttemptCount(self.attempts, contentID: envelope.attemptID)
                     if let maximum = envelope.maxAttempts, self.attempts >= maximum {
-                        self.state = .exhausted(attempts: self.attempts)
+                        if envelope.destroyAfterMaxAttempts == true {
+                            if xauXatMarkCodeLockedContentDestroyed(envelope.attemptID) {
+                                self.state = .destroyed
+                            } else {
+                                _ = xauXatSetCodeLockedAttemptCount(self.attempts, contentID: envelope.attemptID)
+                                self.state = .exhausted(attempts: self.attempts)
+                            }
+                        } else {
+                            _ = xauXatSetCodeLockedAttemptCount(self.attempts, contentID: envelope.attemptID)
+                            self.state = .exhausted(attempts: self.attempts)
+                        }
                     } else {
+                        _ = xauXatSetCodeLockedAttemptCount(self.attempts, contentID: envelope.attemptID)
                         self.state = .rejected(attempts: self.attempts)
                     }
                 }
@@ -319,7 +356,9 @@ final class XauXatCodeLockedSession: ObservableObject {
 
     func lock() {
         operationID = UUID()
-        if let maximum = envelope.maxAttempts, attempts >= maximum {
+        if xauXatCodeLockedContentDestroyed(envelope.attemptID) {
+            state = .destroyed
+        } else if let maximum = envelope.maxAttempts, attempts >= maximum {
             state = .exhausted(attempts: attempts)
         } else {
             state = .locked

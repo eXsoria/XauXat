@@ -226,6 +226,8 @@ private struct XauXatCodeLockedTextView: View {
                 .accessibilityHint("Opens code entry")
             case .exhausted:
                 protectedPlaceholder("No attempts remaining")
+            case .destroyed:
+                protectedPlaceholder("Content destroyed")
             }
         }
         .privacySensitive()

@@ -232,10 +232,19 @@ public func xauXatCodeLockedAttemptCount(_ contentID: String) -> Int {
     Int(KeyChainItem(forKey: xauXatCodeLockedAttemptsKey(contentID)).get() ?? "") ?? 0
 }
 
+public func xauXatCodeLockedContentDestroyed(_ contentID: String) -> Bool {
+    KeyChainItem(forKey: xauXatCodeLockedAttemptsKey(contentID)).get() == "destroyed"
+}
+
 @discardableResult
 public func xauXatSetCodeLockedAttemptCount(_ count: Int, contentID: String) -> Bool {
     let item = KeyChainItem(forKey: xauXatCodeLockedAttemptsKey(contentID))
     return count > 0 ? item.set(String(count)) : item.remove()
+}
+
+@discardableResult
+public func xauXatMarkCodeLockedContentDestroyed(_ contentID: String) -> Bool {
+    KeyChainItem(forKey: xauXatCodeLockedAttemptsKey(contentID)).set("destroyed")
 }
 
 func randomDatabasePassword() -> String {

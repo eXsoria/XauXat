@@ -734,6 +734,8 @@ private struct XauXatUnlockedVideoView: View {
                 .accessibilityHint("Opens code entry")
             case .exhausted:
                 protectedPoster(label: "No attempts remaining", icon: "lock.slash.fill")
+            case .destroyed:
+                protectedPoster(label: "Content destroyed", icon: "trash.slash.fill")
             }
         }
         .privacySensitive()
