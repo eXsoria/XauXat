@@ -26,7 +26,7 @@ struct ChatItemForwardingView: View {
     @State private var alert: SomeAlert?
     private var chatsToForwardTo: [Chat] {
         filterChatsToForwardTo(chats: ChatModel.shared.chats, includeLocal: includeLocal)
-            .filter { !xauXatIsChatLocked($0.id) }
+            .filter { !xauXatIsChatLocked($0.id) && !xauXatIsChatHidden($0.id) }
     }
 
     var body: some View {

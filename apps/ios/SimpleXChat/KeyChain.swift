@@ -18,6 +18,8 @@ private let SELF_DESTRUCT_PASSWORD_ITEM: String = "selfDestructPassword"
 private let DECOY_PASSWORD_ITEM: String = "localProfilePassword"
 private let PRIMARY_CONVERSATION_LOCKS_ITEM: String = "conversationLocks"
 private let DECOY_CONVERSATION_LOCKS_ITEM: String = "conversationLocks.localProfile"
+private let PRIMARY_HIDDEN_CHATS_ITEM: String = "hiddenChats"
+private let DECOY_HIDDEN_CHATS_ITEM: String = "hiddenChats.localProfile"
 
 public enum XauXatStorageScope: Sendable {
     case primary
@@ -55,6 +57,8 @@ public let kcDecoyPassword = KeyChainItem(forKey: DECOY_PASSWORD_ITEM)
 
 private let kcPrimaryConversationLocks = KeyChainItem(forKey: PRIMARY_CONVERSATION_LOCKS_ITEM)
 private let kcDecoyConversationLocks = KeyChainItem(forKey: DECOY_CONVERSATION_LOCKS_ITEM)
+private let kcPrimaryHiddenChats = KeyChainItem(forKey: PRIMARY_HIDDEN_CHATS_ITEM)
+private let kcDecoyHiddenChats = KeyChainItem(forKey: DECOY_HIDDEN_CHATS_ITEM)
 
 private var kcConversationLocks: KeyChainItem {
     xauXatStorageScope() == .decoy ? kcDecoyConversationLocks : kcPrimaryConversationLocks
@@ -90,6 +94,43 @@ public func xauXatRemoveConversationLocks(_ scope: XauXatStorageScope) -> Bool {
     switch scope {
     case .primary: kcPrimaryConversationLocks.remove()
     case .decoy: kcDecoyConversationLocks.remove()
+    }
+}
+
+private var kcHiddenChats: KeyChainItem {
+    xauXatStorageScope() == .decoy ? kcDecoyHiddenChats : kcPrimaryHiddenChats
+}
+
+public func xauXatHiddenChatIDs() -> Set<String> {
+    guard let value = kcHiddenChats.get(),
+          let data = value.data(using: .utf8),
+          let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+    return Set(ids)
+}
+
+public func xauXatIsChatHidden(_ chatID: String) -> Bool {
+    xauXatHiddenChatIDs().contains(chatID)
+}
+
+@discardableResult
+public func xauXatSetChatHidden(_ chatID: String, hidden: Bool) -> Bool {
+    var ids = xauXatHiddenChatIDs()
+    if hidden {
+        ids.insert(chatID)
+    } else {
+        ids.remove(chatID)
+    }
+    guard !ids.isEmpty else { return kcHiddenChats.remove() }
+    guard let data = try? JSONEncoder().encode(ids.sorted()),
+          let value = String(data: data, encoding: .utf8) else { return false }
+    return kcHiddenChats.set(value)
+}
+
+@discardableResult
+public func xauXatRemoveHiddenChats(_ scope: XauXatStorageScope) -> Bool {
+    switch scope {
+    case .primary: kcPrimaryHiddenChats.remove()
+    case .decoy: kcDecoyHiddenChats.remove()
     }
 }
 

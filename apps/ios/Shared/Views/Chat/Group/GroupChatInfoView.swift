@@ -178,6 +178,14 @@ struct GroupChatInfoView: View {
                         }
                     }
 
+                    if xauXatIsChatHidden(chat.id) || plusEntitlements.isAuthorized(for: .hiddenChats) {
+                        Section {
+                            XauXatHiddenChatButton(chatID: chat.id)
+                        } footer: {
+                            Text("Hidden conversations are removed from lists, search, sharing destinations and notification badges.")
+                        }
+                    }
+
                     Section {
                         if groupInfo.isOwner && groupInfo.businessChat == nil {
                             editGroupButton()

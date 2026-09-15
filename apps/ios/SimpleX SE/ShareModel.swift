@@ -67,10 +67,10 @@ class ShareModel: ObservableObject {
     }
 
     var filteredChats: [SEChatData] {
-        let unlockedChats = chats.filter { !xauXatIsChatLocked($0.id) }
+        let visibleChats = chats.filter { !xauXatIsChatLocked($0.id) && !xauXatIsChatHidden($0.id) }
         return search.isEmpty
-        ? filterChatsToForwardTo(chats: unlockedChats)
-        : filterChatsToForwardTo(chats: unlockedChats)
+        ? filterChatsToForwardTo(chats: visibleChats)
+        : filterChatsToForwardTo(chats: visibleChats)
             .filter { foundChat($0, search.localizedLowercase) }
     }
 
