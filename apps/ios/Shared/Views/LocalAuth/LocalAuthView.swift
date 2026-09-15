@@ -124,6 +124,13 @@ struct LocalAuthView: View {
     private func deleteStorageAndRestart(_ password: String, completed: @escaping (LAResult) -> Void) {
         Task {
             do {
+                let requestedScope = XauXatDuressScope.configured
+                let duressScope: XauXatDuressScope =
+                    (requestedScope == .decoy || requestedScope == .all) && kcDecoyPassword.get() == nil
+                    ? .primary
+                    : requestedScope
+                let replacementScope: XauXatStorageScope = duressScope == .decoy ? .decoy : .primary
+
                 /** Waiting until [initializeChat] finishes */
                 while (m.ctrlInitInProgress) {
                     try await Task.sleep(nanoseconds: 50_000000)
@@ -139,18 +146,38 @@ struct LocalAuthView: View {
                      * */
                     chatCloseStore()
                 }
-                setXauXatStorageScope(.primary)
-                deleteDecoyStorage()
-                _ = kcDecoyPassword.remove()
-                deleteAppDatabaseAndFiles()
+
+                // Destroy the encryption keys first. Deleting encrypted files
+                // afterwards is defense in depth and is not the erasure boundary.
+                for scope in duressScope.storageScopes {
+                    guard destroyXauXatStorage(scope) else {
+                        throw RuntimeError("Unable to destroy selected database key")
+                    }
+                }
+
                 // Clear sensitive data on screen just in case app fails to hide its views while new database is created
                 clearVisibleChatData()
-                _ = kcAppPassword.set(password)
+                setXauXatStorageScope(replacementScope)
+                try prepareXauXatStorageScope()
+
+                if replacementScope == .decoy {
+                    guard kcDecoyPassword.set(password) else {
+                        throw RuntimeError("Unable to persist replacement decoy PIN")
+                    }
+                } else {
+                    guard kcAppPassword.set(password) else {
+                        throw RuntimeError("Unable to persist replacement app PIN")
+                    }
+                    if duressScope == .all {
+                        _ = kcDecoyPassword.remove()
+                    }
+                }
                 _ = kcSelfDestructPassword.remove()
                 await NtfManager.shared.removeAllNotifications()
                 let displayName = UserDefaults.standard.string(forKey: DEFAULT_LA_SELF_DESTRUCT_DISPLAY_NAME)
                 UserDefaults.standard.removeObject(forKey: DEFAULT_LA_SELF_DESTRUCT)
                 UserDefaults.standard.removeObject(forKey: DEFAULT_LA_SELF_DESTRUCT_DISPLAY_NAME)
+                UserDefaults.standard.removeObject(forKey: DEFAULT_LA_DURESS_SCOPE)
                 await MainActor.run {
                     m.chatDbChanged = true
                     m.chatInitialized = false

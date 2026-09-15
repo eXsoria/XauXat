@@ -143,8 +143,8 @@ func getLegacyDatabasePath() -> URL {
 }
 
 // Spec: spec/database.md#getAppDatabasePath
-public func getAppDatabasePath() -> URL {
-    if xauXatStorageScope() == .decoy {
+public func getAppDatabasePath(_ scope: XauXatStorageScope = xauXatStorageScope()) -> URL {
+    if scope == .decoy {
         return getAppDirectory(.decoy).appendingPathComponent(DB_FILE_PREFIX, isDirectory: false)
     }
     return dbContainerGroupDefault.get() == .group
@@ -258,7 +258,36 @@ public func hasDatabase() -> Bool {
 }
 
 public func hasDecoyDatabase() -> Bool {
-    hasDatabaseAtPath(getAppDirectory(.decoy).appendingPathComponent(DB_FILE_PREFIX, isDirectory: false))
+    hasDatabaseAtPath(getAppDatabasePath(.decoy))
+}
+
+/// Cryptographic erasure removes the selected database key before making a
+/// best-effort deletion of that scope's encrypted databases and local files.
+/// Losing the random Keychain key makes any surviving database blocks
+/// inaccessible; file deletion is defense in depth, not the trust boundary.
+@discardableResult
+public func destroyXauXatStorage(_ scope: XauXatStorageScope) -> Bool {
+    let keyRemoved: Bool
+    switch scope {
+    case .primary: keyRemoved = kcPrimaryDatabasePassword.remove()
+    case .decoy: keyRemoved = kcDecoyDatabasePassword.remove()
+    }
+
+    let fm = FileManager.default
+    if scope == .decoy {
+        try? fm.removeItem(at: getAppDirectory(.decoy))
+    } else {
+        let dbPath = getAppDatabasePath(.primary).path
+        try? fm.removeItem(atPath: dbPath + CHAT_DB)
+        try? fm.removeItem(atPath: dbPath + AGENT_DB)
+        try? fm.removeItem(atPath: dbPath + CHAT_DB_BAK)
+        try? fm.removeItem(atPath: dbPath + AGENT_DB_BAK)
+        try? fm.removeItem(at: getAppDirectory(.primary).appendingPathComponent("app_files", isDirectory: true))
+        try? fm.removeItem(at: getAppDirectory(.primary).appendingPathComponent("temp_files", isDirectory: true))
+        try? fm.removeItem(at: getAppDirectory(.primary).appendingPathComponent("assets", isDirectory: true))
+        try? fm.removeItem(at: getDocumentsDirectory().appendingPathComponent("migration_temp_files", isDirectory: true))
+    }
+    return keyRemoved
 }
 
 func hasDatabaseAtPath(_ dbPath: URL) -> Bool {
