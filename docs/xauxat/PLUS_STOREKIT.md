@@ -22,6 +22,10 @@ The app reads the product ID from the `XAUXAT_PLUS_PRODUCT_ID` Xcode build setti
 - `XauXatPlusAuthorizing.isAuthorized(for:)` is the single authorization boundary for Plus features and can be replaced by a test double.
 - Builds compiled with `DEBUG` authorize Plus locally. This compile-time path is absent from Release builds and cannot unlock an App Store or TestFlight build.
 
+## Free-plan presentation
+
+Implemented Plus controls remain visible to Free users. They use a subdued `Plus` and lock treatment and open the XauXat Plus purchase screen instead of silently disappearing. When the entitlement becomes inactive, XauXat immediately restores Free defaults: conversation locks and hidden-chat state are cleared, protected profiles are made visible, Decoy storage is removed, and Decoy/Duress PIN configuration is cleared.
+
 ## Local purchase testing
 
 The Settings tab exposes **XauXat Plus** with subscription status, purchase, and restore actions. In a local Debug build it reports **Included in local build** and labels the purchase action as an App Store test; Plus access remains active independently of that test transaction.

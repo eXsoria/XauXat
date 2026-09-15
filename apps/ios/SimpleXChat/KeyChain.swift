@@ -22,6 +22,8 @@ private let PRIMARY_HIDDEN_CHATS_ITEM: String = "hiddenChats"
 private let DECOY_HIDDEN_CHATS_ITEM: String = "hiddenChats.localProfile"
 private let PRIMARY_PROTECTED_PROFILES_ITEM: String = "protectedProfiles"
 private let DECOY_PROTECTED_PROFILES_ITEM: String = "protectedProfiles.localProfile"
+private let PRIMARY_PROTECTED_PROFILE_PASSWORDS_ITEM: String = "protectedProfilePasswords"
+private let DECOY_PROTECTED_PROFILE_PASSWORDS_ITEM: String = "protectedProfilePasswords.localProfile"
 
 public enum XauXatStorageScope: Sendable {
     case primary
@@ -63,6 +65,8 @@ private let kcPrimaryHiddenChats = KeyChainItem(forKey: PRIMARY_HIDDEN_CHATS_ITE
 private let kcDecoyHiddenChats = KeyChainItem(forKey: DECOY_HIDDEN_CHATS_ITEM)
 private let kcPrimaryProtectedProfiles = KeyChainItem(forKey: PRIMARY_PROTECTED_PROFILES_ITEM)
 private let kcDecoyProtectedProfiles = KeyChainItem(forKey: DECOY_PROTECTED_PROFILES_ITEM)
+private let kcPrimaryProtectedProfilePasswords = KeyChainItem(forKey: PRIMARY_PROTECTED_PROFILE_PASSWORDS_ITEM)
+private let kcDecoyProtectedProfilePasswords = KeyChainItem(forKey: DECOY_PROTECTED_PROFILE_PASSWORDS_ITEM)
 
 private var kcConversationLocks: KeyChainItem {
     xauXatStorageScope() == .decoy ? kcDecoyConversationLocks : kcPrimaryConversationLocks
@@ -166,6 +170,39 @@ public func xauXatRemoveProtectedProfiles(_ scope: XauXatStorageScope) -> Bool {
     switch scope {
     case .primary: kcPrimaryProtectedProfiles.remove()
     case .decoy: kcDecoyProtectedProfiles.remove()
+    }
+}
+
+private var kcProtectedProfilePasswords: KeyChainItem {
+    xauXatStorageScope() == .decoy ? kcDecoyProtectedProfilePasswords : kcPrimaryProtectedProfilePasswords
+}
+
+private func xauXatProtectedProfilePasswords() -> [String: String] {
+    guard let value = kcProtectedProfilePasswords.get(),
+          let data = value.data(using: .utf8),
+          let passwords = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+    return passwords
+}
+
+public func xauXatProtectedProfilePassword(_ userID: Int64) -> String? {
+    xauXatProtectedProfilePasswords()[String(userID)]
+}
+
+@discardableResult
+public func xauXatSetProtectedProfilePassword(_ userID: Int64, password: String?) -> Bool {
+    var passwords = xauXatProtectedProfilePasswords()
+    passwords[String(userID)] = password
+    guard !passwords.isEmpty else { return kcProtectedProfilePasswords.remove() }
+    guard let data = try? JSONEncoder().encode(passwords),
+          let value = String(data: data, encoding: .utf8) else { return false }
+    return kcProtectedProfilePasswords.set(value)
+}
+
+@discardableResult
+public func xauXatRemoveProtectedProfilePasswords(_ scope: XauXatStorageScope) -> Bool {
+    switch scope {
+    case .primary: kcPrimaryProtectedProfilePasswords.remove()
+    case .decoy: kcDecoyProtectedProfilePasswords.remove()
     }
 }
 

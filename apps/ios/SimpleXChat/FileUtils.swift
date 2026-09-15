@@ -136,6 +136,7 @@ public func deleteDecoyStorage() {
     _ = xauXatRemoveConversationLocks(.decoy)
     _ = xauXatRemoveHiddenChats(.decoy)
     _ = xauXatRemoveProtectedProfiles(.decoy)
+    _ = xauXatRemoveProtectedProfilePasswords(.decoy)
 }
 
 // Spec: spec/database.md#DB_FILE_PREFIX
@@ -278,6 +279,7 @@ public func destroyXauXatStorage(_ scope: XauXatStorageScope) -> Bool {
     _ = xauXatRemoveConversationLocks(scope)
     _ = xauXatRemoveHiddenChats(scope)
     _ = xauXatRemoveProtectedProfiles(scope)
+    _ = xauXatRemoveProtectedProfilePasswords(scope)
 
     let fm = FileManager.default
     if scope == .decoy {

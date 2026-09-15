@@ -1011,6 +1011,7 @@ private struct XauXatHelpDestination: View {
 }
 
 private struct XauXatPrivacyView: View {
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DEFAULT_PERFORM_LA) private var appLock = false
     @State private var localAuthMode = privacyLocalAuthModeDefault.get()
@@ -1035,39 +1036,69 @@ private struct XauXatPrivacyView: View {
                             value: appLock ? (localAuthMode == .system ? "System" : "Passcode") : "Off"
                         )
                     }
-                    Button {
-                        authenticate(
-                            title: "Hidden conversations",
-                            reason: NSLocalizedString("Authenticate to manage hidden conversations", comment: "hidden conversations")
-                        ) { result in
-                            if case .success = result { showHiddenConversations = true }
+                    if canManageHiddenConversations {
+                        Button {
+                            authenticate(
+                                title: "Hidden conversations",
+                                reason: NSLocalizedString("Authenticate to manage hidden conversations", comment: "hidden conversations")
+                            ) { result in
+                                if case .success = result { showHiddenConversations = true }
+                            }
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "eye.slash",
+                                title: "Hidden conversations"
+                            )
                         }
-                    } label: {
-                        XauXatSettingsRow(
-                            palette: palette,
-                            symbol: "eye.slash",
-                            title: "Hidden conversations"
-                        )
+                        .background {
+                            NavigationLink(
+                                destination: XauXatHiddenChatsView(),
+                                isActive: $showHiddenConversations,
+                                label: { EmptyView() }
+                            )
+                            .hidden()
+                        }
+                    } else {
+                        NavigationLink {
+                            XauXatPlusView()
+                                .navigationTitle("XauXat Plus")
+                                .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "eye.slash",
+                                title: "Hidden conversations",
+                                value: "Plus"
+                            )
+                        }
                     }
-                    .background {
-                        NavigationLink(
-                            destination: XauXatHiddenChatsView(),
-                            isActive: $showHiddenConversations,
-                            label: { EmptyView() }
-                        )
-                        .hidden()
-                    }
-                    NavigationLink {
-                        UserProfilesView(
-                            allowsProfileCreation: false,
-                            title: "Protected profiles"
-                        )
-                    } label: {
-                        XauXatSettingsRow(
-                            palette: palette,
-                            symbol: "person.crop.circle.badge.checkmark",
-                            title: "Protected profiles"
-                        )
+                    if canManageProtectedProfiles {
+                        NavigationLink {
+                            UserProfilesView(
+                                allowsProfileCreation: false,
+                                title: "Protected profiles"
+                            )
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "person.crop.circle.badge.checkmark",
+                                title: "Protected profiles"
+                            )
+                        }
+                    } else {
+                        NavigationLink {
+                            XauXatPlusView()
+                                .navigationTitle("XauXat Plus")
+                                .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "person.crop.circle.badge.checkmark",
+                                title: "Protected profiles",
+                                value: "Plus"
+                            )
+                        }
                     }
                 }
 
@@ -1084,6 +1115,14 @@ private struct XauXatPrivacyView: View {
         .navigationTitle("Privacy & Security")
         .navigationBarTitleDisplayMode(.inline)
         .buttonStyle(.plain)
+    }
+
+    private var canManageHiddenConversations: Bool {
+        plusEntitlements.isAuthorized(for: .hiddenChats)
+    }
+
+    private var canManageProtectedProfiles: Bool {
+        plusEntitlements.isAuthorized(for: .protectedProfiles)
     }
 }
 

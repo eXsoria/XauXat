@@ -572,6 +572,23 @@ struct SettingsView: View {
     }
 }
 
+struct XauXatPlusLockedLabel: View {
+    let title: LocalizedStringKey
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: systemImage)
+            Spacer(minLength: 12)
+            Text("Plus")
+                .foregroundStyle(.secondary)
+            Image(systemName: "lock.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 struct XauXatPlusView: View {
     @EnvironmentObject var theme: AppTheme
     @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements

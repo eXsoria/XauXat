@@ -535,66 +535,96 @@ struct SimplexLockView: View {
                 }
 
                 if performLA && laMode == .passcode {
-                    if xauXatStorageScope() == .primary &&
-                        (plusEntitlements.isAuthorized(for: .decoyPIN) || decoyEnabled) {
-                        Section {
-                            TextField("Decoy profile display name", text: $decoyDisplayName)
-                                .disabled(hasDecoyDatabase())
-                            if decoyEnabled {
-                                Button("Change decoy PIN") {
-                                    changeDecoyPassword()
+                    if xauXatStorageScope() == .primary {
+                        if plusEntitlements.isAuthorized(for: .decoyPIN) {
+                            Section {
+                                TextField("Decoy profile display name", text: $decoyDisplayName)
+                                    .disabled(hasDecoyDatabase())
+                                if decoyEnabled {
+                                    Button("Change decoy PIN") {
+                                        changeDecoyPassword()
+                                    }
+                                    Button("Remove decoy environment", role: .destructive) {
+                                        laAlert = .removeDecoyConfirmation
+                                    }
+                                } else {
+                                    Button("Set up decoy PIN") {
+                                        showPasswordAction = .enableDecoy
+                                    }
                                 }
-                                Button("Remove decoy environment", role: .destructive) {
-                                    laAlert = .removeDecoyConfirmation
-                                }
-                            } else {
-                                Button("Set up decoy PIN") {
-                                    showPasswordAction = .enableDecoy
-                                }
-                                .disabled(!plusEntitlements.isAuthorized(for: .decoyPIN))
+                            } header: {
+                                Text("Decoy environment")
+                                    .foregroundColor(theme.colors.secondary)
+                            } footer: {
+                                Text("Entering this PIN at app unlock opens a separate local profile. While it is configured, app unlock always uses PIN entry so biometrics cannot select the real environment.")
                             }
-                        } header: {
-                            Text("Decoy environment")
-                                .foregroundColor(theme.colors.secondary)
-                        } footer: {
-                            Text("Entering this PIN at app unlock opens a separate local profile. While it is configured, app unlock always uses PIN entry so biometrics cannot select the real environment.")
+                        } else {
+                            Section {
+                                NavigationLink {
+                                    XauXatPlusView()
+                                        .navigationTitle("XauXat Plus")
+                                        .navigationBarTitleDisplayMode(.inline)
+                                } label: {
+                                    XauXatPlusLockedLabel(title: "Set up decoy PIN", systemImage: "person.crop.circle.badge.questionmark")
+                                }
+                            } header: {
+                                Text("Decoy environment")
+                                    .foregroundColor(theme.colors.secondary)
+                            } footer: {
+                                Text("Open XauXat Plus to use an alternate PIN that opens a separate local profile.")
+                            }
                         }
                     }
 
-                    if xauXatStorageScope() == .primary &&
-                        (plusEntitlements.isAuthorized(for: .duressPIN) || selfDestruct) {
-                    Section {
-                        Picker("Destroy when used", selection: $duressScope) {
-                            Text(XauXatDuressScope.primary.label).tag(XauXatDuressScope.primary.rawValue)
-                            if kcDecoyPassword.get() != nil {
-                                Text(XauXatDuressScope.decoy.label).tag(XauXatDuressScope.decoy.rawValue)
-                                Text(XauXatDuressScope.all.label).tag(XauXatDuressScope.all.rawValue)
+                    if xauXatStorageScope() == .primary {
+                        if plusEntitlements.isAuthorized(for: .duressPIN) {
+                            Section {
+                                Picker("Destroy when used", selection: $duressScope) {
+                                    Text(XauXatDuressScope.primary.label).tag(XauXatDuressScope.primary.rawValue)
+                                    if kcDecoyPassword.get() != nil {
+                                        Text(XauXatDuressScope.decoy.label).tag(XauXatDuressScope.decoy.rawValue)
+                                        Text(XauXatDuressScope.all.label).tag(XauXatDuressScope.all.rawValue)
+                                    }
+                                }
+                                Toggle(isOn: $selfDestruct) {
+                                    HStack(spacing: 6) {
+                                        Text("Enable Duress PIN")
+                                        Image(systemName: "info.circle")
+                                            .foregroundColor(theme.colors.primary)
+                                            .font(.system(size: 14))
+                                    }
+                                    .onTapGesture {
+                                        showPasswordAction = .selfDestructInfo
+                                    }
+                                }
+                                if selfDestruct {
+                                    TextField("Replacement profile name", text: $selfDestructDisplayName)
+                                    Button("Change Duress PIN") {
+                                        changeSelfDestructPassword()
+                                    }
+                                }
+                            } header: {
+                                Text("Duress PIN")
+                                    .foregroundColor(theme.colors.secondary)
+                            } footer: {
+                                Text("Entering this PIN at app unlock immediately destroys the selected encryption keys without showing a confirmation, then opens an ordinary replacement profile.")
+                            }
+                        } else {
+                            Section {
+                                NavigationLink {
+                                    XauXatPlusView()
+                                        .navigationTitle("XauXat Plus")
+                                        .navigationBarTitleDisplayMode(.inline)
+                                } label: {
+                                    XauXatPlusLockedLabel(title: "Enable Duress PIN", systemImage: "exclamationmark.shield")
+                                }
+                            } header: {
+                                Text("Duress PIN")
+                                    .foregroundColor(theme.colors.secondary)
+                            } footer: {
+                                Text("Open XauXat Plus to configure a PIN that destroys the selected encryption keys under coercion.")
                             }
                         }
-                        Toggle(isOn: $selfDestruct) {
-                            HStack(spacing: 6) {
-                                Text("Enable Duress PIN")
-                                Image(systemName: "info.circle")
-                                    .foregroundColor(theme.colors.primary)
-                                    .font(.system(size: 14))
-                            }
-                            .onTapGesture {
-                                showPasswordAction = .selfDestructInfo
-                            }
-                        }
-                        .disabled(!plusEntitlements.isAuthorized(for: .duressPIN) && !selfDestruct)
-                        if selfDestruct {
-                            TextField("Replacement profile name", text: $selfDestructDisplayName)
-                            Button("Change Duress PIN") {
-                                changeSelfDestructPassword()
-                            }
-                        }
-                    } header: {
-                        Text("Duress PIN")
-                            .foregroundColor(theme.colors.secondary)
-                    } footer: {
-                        Text("Entering this PIN at app unlock immediately destroys the selected encryption keys without showing a confirmation, then opens an ordinary replacement profile.")
-                    }
                     }
                 }
             }
@@ -630,6 +660,17 @@ struct SimplexLockView: View {
                 performLASelfDestructReset = false
             } else if prefPerformLA {
                 toggleSelfDestruct()
+            }
+        }
+        .onChange(of: plusEntitlements.status) { _ in
+            guard !plusEntitlements.hasAccess else { return }
+            decoyEnabled = false
+            decoyDisplayName = "Alex"
+            currentSelfDestruct = false
+            duressScope = XauXatDuressScope.primary.rawValue
+            if selfDestruct {
+                performLASelfDestructReset = true
+                selfDestruct = false
             }
         }
         .alert(item: $laAlert) { alertItem in

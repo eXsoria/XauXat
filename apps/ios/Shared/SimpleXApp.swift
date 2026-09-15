@@ -290,6 +290,7 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
     @Published var presentedError: String?
 
     private var updatesTask: Task<Void, Never>?
+    private var enforceFreeDefaultsTask: Task<Void, Never>?
     private var started = false
 
     var productID: String { XauXatPlusConfiguration.productID }
@@ -331,7 +332,7 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
                     await transaction.finish()
                 } else if case let .unverified(transaction, _) = verification,
                           transaction.productID == self.productID {
-                    self.status = .unverified
+                    self.updateStatus(.unverified)
                 }
             }
         }
@@ -363,7 +364,7 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
                 // even when the original expiration date has passed.
                 if transaction.revocationDate == nil {
                     let willAutoRenew = await renewalWillAutoRenew(for: transaction.id) ?? true
-                    status = .active(expiresAt: transaction.expirationDate, willAutoRenew: willAutoRenew)
+                    updateStatus(.active(expiresAt: transaction.expirationDate, willAutoRenew: willAutoRenew))
                     return
                 }
             case let .unverified(transaction, _) where transaction.productID == productID:
@@ -374,7 +375,7 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
         }
 
         if foundUnverified {
-            status = .unverified
+            updateStatus(.unverified)
             return
         }
 
@@ -382,17 +383,17 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
             switch latest {
             case let .verified(transaction):
                 if let revokedAt = transaction.revocationDate {
-                    status = .revoked(at: revokedAt)
+                    updateStatus(.revoked(at: revokedAt))
                 } else if let expiresAt = transaction.expirationDate, expiresAt <= Date() {
-                    status = .expired(expiresAt: expiresAt)
+                    updateStatus(.expired(expiresAt: expiresAt))
                 } else {
-                    status = .notPurchased
+                    updateStatus(.notPurchased)
                 }
             case .unverified:
-                status = .unverified
+                updateStatus(.unverified)
             }
         } else {
-            status = product == nil ? .unavailable : .notPurchased
+            updateStatus(product == nil ? .unavailable : .notPurchased)
         }
     }
 
@@ -418,7 +419,7 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
                 await refresh()
                 await transaction.finish()
             case .success(.unverified):
-                status = .unverified
+                updateStatus(.unverified)
                 presentedError = NSLocalizedString("The purchase could not be verified by the App Store.", comment: "StoreKit unverified transaction")
             case .pending:
                 presentedError = NSLocalizedString("The purchase is pending approval. Access will unlock automatically when the App Store confirms it.", comment: "StoreKit pending purchase")
@@ -454,5 +455,66 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
             return renewalInfo.willAutoRenew
         }
         return nil
+    }
+
+    private func updateStatus(_ nextStatus: XauXatPlusStatus) {
+        status = nextStatus
+#if !DEBUG
+        if nextStatus.hasAccess {
+            enforceFreeDefaultsTask?.cancel()
+            enforceFreeDefaultsTask = nil
+        } else {
+            enforceFreeDefaultsTask?.cancel()
+            enforceFreeDefaultsTask = Task { [weak self] in
+                guard let self else { return }
+                await self.enforceFreeDefaults()
+            }
+        }
+#endif
+    }
+
+    private func enforceFreeDefaults() async {
+        guard !status.hasAccess else { return }
+
+        _ = xauXatRemoveConversationLocks(.primary)
+        _ = xauXatRemoveConversationLocks(.decoy)
+        _ = xauXatRemoveHiddenChats(.primary)
+        _ = xauXatRemoveHiddenChats(.decoy)
+        _ = kcSelfDestructPassword.remove()
+        UserDefaults.standard.removeObject(forKey: DEFAULT_LA_SELF_DESTRUCT)
+        UserDefaults.standard.removeObject(forKey: DEFAULT_LA_SELF_DESTRUCT_DISPLAY_NAME)
+        UserDefaults.standard.removeObject(forKey: DEFAULT_LA_DURESS_SCOPE)
+
+        if xauXatStorageScope() == .primary {
+            deleteDecoyStorage()
+        }
+        _ = kcDecoyPassword.remove()
+        UserDefaults.standard.removeObject(forKey: DEFAULT_LA_DECOY_DISPLAY_NAME)
+
+        let chatModel = ChatModel.shared
+        chatModel.objectWillChange.send()
+        await NtfManager.shared.removeAllNotifications()
+
+        for _ in 0..<120 {
+            if chatModel.chatRunning == true { break }
+            guard !Task.isCancelled, !status.hasAccess else { return }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        guard chatModel.chatRunning == true, !Task.isCancelled, !status.hasAccess else { return }
+
+        for userInfo in chatModel.users where userInfo.user.hidden {
+            guard let password = xauXatProtectedProfilePassword(userInfo.user.userId) else { continue }
+            do {
+                let user = try await apiUnhideUser(userInfo.user.userId, viewPwd: password)
+                chatModel.updateUser(user)
+                _ = xauXatSetProtectedProfilePassword(user.userId, password: nil)
+            } catch {
+                logger.error("Unable to restore Free profile visibility: \(error.localizedDescription)")
+            }
+        }
+        _ = xauXatRemoveProtectedProfiles(.primary)
+        _ = xauXatRemoveProtectedProfiles(.decoy)
+        _ = xauXatRemoveProtectedProfilePasswords(.decoy)
+        NtfManager.shared.setNtfBadgeCount(chatModel.totalUnreadCountForAllUsers())
     }
 }
