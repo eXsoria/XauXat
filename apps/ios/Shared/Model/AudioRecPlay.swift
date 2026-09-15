@@ -55,7 +55,7 @@ enum XauXatVoiceMaskPreset: String, CaseIterable, Identifiable {
 
     var requiresPlus: Bool { self != .veil }
 
-    fileprivate var pitch: Float {
+    var pitch: Float {
         switch self {
         case .veil: return -420
         case .alloy: return 320

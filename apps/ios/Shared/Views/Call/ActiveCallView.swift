@@ -78,6 +78,7 @@ struct ActiveCallView: View {
             dismissAllSheets()
             hideKeyboard()
             prevColorScheme = colorScheme
+            XauXatRealtimeVoiceMasking.shared.beginCall()
         }
         .onChange(of: canConnectCall) { _ in
             logger.debug("ActiveCallView: canConnectCall changed to \(canConnectCall)")
@@ -91,6 +92,7 @@ struct ActiveCallView: View {
             Task { await m.callCommand.setClient(nil) }
             AppDelegate.keepScreenOn(false)
             client?.endCall()
+            XauXatRealtimeVoiceMasking.shared.endCall()
             CallSoundsPlayer.shared.stop()
             try? AVAudioSession.sharedInstance().setCategory(.soloAmbient)
             if (wasConnected) {
@@ -291,9 +293,13 @@ struct ActiveCallView: View {
 // Spec: spec/services/calls.md#ActiveCallOverlay
 struct ActiveCallOverlay: View {
     @EnvironmentObject var chatModel: ChatModel
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @ObservedObject var call: Call
     var client: WebRTCClient
     @ObservedObject private var deviceManager = CallAudioDeviceManager.shared
+    @StateObject private var voiceMasking = XauXatRealtimeVoiceMasking.shared
+    @State private var showVoiceMasking = false
+    @State private var showVoiceMaskingPaywall = false
 
     var body: some View {
         VStack {
@@ -334,6 +340,10 @@ struct ActiveCallOverlay: View {
                 Spacer()
                 audioDeviceButton()
                 Spacer()
+                if !call.hasVideo {
+                    realtimeVoiceMaskButton()
+                    Spacer()
+                }
                 endCallButton()
                 Spacer()
                 if XauXatProductPolicy.videoCallsEnabled {
@@ -356,6 +366,35 @@ struct ActiveCallOverlay: View {
         }
         .onDisappear {
             deviceManager.stop()
+        }
+        .sheet(isPresented: $showVoiceMasking) {
+            XauXatRealtimeVoiceMaskingView()
+        }
+        .sheet(isPresented: $showVoiceMaskingPaywall) {
+            NavigationView {
+                XauXatPlusView()
+                    .navigationTitle("XauXat Plus")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { showVoiceMaskingPaywall = false }
+                        }
+                    }
+            }
+        }
+        .alert("Voice masking unavailable", isPresented: Binding(
+            get: { voiceMasking.failureMessage != nil },
+            set: { if !$0 { voiceMasking.failureMessage = nil } }
+        )) {
+            Button("Disable masking") { voiceMasking.setEnabled(false) }
+            Button("Keep microphone muted", role: .cancel) { voiceMasking.failureMessage = nil }
+        } message: {
+            Text(voiceMasking.failureMessage ?? "")
+        }
+        .onChange(of: plusEntitlements.status) { _ in
+            if !plusEntitlements.isAuthorized(for: .realTimeVoiceMasking), voiceMasking.enabled {
+                voiceMasking.setEnabled(false)
+            }
         }
     }
 
@@ -429,6 +468,32 @@ struct ActiveCallOverlay: View {
                 } else { WebRTCClient.showUnauthorizedAlert(for: .audio) }
             }
         }
+    }
+
+    private func realtimeVoiceMaskButton() -> some View {
+        controlButton(
+            call,
+            voiceMasking.enabled ? "waveform.badge.shield.lefthalf.filled" : "waveform.badge.shield.lefthalf",
+            padding: 13
+        ) {
+            if plusEntitlements.isAuthorized(for: .realTimeVoiceMasking) {
+                showVoiceMasking = true
+            } else {
+                showVoiceMaskingPaywall = true
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if !plusEntitlements.isAuthorized(for: .realTimeVoiceMasking) {
+                Image(systemName: "lock.fill")
+                    .font(.caption2)
+                    .foregroundColor(whiteColorWithAlpha)
+                    .padding(3)
+            }
+        }
+        .accessibilityLabel(plusEntitlements.isAuthorized(for: .realTimeVoiceMasking)
+            ? "Real-time voice masking"
+            : "Real-time voice masking, XauXat Plus")
+        .accessibilityValue(voiceMasking.enabled ? voiceMasking.preset.name : "Off")
     }
 
     func audioDeviceButton() -> some View {
@@ -519,6 +584,63 @@ struct ActiveCallOverlay: View {
 
     private var whiteColorWithAlpha: Color {
         get { Color(red: 204 / 255, green: 204 / 255, blue: 204 / 255) }
+    }
+}
+
+private struct XauXatRealtimeVoiceMaskingView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var voiceMasking = XauXatRealtimeVoiceMasking.shared
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    Toggle("Mask my voice", isOn: Binding(
+                        get: { voiceMasking.enabled },
+                        set: voiceMasking.setEnabled
+                    ))
+                } footer: {
+                    Text("Your microphone is transformed locally before WebRTC receives it. Preset changes keep the call connected.")
+                }
+
+                Section("Voice preset") {
+                    ForEach(XauXatVoiceMaskPreset.allCases) { preset in
+                        Button { voiceMasking.setPreset(preset) } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(preset.name)
+                                        .foregroundColor(.primary)
+                                    Text(preset.detail)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: voiceMasking.preset == preset ? "checkmark.circle.fill" : "circle")
+                                    .foregroundColor(voiceMasking.preset == preset ? .accentColor : .secondary)
+                            }
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if let failureMessage = voiceMasking.failureMessage {
+                    Section {
+                        Text(failureMessage)
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+            .navigationTitle("Call voice masking")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .privacySensitive()
     }
 }
 
