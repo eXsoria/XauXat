@@ -161,6 +161,22 @@ public func xauxatCodeLockedPhotoPreview() -> String? {
     return resizeImageToStrSizeSync(image, maxDataSize: 14_000)
 }
 
+@MainActor
+public func xauxatCodeLockedVideoPreview() -> String? {
+    let size = CGSize(width: 400, height: 225)
+    let renderer = UIGraphicsImageRenderer(size: size)
+    let image = renderer.image { context in
+        UIColor(white: 0.08, alpha: 1).setFill()
+        context.fill(CGRect(origin: .zero, size: size))
+        let configuration = UIImage.SymbolConfiguration(pointSize: 48, weight: .medium)
+        guard let lock = UIImage(systemName: "lock.fill", withConfiguration: configuration)?
+            .withTintColor(.white, renderingMode: .alwaysOriginal) else { return }
+        let origin = CGPoint(x: (size.width - lock.size.width) / 2, y: (size.height - lock.size.height) / 2)
+        lock.draw(at: origin)
+    }
+    return resizeImageToStrSizeSync(image, maxDataSize: 14_000)
+}
+
 public func xauxatSanitizeAnimatedImageData(_ data: Data) -> Data? {
     guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
     let frameCount = CGImageSourceGetCount(source)
