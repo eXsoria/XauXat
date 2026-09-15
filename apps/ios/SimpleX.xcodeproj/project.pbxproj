@@ -224,6 +224,7 @@
 		8CE848A32C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */; };
 		A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000133D1000100000001 /* EmbeddedTorManager.swift */; };
 		A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000333D2000100000003 /* XauXatHomeView.swift */; };
+		A11E001233D3000100000012 /* NSEEmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */; };
 		A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */; };
 		B70A39732D24090D00E80A5F /* TagListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70A39722D24090D00E80A5F /* TagListView.swift */; };
 		B70CE9E62D4BE5930080F36D /* GroupMentions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70CE9E52D4BE5930080F36D /* GroupMentions.swift */; };
@@ -269,6 +270,7 @@
 		E5DDBE702DC4217900A0EFF0 /* NSEAPITypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DDBE6F2DC4217900A0EFF0 /* NSEAPITypes.swift */; };
 		E5E418012F83D2CA00252B9E /* OnboardingCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5E418002F83D2CA00252B9E /* OnboardingCards.swift */; };
 		E5E418022F83D2CA00252B9E /* ChannelWebAccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5E418032F83D2CA00252B9E /* ChannelWebAccessView.swift */; };
+		FBB34E2DB42E4CB435B96315 /* Pods_SimpleX_NSE.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F5616F18CA696CC5FB9AACD /* Pods_SimpleX_NSE.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -353,6 +355,7 @@
 		18415B08031E8FB0F7FC27F9 /* CallViewRenderers.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CallViewRenderers.swift; sourceTree = "<group>"; };
 		18415DAAAD1ADBEDB0EDA852 /* VideoPlayerView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VideoPlayerView.swift; sourceTree = "<group>"; };
 		18415FD2E36F13F596A45BB4 /* CIVideoView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CIVideoView.swift; sourceTree = "<group>"; };
+		1F5616F18CA696CC5FB9AACD /* Pods_SimpleX_NSE.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_SimpleX_NSE.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		3CDBCF4127FAE51000354CDD /* ComposeLinkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeLinkView.swift; sourceTree = "<group>"; };
 		3CDBCF4727FF621E00354CDD /* CILinkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CILinkView.swift; sourceTree = "<group>"; };
 		5C00168028C4FE760094D739 /* KeyChain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyChain.swift; sourceTree = "<group>"; };
@@ -581,6 +584,7 @@
 		64EEB0F62C353F1C00972D62 /* ServersSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServersSummaryView.swift; sourceTree = "<group>"; };
 		64F1CC3A28B39D8600CD1FB1 /* IncognitoHelp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncognitoHelp.swift; sourceTree = "<group>"; };
 		64FC8F9C2E3B6DEF0068F384 /* ContextMemberContactActionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextMemberContactActionsView.swift; sourceTree = "<group>"; };
+		73B98082CBF1462E69FD8A68 /* Pods-SimpleX NSE.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SimpleX NSE.release.xcconfig"; path = "Target Support Files/Pods-SimpleX NSE/Pods-SimpleX NSE.release.xcconfig"; sourceTree = "<group>"; };
 		82D4E70F2D032159CD1D39ED /* Pods-SimpleX (iOS).debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SimpleX (iOS).debug.xcconfig"; path = "Target Support Files/Pods-SimpleX (iOS)/Pods-SimpleX (iOS).debug.xcconfig"; sourceTree = "<group>"; };
 		8C01E9BF2C8EFBB6008A4B0A /* objc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = objc.h; sourceTree = "<group>"; };
 		8C01E9C02C8EFC33008A4B0A /* objc.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = objc.m; sourceTree = "<group>"; };
@@ -608,6 +612,8 @@
 		8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableChatItemToolbars.swift; sourceTree = "<group>"; };
 		A11E000133D1000100000001 /* EmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedTorManager.swift; sourceTree = "<group>"; };
 		A11E000333D2000100000003 /* XauXatHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatHomeView.swift; sourceTree = "<group>"; };
+		A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEEmbeddedTorManager.swift; sourceTree = "<group>"; };
+		B3B79D8F8E95FE108F604F0D /* Pods-SimpleX NSE.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SimpleX NSE.debug.xcconfig"; path = "Target Support Files/Pods-SimpleX NSE/Pods-SimpleX NSE.debug.xcconfig"; sourceTree = "<group>"; };
 		A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatCodeLockedContent.swift; sourceTree = "<group>"; };
 		B5D5FB384075FF4C67AA7A2A /* Pods_SimpleX__iOS_.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_SimpleX__iOS_.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70A39722D24090D00E80A5F /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
@@ -734,6 +740,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5CE2BAA62845617C00EC33A6 /* SimpleXChat.framework in Frameworks */,
+				FBB34E2DB42E4CB435B96315 /* Pods_SimpleX_NSE.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -849,6 +856,7 @@
 				5CDCAD6028187D7900503DA2 /* libz.tbd */,
 				5CDCAD5E28187D4A00503DA2 /* libiconv.tbd */,
 				B5D5FB384075FF4C67AA7A2A /* Pods_SimpleX__iOS_.framework */,
+				1F5616F18CA696CC5FB9AACD /* Pods_SimpleX_NSE.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -1063,6 +1071,7 @@
 			children = (
 				5CDCAD5128186DE400503DA2 /* SimpleX NSE.entitlements */,
 				E5DDBE6F2DC4217900A0EFF0 /* NSEAPITypes.swift */,
+				A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */,
 				5CDCAD472818589900503DA2 /* NotificationService.swift */,
 				5CDCAD492818589900503DA2 /* Info.plist */,
 				5CB0BA862826CB3A00B3292C /* InfoPlist.strings */,
@@ -1243,6 +1252,8 @@
 			children = (
 				82D4E70F2D032159CD1D39ED /* Pods-SimpleX (iOS).debug.xcconfig */,
 				0B6ADA0DF7B5CEA9A9452020 /* Pods-SimpleX (iOS).release.xcconfig */,
+				B3B79D8F8E95FE108F604F0D /* Pods-SimpleX NSE.debug.xcconfig */,
+				73B98082CBF1462E69FD8A68 /* Pods-SimpleX NSE.release.xcconfig */,
 			);
 			name = Pods;
 			path = Pods;
@@ -1337,6 +1348,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5CDCAD502818589900503DA2 /* Build configuration list for PBXNativeTarget "SimpleX NSE" */;
 			buildPhases = (
+				C688D0B8AF21086B27B05F5E /* [CP] Check Pods Manifest.lock */,
 				5CDCAD412818589900503DA2 /* Sources */,
 				5CDCAD422818589900503DA2 /* Frameworks */,
 				5CDCAD432818589900503DA2 /* Resources */,
@@ -1555,6 +1567,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-SimpleX (iOS)/Pods-SimpleX (iOS)-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		C688D0B8AF21086B27B05F5E /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-SimpleX NSE-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
 		E5C0BBF02F82B50C00EA7527 /* Run Script */ = {
@@ -1791,6 +1825,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11E001233D3000100000012 /* NSEEmbeddedTorManager.swift in Sources */,
 				5CDCAD482818589900503DA2 /* NotificationService.swift in Sources */,
 				E5DDBE702DC4217900A0EFF0 /* NSEAPITypes.swift in Sources */,
 				5CFE0922282EEAF60002594B /* ZoomableScrollView.swift in Sources */,
@@ -2293,6 +2328,7 @@
 		};
 		5CDCAD4E2818589900503DA2 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B3B79D8F8E95FE108F604F0D /* Pods-SimpleX NSE.debug.xcconfig */;
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_TIDY_BUGPRONE_REDUNDANT_BRANCH_CONDITION = YES;
@@ -2330,6 +2366,7 @@
 		};
 		5CDCAD4F2818589900503DA2 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 73B98082CBF1462E69FD8A68 /* Pods-SimpleX NSE.release.xcconfig */;
 			buildSettings = {
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_TIDY_BUGPRONE_REDUNDANT_BRANCH_CONDITION = YES;

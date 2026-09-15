@@ -348,7 +348,7 @@ class NotificationService: UNNotificationServiceExtension {
             contentHandler(createAppStoppedNtf(badgeCount))
         case .suspended:
             setExpirationTimer()
-            receiveNtfMessages(request)
+            receiveNtfMessagesViaTor(request)
         case .suspending:
             // while application is suspending, the current instance will be waiting
             setExpirationTimer()
@@ -375,7 +375,7 @@ class NotificationService: UNNotificationServiceExtension {
                 }
                 logger.debug("NotificationService: app state is now \(state.rawValue)")
                 if state.inactive && self.contentHandler != nil {
-                    receiveNtfMessages(request)
+                    receiveNtfMessagesViaTor(request)
                 } else {
                     contentHandler(receivedNtf)
                 }
@@ -383,6 +383,27 @@ class NotificationService: UNNotificationServiceExtension {
         case .active: contentHandler(receivedNtf)
         case .activating: contentHandler(receivedNtf)
         case .bgRefresh: contentHandler(receivedNtf)
+        }
+    }
+
+    /// The notification extension is a separate process, so it must establish
+    /// its own Tor circuit before the SimpleX core can make any connection.
+    /// Failure is intentionally closed: deliver the opaque best attempt rather
+    /// than allowing the core to retry over the device's direct connection.
+    private func receiveNtfMessagesViaTor(_ request: UNNotificationRequest) {
+        NSEEmbeddedTorManager.shared.start { [weak self] result in
+            guard let self, self.contentHandler != nil else { return }
+            switch result {
+            case let .success(port):
+                networkConfig = xauXatManagedTorConfig(
+                    getNetCfg(),
+                    socksProxy: "127.0.0.1:\(port)"
+                )
+                self.receiveNtfMessages(request)
+            case let .failure(error):
+                logger.error("NotificationService: Tor unavailable, failing closed: \(error.localizedDescription, privacy: .public)")
+                self.deliverBestAttemptNtf(urgent: true)
+            }
         }
     }
 
@@ -871,7 +892,9 @@ let seSubscriber = seMessageSubscriber {
 var receiverStarted = false
 let startLock = DispatchSemaphore(value: 1)
 let suspendLock = DispatchSemaphore(value: 1)
-var networkConfig: NetCfg = getNetCfg()
+// A closed loopback endpoint prevents the NSE core from making any direct
+// connection before its own embedded Tor circuit is ready.
+var networkConfig: NetCfg = xauXatManagedTorConfig(getNetCfg(), socksProxy: "127.0.0.1:1")
 
 // startChat uses semaphore startLock to ensure that only one didReceive thread can start chat controller
 // Subsequent calls to didReceive will be waiting on semaphore and won't start chat again, as it will be .active
@@ -879,12 +902,15 @@ var networkConfig: NetCfg = getNetCfg()
 func startChat() -> DBMigrationResult? {
     logger.debug("NotificationService: startChat")
     // only skip creating if there is chat controller
-    if case .active = NSEChatState.shared.value, hasChatCtrl() { return .ok }
+    if case .active = NSEChatState.shared.value, hasChatCtrl() {
+        return applyCurrentNSEConfig() ? .ok : nil
+    }
 
     startLock.wait()
     defer { startLock.signal() }
 
     if hasChatCtrl() {
+        guard applyCurrentNSEConfig() else { return nil }
         return switch NSEChatState.shared.value {
         case .created: doStartChat()
         case .starting: .ok // it should never get to this branch, as it would be waiting for start on startLock
@@ -897,6 +923,20 @@ func startChat() -> DBMigrationResult? {
         // State in preference may have failed to update e.g. because of a crash.
         NSEChatState.shared.set(.created)
         return doStartChat()
+    }
+}
+
+/// A surviving chat controller may still point at a SOCKS listener owned by a
+/// previous Tor attempt. Reapply the current process-local endpoint before any
+/// notification retrieval, including activation of an existing controller.
+@inline(__always)
+func applyCurrentNSEConfig() -> Bool {
+    do {
+        try setNetworkConfig(networkConfig)
+        return true
+    } catch {
+        logger.error("NotificationService apply Tor network config error: \(responseError(error))")
+        return false
     }
 }
 
@@ -1098,11 +1138,16 @@ func receivedMsgNtf(_ res: NSEChatEvent) async -> (String, NSENotificationData)?
 
 @inline(__always)
 func updateNetCfg() {
-    let newNetConfig = getNetCfg()
+    // Preserve all upstream tunables, but keep the process-local NSE SOCKS
+    // endpoint instead of adopting the main app's stale or unavailable port.
+    let newNetConfig = xauXatManagedTorConfig(
+        getNetCfg(),
+        socksProxy: networkConfig.socksProxy ?? "127.0.0.1:1"
+    )
     if newNetConfig != networkConfig {
         logger.debug("NotificationService applying changed network config")
         do {
-            try setNetworkConfig(networkConfig)
+            try setNetworkConfig(newNetConfig)
             networkConfig = newNetConfig
         } catch {
             logger.error("NotificationService apply changed network config error: \(responseError(error))")
