@@ -593,11 +593,26 @@ struct XauXatPlusView: View {
                         .multilineTextAlignment(.trailing)
                 }
             } footer: {
-                Text("The App Store provides the localized price and cryptographically verifies access. XauXat does not unlock Plus from a local setting.")
+                if plusEntitlements.hasLocalDebugAccess {
+                    Text("This local Debug build includes XauXat Plus automatically.")
+                } else {
+                    Text("The App Store provides the localized price and cryptographically verifies access. XauXat does not unlock Plus from a local setting.")
+                }
             }
 
             Section {
-                if !plusEntitlements.status.hasAccess {
+                if plusEntitlements.hasLocalDebugAccess {
+                    Button {
+                        Task { await plusEntitlements.purchase() }
+                    } label: {
+                        HStack {
+                            Text("Test App Store purchase")
+                            Spacer()
+                            if plusEntitlements.isPurchasing { ProgressView() }
+                        }
+                    }
+                    .disabled(plusEntitlements.product == nil || plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
+                } else if !plusEntitlements.hasAccess {
                     Button {
                         Task { await plusEntitlements.purchase() }
                     } label: {
@@ -621,7 +636,9 @@ struct XauXatPlusView: View {
                 }
                 .disabled(plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
             } footer: {
-                if plusEntitlements.product == nil {
+                if plusEntitlements.hasLocalDebugAccess {
+                    Text("Plus stays included in this Debug build. The test purchase uses the configured StoreKit environment; App Store and TestFlight builds still require a verified subscription.")
+                } else if plusEntitlements.product == nil {
                     Text("The product is not available in this build or App Store environment. Configure \(plusEntitlements.productID) before testing purchases.")
                 } else {
                     Text("Payment and subscription management are handled by Apple. Restoring may ask you to authenticate with the App Store.")
@@ -642,6 +659,9 @@ struct XauXatPlusView: View {
 
     @ViewBuilder
     private var statusText: some View {
+#if DEBUG
+        Text("Included in local build")
+#else
         switch plusEntitlements.status {
         case .checking:
             Text("Checking App Store…")
@@ -666,6 +686,7 @@ struct XauXatPlusView: View {
         case .unavailable:
             Text("Unavailable")
         }
+#endif
     }
 }
 

@@ -1,6 +1,6 @@
 # XauXat Plus on iOS
 
-XauXat Plus uses StoreKit 2 and grants access only from App Store verified transactions. There is no local premium toggle.
+XauXat Plus uses StoreKit 2. App Store and TestFlight builds grant access only from App Store verified transactions. Local Debug builds grant Plus automatically so contributors can exercise every paid feature without configuring a StoreKit test account.
 
 ## Product configuration
 
@@ -20,7 +20,10 @@ The app reads the product ID from the `XAUXAT_PLUS_PRODUCT_ID` Xcode build setti
 - Unverified transactions never grant access.
 - Restore Purchases calls `AppStore.sync()` only after the user explicitly requests it.
 - `XauXatPlusAuthorizing.isAuthorized(for:)` is the single authorization boundary for Plus features and can be replaced by a test double.
+- Builds compiled with `DEBUG` authorize Plus locally. This compile-time path is absent from Release builds and cannot unlock an App Store or TestFlight build.
 
 ## Local purchase testing
 
-Create a StoreKit Configuration file in Xcode with the same product ID, an auto-renewable monthly period, and a EUR 2.99 price. Select it in the Run scheme under Options. Do not commit Apple account credentials or signed transaction material.
+The Settings tab exposes **XauXat Plus** with subscription status, purchase, and restore actions. In a local Debug build it reports **Included in local build** and labels the purchase action as an App Store test; Plus access remains active independently of that test transaction.
+
+To test the purchase flow itself, run a Release configuration against a StoreKit Configuration file with the same product ID, an auto-renewable monthly period, and a EUR 2.99 price. Select it in the Run scheme under Options. Do not commit Apple account credentials or signed transaction material.

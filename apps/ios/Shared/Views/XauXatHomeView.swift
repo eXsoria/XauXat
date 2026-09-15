@@ -874,6 +874,7 @@ private struct XauXatEmptyState: View {
 
 private struct XauXatSettingsHome: View {
     @EnvironmentObject private var chatModel: ChatModel
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     let palette: XauXatPalette
     @Binding var activeUserPickerSheet: UserPickerSheet?
 
@@ -904,6 +905,24 @@ private struct XauXatSettingsHome: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Open your profile")
+                }
+
+                XauXatSectionTitle("PLAN", palette: palette)
+                    .padding(.top, 26)
+                XauXatSettingsCard(palette: palette) {
+                    NavigationLink {
+                        XauXatPlusView()
+                            .navigationTitle("XauXat Plus")
+                            .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        XauXatSettingsRow(
+                            palette: palette,
+                            symbol: "plus.circle",
+                            title: "XauXat Plus",
+                            value: plusStatusLabel
+                        )
+                    }
+                    .accessibilityHint("View subscription details, subscribe, or restore purchases")
                 }
 
                 XauXatSectionTitle("APP", palette: palette)
@@ -971,6 +990,15 @@ private struct XauXatSettingsHome: View {
             .padding(.bottom, 32)
         }
         .buttonStyle(.plain)
+    }
+
+    private var plusStatusLabel: String {
+        if plusEntitlements.hasLocalDebugAccess { return "Included" }
+        switch plusEntitlements.status {
+        case .active: return "Active"
+        case .checking: return "Checking"
+        case .notPurchased, .expired, .revoked, .unverified, .unavailable: return "Free"
+        }
     }
 }
 

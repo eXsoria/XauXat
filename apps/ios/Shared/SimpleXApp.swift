@@ -298,8 +298,24 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
         product.map { "\($0.displayPrice) / month" } ?? "€2.99 / month"
     }
 
-    func isAuthorized(for feature: XauXatPlusFeature) -> Bool {
+    var hasAccess: Bool {
+#if DEBUG
+        true
+#else
         status.hasAccess
+#endif
+    }
+
+    var hasLocalDebugAccess: Bool {
+#if DEBUG
+        true
+#else
+        false
+#endif
+    }
+
+    func isAuthorized(for feature: XauXatPlusFeature) -> Bool {
+        hasAccess
     }
 
     func start() {
