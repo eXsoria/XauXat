@@ -441,6 +441,7 @@ struct ComposeView: View {
     @State private var allowOneTimePhotoSave = false
     @State private var showFileImporter = false
     @State private var showCodeLockSetup = false
+    @State private var showCodeLockPaywall = false
     @State private var codeLockCode: String?
 
     @State private var audioRecorder: AudioRecorder?
@@ -727,6 +728,18 @@ struct ComposeView: View {
                     resetLinkPreview()
                     composeState = composeState.copy(preview: .noPreview)
                 }
+            }
+        }
+        .sheet(isPresented: $showCodeLockPaywall) {
+            NavigationView {
+                XauXatPlusView()
+                    .navigationTitle("XauXat Plus")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { showCodeLockPaywall = false }
+                        }
+                    }
             }
         }
         .onChange(of: chosenMedia) { selected in
@@ -1274,10 +1287,7 @@ struct ComposeView: View {
                 clearCurrentDraft()
                 showCodeLockSetup = true
             } else {
-                AlertManager.shared.showAlertMsg(
-                    title: "XauXat Plus required",
-                    message: "Code-Locked Content is included with XauXat Plus."
-                )
+                showCodeLockPaywall = true
             }
         } label: {
             Image(systemName: codeLockCode == nil ? "lock" : "lock.fill")
@@ -1287,6 +1297,11 @@ struct ComposeView: View {
         }
         .tint(theme.colors.primary)
         .accessibilityLabel(codeLockCode == nil ? "Protect content with code" : "Remove content code")
+        .accessibilityValue(
+            codeLockCode == nil && !plusEntitlements.isAuthorized(for: .codeLockedContent)
+                ? "Requires XauXat Plus"
+                : ""
+        )
     }
 
     private func codeLockStatusView() -> some View {

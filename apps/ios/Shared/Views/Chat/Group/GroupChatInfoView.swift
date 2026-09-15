@@ -16,7 +16,6 @@ let SMALL_GROUPS_RCPS_MEM_LIMIT: Int = 20
 struct GroupChatInfoView: View {
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var theme: AppTheme
-    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     @Environment(\.dismiss) var dismiss: DismissAction
     @ObservedObject var chat: Chat
     @Binding var groupInfo: GroupInfo
@@ -170,20 +169,16 @@ struct GroupChatInfoView: View {
                         }
                     }
 
-                    if xauXatIsChatLocked(chat.id) || plusEntitlements.isAuthorized(for: .conversationLock) {
-                        Section {
-                            XauXatConversationLockButton(chatID: chat.id)
-                        } footer: {
-                            Text("Locked conversations hide message previews and require the authentication mode selected in App Lock.")
-                        }
+                    Section {
+                        XauXatConversationLockButton(chatID: chat.id)
+                    } footer: {
+                        Text("Locked conversations hide message previews and require the authentication mode selected in App Lock.")
                     }
 
-                    if xauXatIsChatHidden(chat.id) || plusEntitlements.isAuthorized(for: .hiddenChats) {
-                        Section {
-                            XauXatHiddenChatButton(chatID: chat.id)
-                        } footer: {
-                            Text("Hidden conversations are removed from lists, search, sharing destinations and notification badges.")
-                        }
+                    Section {
+                        XauXatHiddenChatButton(chatID: chat.id)
+                    } footer: {
+                        Text("Hidden conversations are removed from lists, search, sharing destinations and notification badges.")
                     }
 
                     Section {

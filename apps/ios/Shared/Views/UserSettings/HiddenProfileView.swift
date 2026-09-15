@@ -43,8 +43,13 @@ struct HiddenProfileView: View {
                             $0.user.userId != user.userId && !$0.user.hidden
                         }?.user.userId
                         Task {
+                            var profileWasHidden = false
                             do {
+                                guard xauXatSetProtectedProfilePassword(user.userId, password: hidePassword) else {
+                                    throw RuntimeError("Unable to persist protected profile recovery password")
+                                }
                                 let u = try await apiHideUser(user.userId, viewPwd: hidePassword)
+                                profileWasHidden = true
                                 if user.activeUser, let replacementUserId {
                                     try await changeActiveUserAsync_(replacementUserId, viewPwd: nil)
                                 }
@@ -56,6 +61,9 @@ struct HiddenProfileView: View {
                                     }
                                 }
                             } catch let error {
+                                if !profileWasHidden {
+                                    _ = xauXatSetProtectedProfilePassword(user.userId, password: nil)
+                                }
                                 saveErrorAlert = true
                                 savePasswordError = responseError(error)
                             }

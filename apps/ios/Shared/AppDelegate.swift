@@ -126,6 +126,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             _ = xauXatRemoveHiddenChats(.decoy)
             _ = xauXatRemoveProtectedProfiles(.primary)
             _ = xauXatRemoveProtectedProfiles(.decoy)
+            _ = xauXatRemoveProtectedProfilePasswords(.primary)
+            _ = xauXatRemoveProtectedProfilePasswords(.decoy)
         }
     }
 

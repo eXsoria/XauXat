@@ -48,7 +48,7 @@ struct XauXatConversationLockButton: View {
     }
 
     var body: some View {
-        if locked || plusEntitlements.isAuthorized(for: .conversationLock) {
+        if plusEntitlements.isAuthorized(for: .conversationLock) {
             Button {
                 authenticate(
                     title: locked ? "Unlock conversation" : "Lock conversation",
@@ -68,6 +68,14 @@ struct XauXatConversationLockButton: View {
             } label: {
                 Label(locked ? "Remove conversation lock" : "Lock conversation", systemImage: locked ? "lock.open" : "lock")
             }
+        } else {
+            NavigationLink {
+                XauXatPlusView()
+                    .navigationTitle("XauXat Plus")
+                    .navigationBarTitleDisplayMode(.inline)
+            } label: {
+                XauXatPlusLockedLabel(title: "Lock conversation", systemImage: "lock")
+            }
         }
     }
 }
@@ -83,7 +91,7 @@ struct XauXatHiddenChatButton: View {
     }
 
     var body: some View {
-        if hidden || plusEntitlements.isAuthorized(for: .hiddenChats) {
+        if plusEntitlements.isAuthorized(for: .hiddenChats) {
             Button {
                 authenticate(
                     title: hidden ? "Show conversation" : "Hide conversation",
@@ -100,6 +108,14 @@ struct XauXatHiddenChatButton: View {
                 }
             } label: {
                 Label(hidden ? "Show conversation" : "Hide conversation", systemImage: hidden ? "eye" : "eye.slash")
+            }
+        } else {
+            NavigationLink {
+                XauXatPlusView()
+                    .navigationTitle("XauXat Plus")
+                    .navigationBarTitleDisplayMode(.inline)
+            } label: {
+                XauXatPlusLockedLabel(title: "Hide conversation", systemImage: "eye.slash")
             }
         }
     }
@@ -161,7 +177,6 @@ enum SendReceipts: Identifiable, Hashable {
 struct ChatInfoView: View {
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var theme: AppTheme
-    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     @Environment(\.dismiss) var dismiss: DismissAction
     @ObservedObject var chat: Chat
     @State var contact: Contact
@@ -274,20 +289,16 @@ struct ChatInfoView: View {
                     }
                     .disabled(!contact.ready || !contact.active)
 
-                    if xauXatIsChatLocked(chat.id) || plusEntitlements.isAuthorized(for: .conversationLock) {
-                        Section {
-                            XauXatConversationLockButton(chatID: chat.id)
-                        } footer: {
-                            Text("Locked conversations hide message previews and require the authentication mode selected in App Lock.")
-                        }
+                    Section {
+                        XauXatConversationLockButton(chatID: chat.id)
+                    } footer: {
+                        Text("Locked conversations hide message previews and require the authentication mode selected in App Lock.")
                     }
 
-                    if xauXatIsChatHidden(chat.id) || plusEntitlements.isAuthorized(for: .hiddenChats) {
-                        Section {
-                            XauXatHiddenChatButton(chatID: chat.id)
-                        } footer: {
-                            Text("Hidden conversations are removed from lists, search, sharing destinations and notification badges.")
-                        }
+                    Section {
+                        XauXatHiddenChatButton(chatID: chat.id)
+                    } footer: {
+                        Text("Hidden conversations are removed from lists, search, sharing destinations and notification badges.")
                     }
 
                     Section {

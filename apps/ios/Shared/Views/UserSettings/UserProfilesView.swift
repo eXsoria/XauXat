@@ -334,6 +334,7 @@ struct UserProfilesView: View {
 
         func deleteUser() async throws {
             try await apiDeleteUser(user.userId, delSMPQueues, viewPwd: viewPwd)
+            _ = xauXatSetProtectedProfilePassword(user.userId, password: nil)
             removeWallpaperFilesFromTheme(user.uiThemes)
             await MainActor.run { withAnimation { m.removeUser(user) } }
         }
@@ -438,6 +439,9 @@ struct UserProfilesView: View {
         Task {
             do {
                 let u = try await api()
+                if !u.hidden {
+                    _ = xauXatSetProtectedProfilePassword(u.userId, password: nil)
+                }
                 await MainActor.run {
                     withAnimation { m.updateUser(u) }
                     if successAlert != nil {
