@@ -732,6 +732,8 @@ private struct XauXatUnlockedVideoView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Opens code entry")
+            case .exhausted:
+                protectedPoster(label: "No attempts remaining", icon: "lock.slash.fill")
             }
         }
         .privacySensitive()

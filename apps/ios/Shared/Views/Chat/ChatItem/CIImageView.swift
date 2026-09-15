@@ -450,6 +450,8 @@ private struct XauXatCodeLockedImageView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Opens code entry")
+            case .exhausted:
+                protectedPlaceholder("No attempts remaining", icon: "lock.slash.fill")
             }
         }
         .privacySensitive()
