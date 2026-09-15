@@ -359,6 +359,7 @@ private func saveXauXatCodeLockedPhoto(
     _ image: UIImage,
     animated: Bool,
     code: String,
+    maxAttempts: Int?,
     caption: String,
     allowSave: Bool
 ) async -> XauXatPreparedOneTimePhoto? {
@@ -386,7 +387,7 @@ private func saveXauXatCodeLockedPhoto(
                 mimeType: mimeType,
                 caption: caption.isEmpty ? nil : caption
             )
-            return try XauXatCodeLockedEnvelope.seal(payload, code: code).encoded()
+            return try XauXatCodeLockedEnvelope.seal(payload, code: code, maxAttempts: maxAttempts).encoded()
         }.value
         return saveXauXatProtectedPhotoData(envelopeData, allowSave: allowSave)
     } catch {
@@ -399,6 +400,7 @@ private func saveXauXatCodeLockedAudio(
     recordingFileName: String,
     duration: Int,
     code: String,
+    maxAttempts: Int?,
     caption: String
 ) async -> CryptoFile? {
     let source = getAppFilePath(recordingFileName)
@@ -413,7 +415,7 @@ private func saveXauXatCodeLockedAudio(
                 caption: caption.isEmpty ? nil : caption,
                 duration: duration
             )
-            return try XauXatCodeLockedEnvelope.seal(payload, code: code).encoded()
+            return try XauXatCodeLockedEnvelope.seal(payload, code: code, maxAttempts: maxAttempts).encoded()
         }.value
         let protectedFileName = generateNewFileName("audio", "xauxat")
         guard let protectedFile = saveFile(
@@ -433,6 +435,7 @@ private func saveXauXatCodeLockedVideo(
     url: URL,
     duration: Int,
     code: String,
+    maxAttempts: Int?,
     caption: String
 ) async -> CryptoFile? {
     do {
@@ -446,7 +449,7 @@ private func saveXauXatCodeLockedVideo(
                 caption: caption.isEmpty ? nil : caption,
                 duration: duration
             )
-            return try XauXatCodeLockedEnvelope.seal(payload, code: code).encoded()
+            return try XauXatCodeLockedEnvelope.seal(payload, code: code, maxAttempts: maxAttempts).encoded()
         }.value
         let protectedFileName = generateNewFileName("video", "xauxat")
         guard let protectedFile = saveFile(
@@ -465,6 +468,7 @@ private func saveXauXatCodeLockedVideo(
 private func saveXauXatCodeLockedFile(
     url: URL,
     code: String,
+    maxAttempts: Int?,
     caption: String
 ) async -> CryptoFile? {
     guard url.startAccessingSecurityScopedResource() else {
@@ -485,7 +489,7 @@ private func saveXauXatCodeLockedFile(
                 mimeType: mimeType,
                 caption: caption.isEmpty ? nil : caption
             )
-            return try XauXatCodeLockedEnvelope.seal(payload, code: code).encoded()
+            return try XauXatCodeLockedEnvelope.seal(payload, code: code, maxAttempts: maxAttempts).encoded()
         }.value
         let protectedFileName = generateNewFileName("document", "xauxat")
         return saveFile(
@@ -529,6 +533,7 @@ struct ComposeView: View {
     @State private var showCodeLockSetup = false
     @State private var showCodeLockPaywall = false
     @State private var codeLockCode: String?
+    @State private var codeLockMaxAttempts: Int?
 
     @State private var audioRecorder: AudioRecorder?
     @State private var voiceMessageRecordingTime: TimeInterval?
@@ -767,7 +772,10 @@ struct ComposeView: View {
             }
         }
         .onChange(of: composeState.contextItem) { contextItem in
-            if contextItem != .noContextItem { codeLockCode = nil }
+            if contextItem != .noContextItem {
+                codeLockCode = nil
+                codeLockMaxAttempts = nil
+            }
         }
         .confirmationDialog("Attach", isPresented: $showChooseSource, titleVisibility: .visible) {
             Button("Take picture") {
@@ -810,8 +818,9 @@ struct ComposeView: View {
             }
         }
         .sheet(isPresented: $showCodeLockSetup) {
-            XauXatCodeLockSetupView { code in
+            XauXatCodeLockSetupView { code, maxAttempts in
                 codeLockCode = code
+                codeLockMaxAttempts = maxAttempts
                 if case .linkPreview = composeState.preview {
                     resetLinkPreview()
                     composeState = composeState.copy(preview: .noPreview)
@@ -905,6 +914,7 @@ struct ComposeView: View {
             }
             chatModel.removeLiveDummy(animated: false)
             codeLockCode = nil
+            codeLockMaxAttempts = nil
         }
         .onChange(of: chatModel.stopPreviousRecPlay) { _ in
             if !startingRecording {
@@ -1384,6 +1394,7 @@ struct ComposeView: View {
         Button {
             if codeLockCode != nil {
                 codeLockCode = nil
+                codeLockMaxAttempts = nil
             } else if plusEntitlements.isAuthorized(for: .codeLockedContent) {
                 clearCurrentDraft()
                 showCodeLockSetup = true
@@ -1409,10 +1420,13 @@ struct ComposeView: View {
         HStack(spacing: 8) {
             Image(systemName: "lock.fill")
                 .font(.caption)
-            Text("Content protected by code")
+            Text(codeLockMaxAttempts.map { "Protected · \($0) attempts" } ?? "Protected · unlimited attempts")
                 .font(.subheadline.weight(.medium))
             Spacer()
-            Button("Remove") { codeLockCode = nil }
+            Button("Remove") {
+                codeLockCode = nil
+                codeLockMaxAttempts = nil
+            }
                 .font(.subheadline)
         }
         .foregroundColor(theme.colors.secondary)
@@ -1793,8 +1807,13 @@ struct ComposeView: View {
         }
         if let code = codeLockCode, composeState.noPreview {
             do {
+                let maxAttempts = codeLockMaxAttempts
                 let wireText = try await Task.detached(priority: .userInitiated) {
-                    try XauXatCodeLockedEnvelope.seal(XauXatCodeLockedPayload(text: msgText), code: code).wireText()
+                    try XauXatCodeLockedEnvelope.seal(
+                        XauXatCodeLockedPayload(text: msgText),
+                        code: code,
+                        maxAttempts: maxAttempts
+                    ).wireText()
                 }.value
                 protectedText = .text(wireText)
             } catch {
@@ -1886,6 +1905,7 @@ struct ComposeView: View {
                         recordingFileName: recordingFileName,
                         duration: duration,
                         code: code,
+                        maxAttempts: codeLockMaxAttempts,
                         caption: msgText
                     ) else {
                         await MainActor.run {
@@ -1911,7 +1931,12 @@ struct ComposeView: View {
                 }
             case let .filePreview(_, file):
                 if let code = codeLockCode {
-                    guard let savedFile = await saveXauXatCodeLockedFile(url: file, code: code, caption: msgText) else {
+                    guard let savedFile = await saveXauXatCodeLockedFile(
+                        url: file,
+                        code: code,
+                        maxAttempts: codeLockMaxAttempts,
+                        caption: msgText
+                    ) else {
                         await MainActor.run {
                             composeState.inProgress = false
                             AlertManager.shared.showAlertMsg(
@@ -1955,6 +1980,7 @@ struct ComposeView: View {
                         image,
                         animated: false,
                         code: code,
+                        maxAttempts: codeLockMaxAttempts,
                         caption: text,
                         allowSave: allowOneTimePhotoSave
                     ), let protectedPreview = xauxatCodeLockedPhotoPreview() else { return nil }
@@ -1978,6 +2004,7 @@ struct ComposeView: View {
                         image,
                         animated: true,
                         code: code,
+                        maxAttempts: codeLockMaxAttempts,
                         caption: text,
                         allowSave: allowOneTimePhotoSave
                     ), let protectedPreview = xauxatCodeLockedPhotoPreview() else { return nil }
@@ -2001,6 +2028,7 @@ struct ComposeView: View {
                         url: url,
                         duration: duration,
                         code: code,
+                        maxAttempts: codeLockMaxAttempts,
                         caption: text
                     ), let protectedPreview = xauxatCodeLockedVideoPreview() else { return nil }
                     chatModel.filesToDelete.remove(url)
@@ -2325,6 +2353,7 @@ struct ComposeView: View {
         oneTimePhotoEnabled = true
         allowOneTimePhotoSave = false
         codeLockCode = nil
+        codeLockMaxAttempts = nil
         audioRecorder = nil
         voiceMessageRecordingTime = nil
         startingRecording = false
@@ -2455,9 +2484,10 @@ private struct XauXatCodeLockSetupView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var code = ""
     @State private var confirmation = ""
+    @State private var maxAttempts: Int? = 5
     @State private var validationMessage: String?
 
-    let onSave: (String) -> Void
+    let onSave: (String, Int?) -> Void
 
     var body: some View {
         NavigationView {
@@ -2473,6 +2503,17 @@ private struct XauXatCodeLockSetupView: View {
                     Text("Protect content")
                 } footer: {
                     Text("Share this code through a different secure channel. XauXat does not send or save it.")
+                }
+
+                Section {
+                    Picker("Maximum attempts", selection: $maxAttempts) {
+                        Text("3 attempts").tag(Optional(3))
+                        Text("5 attempts").tag(Optional(5))
+                        Text("10 attempts").tag(Optional(10))
+                        Text("Unlimited").tag(nil as Int?)
+                    }
+                } footer: {
+                    Text("Failed attempts are stored securely on the recipient's device and survive app restarts.")
                 }
 
                 if let validationMessage {
@@ -2505,7 +2546,11 @@ private struct XauXatCodeLockSetupView: View {
             validationMessage = NSLocalizedString("Use a code between 4 and 128 characters.", comment: "code-lock validation")
             return
         }
-        onSave(code)
+        guard maxAttempts.map(XauXatCodeLockedEnvelope.allowedAttemptLimits.contains) ?? true else {
+            validationMessage = NSLocalizedString("Choose a limit between 1 and 20 attempts.", comment: "code-lock attempt validation")
+            return
+        }
+        onSave(code, maxAttempts)
         code = ""
         confirmation = ""
         dismiss()

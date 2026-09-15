@@ -443,6 +443,14 @@ private struct XauXatUnlockedFileView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Opens code entry")
+            case .exhausted:
+                XauXatProtectedFileRow(
+                    chat: chat,
+                    meta: meta,
+                    title: Text("No attempts remaining"),
+                    detail: Text("Protected file"),
+                    icon: "lock.slash.fill"
+                )
             }
         }
         .privacySensitive()

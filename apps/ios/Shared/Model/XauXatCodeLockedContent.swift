@@ -2,6 +2,7 @@ import Combine
 import CommonCrypto
 import CryptoKit
 import Foundation
+import SimpleXChat
 
 enum XauXatCodeLockedContentKind: String, Codable, CaseIterable {
     case text
@@ -46,6 +47,7 @@ struct XauXatCodeLockedPayload: Codable, Equatable {
 
 enum XauXatCodeLockedContentError: Error, Equatable {
     case invalidCode
+    case invalidAttemptLimit
     case invalidEnvelope
     case unsupportedVersion
     case keyDerivationFailed
@@ -62,6 +64,7 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
     private static let iterations = 210_000
     private static let saltBytes = 16
     private static let keyBytes = 32
+    static let allowedAttemptLimits = 1...20
 
     let version: Int
     let kind: XauXatCodeLockedContentKind
@@ -69,9 +72,17 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
     let kdfIterations: Int
     let salt: Data
     let sealedPayload: Data
+    let maxAttempts: Int?
 
-    static func seal(_ payload: XauXatCodeLockedPayload, code: String) throws -> Self {
+    static func seal(
+        _ payload: XauXatCodeLockedPayload,
+        code: String,
+        maxAttempts: Int? = nil
+    ) throws -> Self {
         let normalizedCode = try normalized(code)
+        if let maxAttempts, !allowedAttemptLimits.contains(maxAttempts) {
+            throw XauXatCodeLockedContentError.invalidAttemptLimit
+        }
         var salt = Data(count: saltBytes)
         let status = salt.withUnsafeMutableBytes { bytes in
             SecRandomCopyBytes(kSecRandomDefault, saltBytes, bytes.baseAddress!)
@@ -83,7 +94,7 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
         let box = try ChaChaPoly.seal(
             encodedPayload,
             using: key,
-            authenticating: authenticatedHeader(version: currentVersion, kind: payload.kind)
+            authenticating: authenticatedHeader(version: currentVersion, kind: payload.kind, maxAttempts: maxAttempts)
         )
         return Self(
             version: currentVersion,
@@ -91,7 +102,8 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
             kdf: kdfName,
             kdfIterations: iterations,
             salt: salt,
-            sealedPayload: box.combined
+            sealedPayload: box.combined,
+            maxAttempts: maxAttempts
         )
     }
 
@@ -99,7 +111,8 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
         guard version == Self.currentVersion else { throw XauXatCodeLockedContentError.unsupportedVersion }
         guard kdf == Self.kdfName,
               kdfIterations == Self.iterations,
-              salt.count == Self.saltBytes else {
+              salt.count == Self.saltBytes,
+              maxAttempts.map(Self.allowedAttemptLimits.contains) ?? true else {
             throw XauXatCodeLockedContentError.invalidEnvelope
         }
         let normalizedCode = try Self.normalized(code)
@@ -109,7 +122,7 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
             let cleartext = try ChaChaPoly.open(
                 box,
                 using: key,
-                authenticating: Self.authenticatedHeader(version: version, kind: kind)
+                authenticating: Self.authenticatedHeader(version: version, kind: kind, maxAttempts: maxAttempts)
             )
             let payload = try JSONDecoder().decode(XauXatCodeLockedPayload.self, from: cleartext)
             guard payload.kind == kind else { throw XauXatCodeLockedContentError.invalidEnvelope }
@@ -172,8 +185,18 @@ struct XauXatCodeLockedEnvelope: Codable, Equatable {
         return normalized
     }
 
-    private static func authenticatedHeader(version: Int, kind: XauXatCodeLockedContentKind) -> Data {
-        Data("xauxat.code-lock|\(version)|\(kind.rawValue)|\(kdfName)|\(iterations)".utf8)
+    var attemptID: String {
+        let envelopeData = (try? encoded()) ?? sealedPayload
+        return SHA256.hash(data: envelopeData).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func authenticatedHeader(
+        version: Int,
+        kind: XauXatCodeLockedContentKind,
+        maxAttempts: Int?
+    ) -> Data {
+        let limit = maxAttempts.map { "|maxAttempts:\($0)" } ?? ""
+        return Data("xauxat.code-lock|\(version)|\(kind.rawValue)|\(kdfName)|\(iterations)\(limit)".utf8)
     }
 
     private static func deriveKey(code: String, salt: Data, iterations: Int) throws -> SymmetricKey {
@@ -239,6 +262,7 @@ enum XauXatCodeLockedState: Equatable {
     case unlocking
     case unlocked(XauXatCodeLockedPayload)
     case rejected(attempts: Int)
+    case exhausted(attempts: Int)
 }
 
 @MainActor
@@ -246,14 +270,28 @@ final class XauXatCodeLockedSession: ObservableObject {
     @Published private(set) var state: XauXatCodeLockedState = .locked
 
     private let envelope: XauXatCodeLockedEnvelope
-    private var attempts = 0
+    private var attempts: Int
     private var operationID = UUID()
 
     init(envelope: XauXatCodeLockedEnvelope) {
         self.envelope = envelope
+        attempts = xauXatCodeLockedAttemptCount(envelope.attemptID)
+        if let maximum = envelope.maxAttempts, attempts >= maximum {
+            state = .exhausted(attempts: attempts)
+        }
     }
 
+    var remainingAttempts: Int? {
+        envelope.maxAttempts.map { max(0, $0 - attempts) }
+    }
+
+    var maximumAttempts: Int? { envelope.maxAttempts }
+
     func unlock(code: String) {
+        if let maximum = envelope.maxAttempts, attempts >= maximum {
+            state = .exhausted(attempts: attempts)
+            return
+        }
         operationID = UUID()
         let currentOperation = operationID
         state = .unlocking
@@ -263,10 +301,17 @@ final class XauXatCodeLockedSession: ObservableObject {
                 guard currentOperation == self.operationID else { return }
                 switch result {
                 case let .success(payload):
+                    self.attempts = 0
+                    _ = xauXatSetCodeLockedAttemptCount(0, contentID: envelope.attemptID)
                     self.state = .unlocked(payload)
                 case .failure:
                     self.attempts += 1
-                    self.state = .rejected(attempts: self.attempts)
+                    _ = xauXatSetCodeLockedAttemptCount(self.attempts, contentID: envelope.attemptID)
+                    if let maximum = envelope.maxAttempts, self.attempts >= maximum {
+                        self.state = .exhausted(attempts: self.attempts)
+                    } else {
+                        self.state = .rejected(attempts: self.attempts)
+                    }
                 }
             }
         }
@@ -274,7 +319,11 @@ final class XauXatCodeLockedSession: ObservableObject {
 
     func lock() {
         operationID = UUID()
-        state = .locked
+        if let maximum = envelope.maxAttempts, attempts >= maximum {
+            state = .exhausted(attempts: attempts)
+        } else {
+            state = .locked
+        }
     }
 }
 

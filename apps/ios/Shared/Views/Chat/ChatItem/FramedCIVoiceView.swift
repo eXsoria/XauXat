@@ -208,6 +208,8 @@ private struct XauXatUnlockedVoiceView: View {
                     protectedRow(label: "Tap to unlock audio", icon: "lock.fill")
                 }
                 .buttonStyle(.plain)
+            case .exhausted:
+                protectedRow(label: "No attempts remaining", icon: "lock.slash.fill")
             }
         }
         .privacySensitive()

@@ -24,6 +24,7 @@ private let PRIMARY_PROTECTED_PROFILES_ITEM: String = "protectedProfiles"
 private let DECOY_PROTECTED_PROFILES_ITEM: String = "protectedProfiles.localProfile"
 private let PRIMARY_PROTECTED_PROFILE_PASSWORDS_ITEM: String = "protectedProfilePasswords"
 private let DECOY_PROTECTED_PROFILE_PASSWORDS_ITEM: String = "protectedProfilePasswords.localProfile"
+private let CODE_LOCKED_ATTEMPTS_PREFIX: String = "codeLockedAttempts"
 
 public enum XauXatStorageScope: Sendable {
     case primary
@@ -220,6 +221,21 @@ public struct KeyChainItem {
     public func remove() -> Bool {
         deleteItem(forKey: forKey)
     }
+}
+
+private func xauXatCodeLockedAttemptsKey(_ contentID: String) -> String {
+    let scope = xauXatStorageScope() == .decoy ? "localProfile" : "primary"
+    return "\(CODE_LOCKED_ATTEMPTS_PREFIX).\(scope).\(contentID)"
+}
+
+public func xauXatCodeLockedAttemptCount(_ contentID: String) -> Int {
+    Int(KeyChainItem(forKey: xauXatCodeLockedAttemptsKey(contentID)).get() ?? "") ?? 0
+}
+
+@discardableResult
+public func xauXatSetCodeLockedAttemptCount(_ count: Int, contentID: String) -> Bool {
+    let item = KeyChainItem(forKey: xauXatCodeLockedAttemptsKey(contentID))
+    return count > 0 ? item.set(String(count)) : item.remove()
 }
 
 func randomDatabasePassword() -> String {

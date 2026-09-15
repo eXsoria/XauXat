@@ -224,6 +224,8 @@ private struct XauXatCodeLockedTextView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Opens code entry")
+            case .exhausted:
+                protectedPlaceholder("No attempts remaining")
             }
         }
         .privacySensitive()
@@ -273,13 +275,26 @@ struct XauXatCodeUnlockView: View {
                     SecureField("Code", text: $code)
                         .textContentType(.password)
                         .privacySensitive()
+                        .disabled(session.remainingAttempts == 0)
                         .onSubmit(unlock)
                 } footer: {
-                    Text("The code is checked on this device and is never sent.")
+                    if let remaining = session.remainingAttempts {
+                        Text("The code is checked on this device and is never sent. \(remaining) attempts remaining.")
+                    } else {
+                        Text("The code is checked on this device and is never sent.")
+                    }
                 }
 
                 if case let .rejected(attempts) = session.state {
-                    Text("Incorrect code. Failed attempts: \(attempts).")
+                    if let remaining = session.remainingAttempts {
+                        Text("Incorrect code. \(remaining) attempts remaining.")
+                            .foregroundColor(.red)
+                    } else {
+                        Text("Incorrect code. Failed attempts: \(attempts).")
+                            .foregroundColor(.red)
+                    }
+                } else if case .exhausted = session.state {
+                    Text("No attempts remaining. This content can no longer be unlocked on this device.")
                         .foregroundColor(.red)
                 }
             }
@@ -291,7 +306,7 @@ struct XauXatCodeUnlockView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Unlock", action: unlock)
-                        .disabled(code.isEmpty || session.state == .unlocking)
+                        .disabled(code.isEmpty || session.state == .unlocking || session.remainingAttempts == 0)
                 }
             }
         }

@@ -56,5 +56,12 @@ unlocking, unlocked, or rejected. Verification and the unlocked payload stay in
 the local app process. Locking invalidates an in-flight verification result and
 immediately drops the clear payload from the session state.
 
-Attempt limits and destruction policy build on the local rejection count in
-their dedicated roadmap issues.
+The sender can authenticate a maximum of 1 to 20 attempts in the envelope, or
+explicitly allow unlimited attempts. Failed attempts are keyed to the exact
+encrypted envelope and stored in the device Keychain, so closing or restarting
+XauXat, deleting and receiving the same message again, or reinstalling the app
+does not trivially reset the counter. The unlock sheet shows the remaining
+count and the session refuses further code checks at zero.
+
+Destruction after the authenticated limit is handled separately by its roadmap
+issue.
