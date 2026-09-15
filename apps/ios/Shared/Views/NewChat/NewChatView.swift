@@ -90,6 +90,9 @@ struct NewChatView: View {
     @State private var pastedLink: String = ""
     @State private var alert: NewChatViewAlert?
     @State private var contactConnection: PendingContactConnection? = nil
+    @State private var inviteLifetime: XauXatContactInviteLifetime = .never
+    @State private var customInviteExpiry = Date.now.addingTimeInterval(24 * 60 * 60)
+    @State private var invitePolicy: XauXatContactInvitePolicy? = nil
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -125,9 +128,7 @@ struct NewChatView: View {
                     }
                         .transition(.move(edge: .leading))
                         .onAppear {
-                            if plusEntitlements.isAuthorized(for: .advancedContactInvites) {
-                                createInvitation()
-                            }
+                            refreshInvitePolicy()
                         }
                 }
                 if case .connect = selection {
@@ -184,6 +185,9 @@ struct NewChatView: View {
                 contactConnection = nil
             }
         }
+        .task(id: invitePolicy?.expiresAt) {
+            await waitForInviteExpiry()
+        }
         .alert(item: $alert) { a in
             switch(a) {
             case let .newChatSomeAlert(a):
@@ -201,12 +205,50 @@ struct NewChatView: View {
                     connLinkInvitation: $connLinkInvitation,
                     showShortLink: $showShortLink,
                     choosingProfile: $choosingProfile,
+                    invitePolicy: $invitePolicy,
                     onboarding: onboarding
                 )
             } else if creatingConnReq {
                 creatingLinkProgressView()
             } else {
-                retryButton()
+                inviteSetupView()
+            }
+        }
+    }
+
+    private func inviteSetupView() -> some View {
+        Form {
+            Section {
+                Picker("Expires", selection: $inviteLifetime) {
+                    ForEach(XauXatContactInviteLifetime.allCases) { lifetime in
+                        Text(lifetime.label).tag(lifetime)
+                    }
+                }
+                if inviteLifetime == .custom {
+                    DatePicker(
+                        "Expiry date",
+                        selection: $customInviteExpiry,
+                        in: Date.now...,
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                }
+            } header: {
+                Text("Invite lifetime")
+            } footer: {
+                if inviteLifetime == .never {
+                    Text("The invite remains valid until it is used or revoked.")
+                } else if inviteLifetime == .custom {
+                    Text("XauXat will permanently revoke the invite on the selected date.")
+                } else {
+                    Text("XauXat will permanently revoke the invite when this duration ends.")
+                }
+            }
+
+            Section {
+                Button(inviteLifetime == .never ? "Create invite" : "Create expiring invite") {
+                    authorizeAndCreateInvitation()
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
     }
@@ -236,6 +278,23 @@ struct NewChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func authorizeAndCreateInvitation() {
+        if inviteLifetime == .never {
+            createInvitation()
+            return
+        }
+        authenticate(reason: NSLocalizedString("Create an expiring contact invite", comment: "authentication reason")) { result in
+            switch result {
+            case .success:
+                createInvitation()
+            case .failed:
+                AlertManager.shared.showAlert(laFailedAlert())
+            case .unavailable:
+                AlertManager.shared.showAlert(laUnavailableInstructionAlert())
+            }
+        }
+    }
+
     private func createInvitation() {
         guard plusEntitlements.isAuthorized(for: .advancedContactInvites) else { return }
         if connLinkInvitation.connFullLink == "" && contactConnection == nil && !creatingConnReq {
@@ -243,7 +302,14 @@ struct NewChatView: View {
             Task {
                 _ = try? await Task.sleep(nanoseconds: 250_000000)
                 if let (connLink, pcc) = await apiAddContact(incognito: incognitoGroupDefault.get()) {
+                    let policy: XauXatContactInvitePolicy? = if let expiresAt = inviteLifetime.expiresAt(custom: customInviteExpiry) {
+                        XauXatContactInvitePolicy(connectionId: pcc.pccConnId, createdAt: .now, expiresAt: expiresAt)
+                    } else {
+                        nil
+                    }
+                    if let policy { _ = xauXatSaveContactInvitePolicy(policy) }
                     await MainActor.run {
+                        invitePolicy = policy
                         m.updateContactConnection(pcc)
                         m.showingInvitation = ShowingInvitation(pcc: pcc, connChatUsed: false)
                         connLinkInvitation = connLink
@@ -272,6 +338,63 @@ struct NewChatView: View {
             }
         }
     }
+
+    private func refreshInvitePolicy() {
+        guard let connectionId = contactConnection?.pccConnId else { return }
+        invitePolicy = xauXatObserveContactInvitePolicy(connectionId: connectionId)
+    }
+
+    private func waitForInviteExpiry() async {
+        guard let policy = invitePolicy, policy.state == .active else { return }
+        let delay = policy.expiresAt.timeIntervalSinceNow
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+        guard !Task.isCancelled,
+              let expired = xauXatObserveContactInvitePolicy(connectionId: policy.connectionId),
+              expired.state == .expired else { return }
+        if let pcc = contactConnection, pcc.pccConnId == policy.connectionId {
+            try? await apiDeleteChat(type: .contactConnection, id: pcc.apiId)
+            await MainActor.run {
+                invitePolicy = expired
+                m.removeChat(pcc.id)
+                m.showingInvitation = nil
+            }
+        }
+    }
+}
+
+private enum XauXatContactInviteLifetime: Int, CaseIterable, Identifiable {
+    case never
+    case fifteenMinutes
+    case oneHour
+    case oneDay
+    case sevenDays
+    case custom
+
+    var id: Self { self }
+
+    var label: LocalizedStringKey {
+        switch self {
+        case .never: "Never"
+        case .fifteenMinutes: "15 minutes"
+        case .oneHour: "1 hour"
+        case .oneDay: "24 hours"
+        case .sevenDays: "7 days"
+        case .custom: "Custom date"
+        }
+    }
+
+    func expiresAt(custom: Date) -> Date? {
+        switch self {
+        case .never: nil
+        case .fifteenMinutes: Date.now.addingTimeInterval(15 * 60)
+        case .oneHour: Date.now.addingTimeInterval(60 * 60)
+        case .oneDay: Date.now.addingTimeInterval(24 * 60 * 60)
+        case .sevenDays: Date.now.addingTimeInterval(7 * 24 * 60 * 60)
+        case .custom: custom
+        }
+    }
 }
 
 private func incognitoProfileImage() -> some View {
@@ -291,7 +414,9 @@ private struct InviteView: View {
     @Binding var connLinkInvitation: CreatedConnLink
     @Binding var showShortLink: Bool
     @Binding var choosingProfile: Bool
+    @Binding var invitePolicy: XauXatContactInvitePolicy?
     var onboarding: Bool = false
+    @State private var authenticatedShareLink: String?
 
     @AppStorage(GROUP_DEFAULT_INCOGNITO, store: groupDefaults) private var incognitoDefault = false
 
@@ -302,7 +427,16 @@ private struct InviteView: View {
             }
             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 10))
 
-            qrCodeView()
+            if let policy = observedPolicy {
+                Section {
+                    infoRow("Invite status", policy.state == .expired ? "Expired" : "Unused")
+                    infoRow("Expires", policy.expiresAt.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+
+            if observedPolicy?.state != .expired {
+                qrCodeView()
+            }
             if !onboarding, let selectedProfile = chatModel.currentUser {
                 Section {
                     NavigationLink {
@@ -339,6 +473,14 @@ private struct InviteView: View {
         .onChange(of: chatModel.currentUser) { u in
             setInvitationUsed()
         }
+        .onAppear(perform: refreshAuthenticatedShareLink)
+        .onChange(of: showShortLink) { _ in refreshAuthenticatedShareLink() }
+        .onChange(of: invitePolicy) { _ in refreshAuthenticatedShareLink() }
+    }
+
+    private var observedPolicy: XauXatContactInvitePolicy? {
+        guard let connectionId = contactConnection?.pccConnId else { return invitePolicy }
+        return xauXatObserveContactInvitePolicy(connectionId: connectionId) ?? invitePolicy
     }
 
     private var sectionHeader: some View {
@@ -370,24 +512,26 @@ private struct InviteView: View {
 
     private func shareLinkView() -> some View {
         HStack(spacing: 8) {
-            let link = connLinkInvitation.simplexChatUri(short: showShortLink)
-            linkTextView(link)
+            linkTextView(authenticatedShareLink ?? NSLocalizedString("Authenticated link unavailable", comment: "invite link error"))
             Button {
-                showShareSheet(items: [link])
+                guard let authenticatedShareLink else { return }
+                showShareSheet(items: [authenticatedShareLink])
                 setInvitationUsed()
             } label: {
                 Image(systemName: "square.and.arrow.up")
                     .padding(.top, -7)
                     .padding(.horizontal, 8)
             }
+            .disabled(observedPolicy?.state == .expired || authenticatedShareLink == nil)
         }
         .frame(maxWidth: .infinity)
     }
 
     private func qrCodeView() -> some View {
         Section {
-            SimpleXCreatedLinkQRCode(link: connLinkInvitation, short: $showShortLink, onShare: setInvitationUsed)
-                .id("simplex-qrcode-view-for-\(connLinkInvitation.simplexChatUri(short: showShortLink))")
+            if let authenticatedShareLink {
+                QRCode(uri: authenticatedShareLink, onShare: setInvitationUsed)
+                    .id("simplex-qrcode-view-for-\(authenticatedShareLink)")
                 .padding()
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -397,6 +541,7 @@ private struct InviteView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+            }
         } header: {
             if onboarding {
                 Text("Or show QR in person or via video call.").font(.body).foregroundColor(theme.colors.onBackground).textCase(nil)
@@ -406,11 +551,29 @@ private struct InviteView: View {
         }
     }
 
+    private func refreshAuthenticatedShareLink() {
+        authenticatedShareLink = xauXatContactInviteShareLink(
+            connLinkInvitation,
+            short: showShortLink,
+            policy: observedPolicy
+        )
+    }
+
     private func setInvitationUsed() {
         if !invitationUsed {
             invitationUsed = true
         }
     }
+}
+
+func xauXatContactInviteShareLink(
+    _ connectionLink: CreatedConnLink,
+    short: Bool,
+    policy: XauXatContactInvitePolicy?
+) -> String? {
+    let link = connectionLink.simplexChatUri(short: short)
+    guard let policy else { return link }
+    return xauXatSignedContactInviteLink(link: link, expiresAt: policy.expiresAt)
 }
 
 private enum ProfileSwitchStatus {
@@ -686,10 +849,11 @@ private struct ConnectView: View {
             ZStack(alignment: .trailing) {
                 Button {
                     if let str = UIPasteboard.general.string {
-                        switch strConnectTarget(str.trimmingCharacters(in: .whitespaces)) {
+                        let candidate = str.trimmingCharacters(in: .whitespaces)
+                        switch strConnectTarget(candidate) {
                         case let .link(text, _, _):
                             pastedLink = text
-                            connect(pastedLink)
+                            connect(candidate)
                         case let .name(text, _):
                             pastedLink = text
                             connect(pastedLink)
@@ -880,7 +1044,12 @@ struct InfoSheetButton<Content: View>: View {
 }
 
 func strIsSimplexLink(_ str: String) -> Bool {
-    if let parsedMd = parseSimpleXMarkdown(str),
+    let link = switch xauXatValidateContactInviteLink(str) {
+    case .notEnvelope: str
+    case let .valid(link, _), let .expired(link, _): link
+    case .invalid: ""
+    }
+    if let parsedMd = parseSimpleXMarkdown(link),
        parsedMd.count == 1,
        case .simplexLink = parsedMd[0].format {
         return true
@@ -895,7 +1064,12 @@ enum ConnectTarget {
 }
 
 func strConnectTarget(_ str: String) -> ConnectTarget? {
-    let parsedMd = parseSimpleXMarkdown(str)
+    let link = switch xauXatValidateContactInviteLink(str) {
+    case .notEnvelope: str
+    case let .valid(link, _), let .expired(link, _): link
+    case .invalid: ""
+    }
+    let parsedMd = parseSimpleXMarkdown(link)
     let links = parsedMd?.filter { $0.format?.isSimplexLink ?? false } ?? []
     return if links.count == 1, case let .simplexLink(showText, linkType, simplexUri, smpHosts) = links[0].format {
         .link(text: showText != nil ? simplexUri : links[0].text, linkType: linkType, linkText: simplexLinkText(linkType, smpHosts))
@@ -1352,7 +1526,31 @@ func planAndConnect(
     filterKnownContact: ((Contact) -> Void)? = nil,
     filterKnownGroup: ((GroupInfo) -> Void)? = nil
 ) {
-    switch strConnectTarget(shortOrFullLink) {
+    let effectiveLink: String
+    switch xauXatValidateContactInviteLink(shortOrFullLink) {
+    case .notEnvelope:
+        effectiveLink = shortOrFullLink
+    case let .valid(link, _):
+        effectiveLink = link
+    case let .expired(_, expiresAt):
+        showAlert(
+            NSLocalizedString("Invite expired", comment: "alert title"),
+            message: String.localizedStringWithFormat(
+                NSLocalizedString("This authenticated invite expired on %@. Ask its creator for a new one.", comment: "expired invite alert"),
+                expiresAt.formatted(date: .abbreviated, time: .shortened)
+            )
+        )
+        cleanup?()
+        return
+    case .invalid:
+        showAlert(
+            NSLocalizedString("Invalid invite", comment: "alert title"),
+            message: NSLocalizedString("The XauXat invite signature could not be verified.", comment: "invalid invite alert")
+        )
+        cleanup?()
+        return
+    }
+    switch strConnectTarget(effectiveLink) {
     case let .link(_, linkType, _):
         if linkType == .relay {
             showAlert(
@@ -1376,7 +1574,7 @@ func planAndConnect(
 
     func connectTask(_ inProgress: BoxedValue<Bool>) {
         Task {
-            let result = await apiConnectPlan(connLink: shortOrFullLink, linkOwnerSig: linkOwnerSig, inProgress: inProgress)
+            let result = await apiConnectPlan(connLink: effectiveLink, linkOwnerSig: linkOwnerSig, inProgress: inProgress)
             await MainActor.run {
                 ConnectProgressManager.shared.stopConnectProgress()
             }
