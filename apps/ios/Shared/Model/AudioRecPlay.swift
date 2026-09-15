@@ -25,13 +25,73 @@ enum XauXatVoiceMaskError: LocalizedError {
     }
 }
 
-struct XauXatVoiceMask {
-    static let presetName = NSLocalizedString("Veil", comment: "free voice masking preset name")
+enum XauXatVoiceMaskPreset: String, CaseIterable, Identifiable {
+    case veil
+    case alloy
+    case hollow
+    case wisp
 
-    private static let pitch: Float = -420
+    static let defaultPreferenceKey = "xauxat.voiceMask.defaultPreset"
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .veil: return NSLocalizedString("Veil", comment: "free voice masking preset name")
+        case .alloy: return NSLocalizedString("Alloy", comment: "Plus voice masking preset name")
+        case .hollow: return NSLocalizedString("Hollow", comment: "Plus voice masking preset name")
+        case .wisp: return NSLocalizedString("Wisp", comment: "Plus voice masking preset name")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .veil: return NSLocalizedString("Low and discreet", comment: "voice masking preset description")
+        case .alloy: return NSLocalizedString("Bright and metallic", comment: "voice masking preset description")
+        case .hollow: return NSLocalizedString("Deep and distant", comment: "voice masking preset description")
+        case .wisp: return NSLocalizedString("Light and airy", comment: "voice masking preset description")
+        }
+    }
+
+    var requiresPlus: Bool { self != .veil }
+
+    fileprivate var pitch: Float {
+        switch self {
+        case .veil: return -420
+        case .alloy: return 320
+        case .hollow: return -700
+        case .wisp: return 610
+        }
+    }
+}
+
+struct XauXatVoiceMask {
     private static let renderBufferSize: AVAudioFrameCount = 4096
 
-    static func apply(to recordingURL: URL) throws {
+    static func apply(to recordingURL: URL, preset: XauXatVoiceMaskPreset) throws {
+        let maskedURL = recordingURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(UUID().uuidString)-masked.m4a")
+        defer { try? FileManager.default.removeItem(at: maskedURL) }
+        try render(from: recordingURL, to: maskedURL, preset: preset)
+
+        _ = try FileManager.default.replaceItemAt(
+            recordingURL,
+            withItemAt: maskedURL,
+            backupItemName: nil,
+            options: []
+        )
+        _ = excludeFromSystemBackup(recordingURL)
+    }
+
+    static func previewData(from recordingURL: URL, preset: XauXatVoiceMaskPreset) throws -> Data {
+        let previewURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xauxat-voice-preview-\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: previewURL) }
+        try render(from: recordingURL, to: previewURL, preset: preset)
+        return try Data(contentsOf: previewURL, options: .mappedIfSafe)
+    }
+
+    private static func render(from recordingURL: URL, to outputURL: URL, preset: XauXatVoiceMaskPreset) throws {
         let sourceFile = try AVAudioFile(forReading: recordingURL)
         guard sourceFile.length > 0 else { throw XauXatVoiceMaskError.emptyRecording }
 
@@ -39,7 +99,7 @@ struct XauXatVoiceMask {
         let player = AVAudioPlayerNode()
         let timePitch = AVAudioUnitTimePitch()
         let renderFormat = sourceFile.processingFormat
-        timePitch.pitch = pitch
+        timePitch.pitch = preset.pitch
         timePitch.rate = 1
 
         engine.attach(player)
@@ -52,10 +112,6 @@ struct XauXatVoiceMask {
             maximumFrameCount: renderBufferSize
         )
 
-        let maskedURL = recordingURL.deletingLastPathComponent()
-            .appendingPathComponent(".\(UUID().uuidString)-masked.m4a")
-        defer { try? FileManager.default.removeItem(at: maskedURL) }
-
         let outputSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: renderFormat.sampleRate,
@@ -64,7 +120,7 @@ struct XauXatVoiceMask {
             AVNumberOfChannelsKey: renderFormat.channelCount
         ]
         var maskedFile: AVAudioFile? = try AVAudioFile(
-            forWriting: maskedURL,
+            forWriting: outputURL,
             settings: outputSettings,
             commonFormat: renderFormat.commonFormat,
             interleaved: renderFormat.isInterleaved
@@ -104,18 +160,12 @@ struct XauXatVoiceMask {
         player.stop()
         engine.stop()
         maskedFile = nil
-        let maskedFileSize = try maskedURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        let maskedFileSize = try outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard maskedFileSize > 0 else {
             throw XauXatVoiceMaskError.renderingFailed
         }
-
-        _ = try FileManager.default.replaceItemAt(
-            recordingURL,
-            withItemAt: maskedURL,
-            backupItemName: nil,
-            options: []
-        )
-        _ = excludeFromSystemBackup(recordingURL)
+        try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: outputURL.path)
+        _ = excludeFromSystemBackup(outputURL)
     }
 }
 
