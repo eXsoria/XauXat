@@ -64,6 +64,30 @@ evaluated before public release.
 Network changes and app resume trigger health checks. The SimpleX controller
 must not start before bootstrap completes.
 
+#### Notification service extension
+
+The iOS Notification Service Extension runs in a process that is separate from
+the main app. It cannot assume that the app-owned Tor thread or its dynamic
+SOCKS port still exists while XauXat is suspended.
+
+The extension therefore has its own pinned C-Tor runtime, private `TorNSE`
+state directory and loopback-only dynamic SOCKS listener. Its SimpleX core is
+configured with the closed endpoint `127.0.0.1:1` until that Tor instance
+reports an established circuit and returns its listener. The extension never
+publishes its short-lived port as the main app's port and never falls back to a
+direct SMP or XFTP connection. If bootstrap does not complete within 18
+seconds, it stops processing and delivers only the opaque best-attempt push so
+the remaining iOS execution budget is not exhausted.
+
+APNs transport from the XauXat notification server to the device remains Apple
+infrastructure and is not carried by Tor. Tor protection begins only when the
+extension wakes and retrieves SimpleX data after receiving that signal.
+
+The extension implementation builds, installs and launches with the full app
+on the current arm64 iOS simulator. Background timing, memory limits and direct
+socket absence still require the physical-iPhone matrix before this behaviour
+can be described as production-verified.
+
 ### Android
 
 Use a pinned `tor-android` library behind the same lifecycle contract. Run Tor
@@ -76,14 +100,16 @@ testing. XauXat must not require Orbot.
 ## Privacy boundary for the first beta
 
 "All messaging through Tor" initially means SimpleX SMP and XFTP traffic from
-the active app process. These paths need separate proof and must not be claimed
-as covered until verified:
+the active app process. The notification extension now has the same fail-closed
+routing policy, but needs physical-device proof. These paths must not be
+claimed as covered until verified:
 
-- iOS APNs and the SimpleX notification service
+- iOS APNs transport to the device, which necessarily remains outside Tor
+- iOS notification-extension execution under physical-device limits
 - Android background notification service
 - WebRTC calls, because Tor does not carry UDP
 - URL previews, downloads or integrations outside the SimpleX core
-- notification and share extensions on iOS
+- the share extension on iOS
 
 Calls and unverified network features stay disabled in the first Tor beta. The
 fork has separate Apple identifiers and cannot use SimpleX Chat's APNs signing
