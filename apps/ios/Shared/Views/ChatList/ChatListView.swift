@@ -79,6 +79,7 @@ struct ServerSettings {
 struct UserPickerSheetView: View {
     let sheet: UserPickerSheet
     @EnvironmentObject var chatModel: ChatModel
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @StateObject private var ss = SaveableSettings()
 
     @State private var loaded = false
@@ -97,7 +98,11 @@ struct UserPickerSheetView: View {
                             currentPreferences: currentUser.fullPreferences
                         )
                     case .chatProfiles:
-                        UserProfile()
+                        UserProfilesView(
+                            allowsProfileCreation: plusEntitlements.isAuthorized(for: .multipleIdentities),
+                            creationLockedByPlan: !plusEntitlements.isAuthorized(for: .multipleIdentities),
+                            title: "XauXat identities"
+                        )
                     case .currentProfile:
                         UserProfile()
                     case .useFromDesktop:

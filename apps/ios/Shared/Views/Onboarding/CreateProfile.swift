@@ -32,6 +32,7 @@ struct CreateProfile: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @State private var displayName: String = ""
     @State private var profileBio: String = ""
     @FocusState private var focusDisplayName
@@ -171,7 +172,10 @@ struct CreateProfile: View {
         let m = ChatModel.shared
         do {
             AppChatState.shared.set(.active)
-            m.currentUser = try apiCreateActiveUser(profile)
+            m.currentUser = try apiCreateActiveUser(
+                profile,
+                allowAdditionalIdentity: plusEntitlements.isAuthorized(for: .multipleIdentities)
+            )
             // .isEmpty check is redundant here, but it makes it clearer what is going on
             if m.users.isEmpty || m.users.allSatisfy({ $0.user.hidden }) {
                 try startChat()

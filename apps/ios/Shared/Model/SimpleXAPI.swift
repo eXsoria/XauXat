@@ -256,10 +256,13 @@ func apiGetActiveUser(ctrl: chat_ctrl? = nil) throws -> User? {
 func apiCreateActiveUser(
     _ p: Profile?,
     pastTimestamp: Bool = false,
+    allowAdditionalIdentity: Bool = false,
     allowAdditionalProfileForMigration: Bool = false,
     ctrl: chat_ctrl? = nil
 ) throws -> User {
-    if !allowAdditionalProfileForMigration, !(try listUsers(ctrl: ctrl)).isEmpty {
+    if !allowAdditionalIdentity,
+       !allowAdditionalProfileForMigration,
+       !(try listUsers(ctrl: ctrl)).isEmpty {
         throw RuntimeError("XauXat Free supports one persistent identity")
     }
     let r: ChatResponse0 = try chatSendCmdSync(.createActiveUser(profile: p, pastTimestamp: pastTimestamp), ctrl: ctrl)
