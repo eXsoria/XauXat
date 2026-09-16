@@ -557,6 +557,20 @@ func apiReorderChatTags(tagIds: [Int64]) async throws {
 }
 
 func apiSendMessages(type: ChatType, id: Int64, scope: GroupChatScope?, sendAsGroup: Bool = false, live: Bool = false, ttl: Int? = nil, sign: Bool = false, composedMessages: [ComposedMessage]) async -> [ChatItem]? {
+    if type == .direct {
+        let contact = await MainActor.run { () -> Contact? in
+            guard let chat = ChatModel.shared.getContactChat(id),
+                  case let .direct(contact) = chat.chatInfo else { return nil }
+            return contact
+        }
+        if let contact, !xauXatContactInvitePermissions(contact).messages {
+            AlertManager.shared.showAlertMsg(
+                title: "Messages unavailable",
+                message: "This contact invite does not allow messages."
+            )
+            return nil
+        }
+    }
     let cmd: ChatCommand = .apiSendMessages(type: type, id: id, scope: scope, sendAsGroup: sendAsGroup, live: live, ttl: ttl, sign: sign, composedMessages: composedMessages)
     return await processSendMessageCmd(toChatType: type, cmd: cmd)
 }
@@ -3001,6 +3015,10 @@ func processReceivedMsg(_ res: ChatEvent) async {
             await chatItemSimpleUpdate(user, aChatItem)
         }
     case let .callInvitation(invitation):
+        guard xauXatContactInvitePermissions(invitation.contact).calls else {
+            logger.info("Ignoring call disallowed by XauXat contact invite policy")
+            break
+        }
         await MainActor.run {
             m.callInvitations[invitation.contact.id] = invitation
         }
@@ -3301,7 +3319,7 @@ func justRefreshCallInvitations() async throws {
 }
 
 private func callsByChat(_ callInvitations: [RcvCallInvitation]) -> [ChatId: RcvCallInvitation] {
-    callInvitations.reduce(into: [ChatId: RcvCallInvitation]()) {
+    callInvitations.filter { xauXatContactInvitePermissions($0.contact).calls }.reduce(into: [ChatId: RcvCallInvitation]()) {
         result, inv in result[inv.contact.id] = inv
     }
 }
