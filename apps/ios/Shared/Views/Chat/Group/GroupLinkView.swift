@@ -12,6 +12,7 @@ import SimpleXChat
 
 struct GroupLinkView: View {
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     var groupId: Int64
     @Binding var groupLink: GroupLink?
     @Binding var groupLinkMemberRole: GroupMemberRole
@@ -26,8 +27,8 @@ struct GroupLinkView: View {
     @State private var creatingLink = false
     @State private var alert: GroupLinkAlert?
     @State private var shouldCreate = true
-    @State private var freeCapacity: XauXatFreeGroupCapacity?
-    @State private var loadingFreeCapacity = false
+    @State private var groupCapacity: XauXatGroupCapacity?
+    @State private var loadingGroupCapacity = false
 
     private enum GroupLinkAlert: Identifiable {
         case deleteLink
@@ -74,7 +75,7 @@ struct GroupLinkView: View {
                 if isChannel {
                     Text("You can share a link or a QR code - anybody will be able to join the channel.")
                 } else {
-                    Text("Share a link or QR code to request access. New members are reviewed before joining, and XauXat Free groups support up to 20 members.")
+                    Text("Share a link or QR code to request access. New members are reviewed before joining. This plan supports up to \(currentGroupMemberLimit) members.")
                 }
             }
             .listRowBackground(Color.clear)
@@ -83,17 +84,17 @@ struct GroupLinkView: View {
 
             Section {
                 if !isChannel {
-                    if loadingFreeCapacity {
+                    if loadingGroupCapacity {
                         HStack(spacing: 10) {
                             ProgressView()
                             Text("Checking group capacity…")
                                 .foregroundColor(theme.colors.secondary)
                         }
-                    } else if let freeCapacity {
+                    } else if let groupCapacity {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("\(freeCapacity.occupied) of \(XAUXAT_FREE_GROUP_MEMBER_LIMIT) member spots used")
-                            if freeCapacity.isFull {
-                                Text("This group is full on XauXat Free. Existing members and larger imported groups are not changed.")
+                            Text("\(groupCapacity.occupied) of \(groupCapacity.limit) member spots used")
+                            if groupCapacity.isFull {
+                                Text("This group is full on the current plan. Existing members and larger imported groups are not changed.")
                                     .foregroundColor(theme.colors.secondary)
                             }
                         }
@@ -195,7 +196,15 @@ struct GroupLinkView: View {
     }
 
     private var canOfferGroupAccess: Bool {
-        isChannel || freeCapacity?.isFull == false
+        isChannel || groupCapacity?.isFull == false
+    }
+
+    private var canUseLargeGroups: Bool {
+        plusEntitlements.isAuthorized(for: .largeGroups)
+    }
+
+    private var currentGroupMemberLimit: Int {
+        canUseLargeGroups ? XAUXAT_PLUS_GROUP_MEMBER_LIMIT : XAUXAT_FREE_GROUP_MEMBER_LIMIT
     }
 
     private func prepareGroupLinkView() async {
@@ -207,16 +216,16 @@ struct GroupLinkView: View {
             return
         }
 
-        await MainActor.run { loadingFreeCapacity = true }
+        await MainActor.run { loadingGroupCapacity = true }
         do {
             if let groupInfo {
-                let updated = try await apiEnsureXauXatFreeGroupAdmission(groupInfo)
+                let updated = try await apiEnsureXauXatGroupAdmission(groupInfo)
                 await MainActor.run { ChatModel.shared.updateGroup(updated) }
             }
-            let capacity = try await apiXauXatFreeGroupCapacity(groupId)
+            let capacity = try await apiXauXatGroupCapacity(groupId, allowLargeGroup: canUseLargeGroups)
             await MainActor.run {
-                freeCapacity = capacity
-                loadingFreeCapacity = false
+                groupCapacity = capacity
+                loadingGroupCapacity = false
                 if groupLink == nil && !creatingLink && shouldCreate && !capacity.isFull {
                     createGroupLink()
                 }
@@ -224,7 +233,7 @@ struct GroupLinkView: View {
             }
         } catch {
             await MainActor.run {
-                loadingFreeCapacity = false
+                loadingGroupCapacity = false
                 shouldCreate = false
                 showErrorAlert(error, NSLocalizedString("Couldn't prepare group access", comment: ""))
             }
@@ -235,7 +244,11 @@ struct GroupLinkView: View {
         Task {
             do {
                 creatingLink = true
-                let gLink = try await apiCreateGroupLink(groupId, enforceFreeGroupLimit: !isChannel)
+                let gLink = try await apiCreateGroupLink(
+                    groupId,
+                    enforceGroupLimit: !isChannel,
+                    allowLargeGroup: canUseLargeGroups
+                )
                 await MainActor.run {
                     creatingLink = false
                     groupLink = gLink
@@ -273,7 +286,7 @@ struct GroupLinkView: View {
         Task {
             do {
                 if !isChannel {
-                    _ = try await apiRequireXauXatFreeGroupCapacity(groupId)
+                    _ = try await apiRequireXauXatGroupCapacity(groupId, allowLargeGroup: canUseLargeGroups)
                 }
                 creatingLink = true
                 let gLink = try await apiAddGroupShortLink(groupId)
@@ -298,7 +311,7 @@ struct GroupLinkView: View {
         Task {
             do {
                 if !isChannel {
-                    freeCapacity = try await apiRequireXauXatFreeGroupCapacity(groupId)
+                    groupCapacity = try await apiRequireXauXatGroupCapacity(groupId, allowLargeGroup: canUseLargeGroups)
                 }
                 await MainActor.run { link.shareAddress(short: showShortLink) }
             } catch {
@@ -313,7 +326,7 @@ struct GroupLinkView: View {
         Task {
             do {
                 if !isChannel {
-                    freeCapacity = try await apiRequireXauXatFreeGroupCapacity(groupId)
+                    groupCapacity = try await apiRequireXauXatGroupCapacity(groupId, allowLargeGroup: canUseLargeGroups)
                 }
                 await MainActor.run { showSharePicker = true }
             } catch {
