@@ -13,6 +13,7 @@ struct UserProfilesView: View {
     @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @Environment(\.editMode) private var editMode
     var allowsProfileCreation = true
+    var creationLockedByPlan = false
     var title: LocalizedStringKey = "Your chat profiles"
     @AppStorage(DEFAULT_SHOW_HIDDEN_PROFILES_NOTICE) private var showHiddenProfilesNotice = true
     @AppStorage(DEFAULT_SHOW_MUTE_PROFILE_ALERT) private var showMuteProfileAlert = true
@@ -27,8 +28,13 @@ struct UserProfilesView: View {
     @State private var actionPassword = ""
     @State private var navigateToProfileCreate = false
 
-    init(allowsProfileCreation: Bool = true, title: LocalizedStringKey = "Your chat profiles") {
+    init(
+        allowsProfileCreation: Bool = true,
+        creationLockedByPlan: Bool = false,
+        title: LocalizedStringKey = "Your chat profiles"
+    ) {
         self.allowsProfileCreation = allowsProfileCreation
+        self.creationLockedByPlan = creationLockedByPlan
         self.title = title
     }
 
@@ -109,10 +115,15 @@ struct UserProfilesView: View {
                     }
                 }
             } footer: {
-                Text("Tap to activate profile.")
-                    .foregroundColor(theme.colors.secondary)
-                    .font(.body)
-                    .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Tap to activate profile.")
+                    if creationLockedByPlan {
+                        Text("Your existing identities remain available. Creating another identity requires XauXat Plus.")
+                    }
+                }
+                .foregroundColor(theme.colors.secondary)
+                .font(.body)
+                .padding(.top, 8)
 
             }
         }
