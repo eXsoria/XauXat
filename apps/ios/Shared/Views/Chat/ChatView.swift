@@ -157,15 +157,29 @@ struct ChatView: View {
                         .padding(.top)
                 }
                 if selectedChatItems == nil {
-                    ComposeView(
-                        chat: chat,
-                        im: im,
-                        composeState: $composeState,
-                        showCommandsMenu: $showCommandsMenu,
-                        keyboardVisible: $keyboardVisible,
-                        keyboardHiddenDate: $keyboardHiddenDate,
-                        selectedRange: $selectedRange
-                    )
+                    if case let .direct(contact) = chat.chatInfo,
+                       !xauXatContactInvitePermissions(contact).messages {
+                        HStack(spacing: 8) {
+                            Image(systemName: "lock.fill")
+                            Text("Messages disabled by invite")
+                        }
+                        .font(.callout.weight(.medium))
+                        .foregroundColor(theme.colors.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 14)
+                        .background(theme.colors.background)
+                    } else {
+                        ComposeView(
+                            chat: chat,
+                            im: im,
+                            composeState: $composeState,
+                            showCommandsMenu: $showCommandsMenu,
+                            keyboardVisible: $keyboardVisible,
+                            keyboardHiddenDate: $keyboardHiddenDate,
+                            selectedRange: $selectedRange
+                        )
+                    }
                 } else {
                     SelectedItemsBottomToolbar(
                         im: im,
@@ -562,7 +576,7 @@ struct ChatView: View {
             case let .direct(contact):
                 HStack {
                     let callsPrefEnabled = contact.mergedPreferences.calls.enabled.forUser
-                    let canStartCall = callsPrefEnabled && contact.ready && contact.active && chatModel.activeCall == nil
+                    let canStartCall = callsPrefEnabled && xauXatContactInvitePermissions(contact).calls && contact.ready && contact.active && chatModel.activeCall == nil
                     if let call = chatModel.activeCall, call.contact.id == cInfo.id {
                         endCallButton(call)
                     } else if canStartCall {

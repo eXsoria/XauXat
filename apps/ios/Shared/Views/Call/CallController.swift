@@ -352,6 +352,13 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
 
     func startCall(_ contact: Contact, _ media: CallMediaType) {
         logger.debug("CallController.startCall")
+        guard xauXatContactInvitePermissions(contact).calls else {
+            AlertManager.shared.showAlertMsg(
+                title: "Calls unavailable",
+                message: "This contact invite does not allow calls."
+            )
+            return
+        }
         let media = XauXatProductPolicy.callMedia(media)
         let callUUID = callManager.newOutgoingCall(contact, media)
         guard let uuid = UUID(uuidString: callUUID) else {

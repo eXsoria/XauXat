@@ -92,6 +92,8 @@ struct NewChatView: View {
     @State private var contactConnection: PendingContactConnection? = nil
     @State private var inviteLifetime: XauXatContactInviteLifetime = .never
     @State private var customInviteExpiry = Date.now.addingTimeInterval(24 * 60 * 60)
+    @State private var allowInviteMessages = true
+    @State private var allowInviteCalls = true
     @State private var invitePolicy: XauXatContactInvitePolicy? = nil
 
     var body: some View {
@@ -245,6 +247,15 @@ struct NewChatView: View {
             }
 
             Section {
+                Toggle("Messages", isOn: $allowInviteMessages)
+                Toggle("Audio calls", isOn: $allowInviteCalls)
+            } header: {
+                Text("Contact permissions")
+            } footer: {
+                Text("These authenticated restrictions are shown before the contact accepts the invite.")
+            }
+
+            Section {
                 Button(inviteLifetime == .never ? "Create invite" : "Create expiring invite") {
                     authorizeAndCreateInvitation()
                 }
@@ -279,7 +290,7 @@ struct NewChatView: View {
     }
 
     private func authorizeAndCreateInvitation() {
-        if inviteLifetime == .never {
+        if inviteLifetime == .never && allowInviteMessages && allowInviteCalls {
             createInvitation()
             return
         }
@@ -302,8 +313,18 @@ struct NewChatView: View {
             Task {
                 _ = try? await Task.sleep(nanoseconds: 250_000000)
                 if let (connLink, pcc) = await apiAddContact(incognito: incognitoGroupDefault.get()) {
-                    let policy: XauXatContactInvitePolicy? = if let expiresAt = inviteLifetime.expiresAt(custom: customInviteExpiry) {
-                        XauXatContactInvitePolicy(connectionId: pcc.pccConnId, createdAt: .now, expiresAt: expiresAt)
+                    let expiresAt = inviteLifetime.expiresAt(custom: customInviteExpiry)
+                    let permissions = XauXatContactInvitePermissions(
+                        messages: allowInviteMessages,
+                        calls: allowInviteCalls
+                    )
+                    let policy: XauXatContactInvitePolicy? = if expiresAt != nil || permissions.isRestricted {
+                        XauXatContactInvitePolicy(
+                            connectionId: pcc.pccConnId,
+                            createdAt: .now,
+                            expiresAt: expiresAt,
+                            permissions: permissions
+                        )
                     } else {
                         nil
                     }
@@ -345,8 +366,8 @@ struct NewChatView: View {
     }
 
     private func waitForInviteExpiry() async {
-        guard let policy = invitePolicy, policy.state == .active else { return }
-        let delay = policy.expiresAt.timeIntervalSinceNow
+        guard let policy = invitePolicy, policy.state == .active, let expiresAt = policy.expiresAt else { return }
+        let delay = expiresAt.timeIntervalSinceNow
         if delay > 0 {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
@@ -430,7 +451,11 @@ private struct InviteView: View {
             if let policy = observedPolicy {
                 Section {
                     infoRow("Invite status", policy.state == .expired ? "Expired" : "Unused")
-                    infoRow("Expires", policy.expiresAt.formatted(date: .abbreviated, time: .shortened))
+                    if let expiresAt = policy.expiresAt {
+                        infoRow("Expires", expiresAt.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    infoRow("Messages", policy.permissions?.messages == false ? "Blocked" : "Allowed")
+                    infoRow("Audio calls", policy.permissions?.calls == false ? "Blocked" : "Allowed")
                 }
             }
 
@@ -573,7 +598,11 @@ func xauXatContactInviteShareLink(
 ) -> String? {
     let link = connectionLink.simplexChatUri(short: short)
     guard let policy else { return link }
-    return xauXatSignedContactInviteLink(link: link, expiresAt: policy.expiresAt)
+    return xauXatSignedContactInviteLink(
+        link: link,
+        expiresAt: policy.expiresAt,
+        permissions: policy.permissions ?? .init()
+    )
 }
 
 private enum ProfileSwitchStatus {
@@ -1046,7 +1075,7 @@ struct InfoSheetButton<Content: View>: View {
 func strIsSimplexLink(_ str: String) -> Bool {
     let link = switch xauXatValidateContactInviteLink(str) {
     case .notEnvelope: str
-    case let .valid(link, _), let .expired(link, _): link
+    case let .valid(link, _, _), let .expired(link, _): link
     case .invalid: ""
     }
     if let parsedMd = parseSimpleXMarkdown(link),
@@ -1066,7 +1095,7 @@ enum ConnectTarget {
 func strConnectTarget(_ str: String) -> ConnectTarget? {
     let link = switch xauXatValidateContactInviteLink(str) {
     case .notEnvelope: str
-    case let .valid(link, _), let .expired(link, _): link
+    case let .valid(link, _, _), let .expired(link, _): link
     case .invalid: ""
     }
     let parsedMd = parseSimpleXMarkdown(link)
@@ -1185,25 +1214,31 @@ private func showAskCurrentOrIncognitoProfileSheet(
     connectionLink: CreatedConnLink,
     connectionPlan: ConnectionPlan?,
     ownerVerification: OwnerVerification? = nil,
+    xauXatExpiresAt: Date? = nil,
+    xauXatPermissions: XauXatContactInvitePermissions? = nil,
     dismiss: Bool,
     cleanup: (() -> Void)?
 ) {
     showSheet(
         title,
-        message: ownerVerificationMessage(ownerVerification),
+        message: xauXatInvitePolicyMessage(
+            ownerVerification: ownerVerification,
+            expiresAt: xauXatExpiresAt,
+            permissions: xauXatPermissions
+        ),
         actions: {[
             UIAlertAction(
                 title: NSLocalizedString("Use current profile", comment: "new chat action"),
                 style: actionStyle,
                 handler: { _ in
-                    connectViaLink(connectionLink, connectionPlan: connectionPlan, dismiss: dismiss, incognito: false, cleanup: cleanup)
+                    connectViaLink(connectionLink, connectionPlan: connectionPlan, dismiss: dismiss, incognito: false, xauXatExpiresAt: xauXatExpiresAt, xauXatPermissions: xauXatPermissions, cleanup: cleanup)
                 }
             ),
             UIAlertAction(
                 title: NSLocalizedString("Use new incognito profile", comment: "new chat action"),
                 style: actionStyle,
                 handler: { _ in
-                    connectViaLink(connectionLink, connectionPlan: connectionPlan, dismiss: dismiss, incognito: true, cleanup: cleanup)
+                    connectViaLink(connectionLink, connectionPlan: connectionPlan, dismiss: dismiss, incognito: true, xauXatExpiresAt: xauXatExpiresAt, xauXatPermissions: xauXatPermissions, cleanup: cleanup)
                 }
             ),
             UIAlertAction(
@@ -1327,6 +1362,8 @@ private func showPrepareContactAlert(
     connectionLink: CreatedConnLink,
     contactShortLinkData: ContactShortLinkData,
     ownerVerification: OwnerVerification? = nil,
+    xauXatExpiresAt: Date? = nil,
+    xauXatPermissions: XauXatContactInvitePermissions? = nil,
     verifiedDomain: SimplexDomain? = nil,
     connectOtherButton: String? = nil,
     connectOtherLink: String? = nil,
@@ -1349,7 +1386,11 @@ private func showPrepareContactAlert(
             ),
         profileBadge: contactShortLinkData.localBadge,
         theme: theme,
-        information: ownerVerificationMessage(ownerVerification),
+        information: xauXatInvitePolicyMessage(
+            ownerVerification: ownerVerification,
+            expiresAt: xauXatExpiresAt,
+            permissions: xauXatPermissions
+        ),
         cancelTitle: NSLocalizedString("Cancel", comment: "new chat action"),
         confirmTitle: NSLocalizedString("Open new chat", comment: "new chat action"),
         secondTitle: connectOtherButton,
@@ -1358,6 +1399,15 @@ private func showPrepareContactAlert(
             Task {
                 do {
                     let chat = try await apiPrepareContact(connLink: connectionLink, contactShortLinkData: contactShortLinkData, verifiedDomain: verifiedDomain)
+                    if case let .direct(contact) = chat.chatInfo,
+                       let connectionId = contact.activeConn?.connId,
+                       let xauXatPermissions {
+                        saveXauXatIncomingInvitePolicy(
+                            connectionId: connectionId,
+                            expiresAt: xauXatExpiresAt,
+                            permissions: xauXatPermissions
+                        )
+                    }
                     await MainActor.run {
                         ChatModel.shared.addChat(Chat(chat))
                         openKnownChat(chat.id, dismiss: dismiss, cleanup: cleanup)
@@ -1527,11 +1577,17 @@ func planAndConnect(
     filterKnownGroup: ((GroupInfo) -> Void)? = nil
 ) {
     let effectiveLink: String
+    let xauXatExpiresAt: Date?
+    let xauXatPermissions: XauXatContactInvitePermissions?
     switch xauXatValidateContactInviteLink(shortOrFullLink) {
     case .notEnvelope:
         effectiveLink = shortOrFullLink
-    case let .valid(link, _):
+        xauXatExpiresAt = nil
+        xauXatPermissions = nil
+    case let .valid(link, expiresAt, permissions):
         effectiveLink = link
+        xauXatExpiresAt = expiresAt
+        xauXatPermissions = permissions
     case let .expired(_, expiresAt):
         showAlert(
             NSLocalizedString("Invite expired", comment: "alert title"),
@@ -1604,6 +1660,8 @@ func planAndConnect(
                                     connectionLink: connectionLink,
                                     contactShortLinkData: contactSLinkData,
                                     ownerVerification: ownerVerification,
+                                    xauXatExpiresAt: xauXatExpiresAt,
+                                    xauXatPermissions: xauXatPermissions,
                                     theme: theme,
                                     dismiss: dismiss,
                                     cleanup: cleanup
@@ -1617,6 +1675,8 @@ func planAndConnect(
                                     connectionLink: connectionLink,
                                     connectionPlan: connectionPlan,
                                     ownerVerification: ownerVerification,
+                                    xauXatExpiresAt: xauXatExpiresAt,
+                                    xauXatPermissions: xauXatPermissions,
                                     dismiss: dismiss,
                                     cleanup: cleanup
                                 )
@@ -1910,10 +1970,19 @@ private func connectViaLink(
     connectionPlan: ConnectionPlan?,
     dismiss: Bool,
     incognito: Bool,
+    xauXatExpiresAt: Date? = nil,
+    xauXatPermissions: XauXatContactInvitePermissions? = nil,
     cleanup: (() -> Void)?
 ) {
     Task {
         if let (connReqType, pcc) = await apiConnect(incognito: incognito, connLink: connectionLink) {
+            if let xauXatPermissions {
+                saveXauXatIncomingInvitePolicy(
+                    connectionId: pcc.pccConnId,
+                    expiresAt: xauXatExpiresAt,
+                    permissions: xauXatPermissions
+                )
+            }
             await MainActor.run {
                 ChatModel.shared.updateContactConnection(pcc)
             }
@@ -1941,6 +2010,19 @@ private func connectViaLink(
         }
         cleanup?()
     }
+}
+
+private func saveXauXatIncomingInvitePolicy(
+    connectionId: Int64,
+    expiresAt: Date?,
+    permissions: XauXatContactInvitePermissions
+) {
+    _ = xauXatSaveContactInvitePolicy(XauXatContactInvitePolicy(
+        connectionId: connectionId,
+        createdAt: .now,
+        expiresAt: expiresAt,
+        permissions: permissions
+    ))
 }
 
 func openKnownContact(_ contact: Contact, dismiss: Bool, cleanup: (() -> Void)?) {
@@ -2017,6 +2099,33 @@ private func ownerVerificationMessage(_ ov: OwnerVerification?) -> String? {
     case let .failed(reason): String.localizedStringWithFormat(NSLocalizedString("⚠️ Signature verification failed: %@.", comment: "owner verification"), reason)
     case .none: nil
     }
+}
+
+private func xauXatInvitePolicyMessage(
+    ownerVerification: OwnerVerification?,
+    expiresAt: Date?,
+    permissions: XauXatContactInvitePermissions?
+) -> String? {
+    var lines: [String] = []
+    if let verification = ownerVerificationMessage(ownerVerification) {
+        lines.append(verification)
+    }
+    if let permissions {
+        lines.append(NSLocalizedString("Invite permissions:", comment: "invite permissions heading"))
+        lines.append(permissions.messages
+                     ? NSLocalizedString("Messages: allowed", comment: "invite permission")
+                     : NSLocalizedString("Messages: blocked", comment: "invite permission"))
+        lines.append(permissions.calls
+                     ? NSLocalizedString("Audio calls: allowed", comment: "invite permission")
+                     : NSLocalizedString("Audio calls: blocked", comment: "invite permission"))
+    }
+    if let expiresAt {
+        lines.append(String.localizedStringWithFormat(
+            NSLocalizedString("Expires: %@", comment: "invite expiry"),
+            expiresAt.formatted(date: .abbreviated, time: .shortened)
+        ))
+    }
+    return lines.isEmpty ? nil : lines.joined(separator: "\n")
 }
 
 func connReqSentAlert(_ type: ConnReqType) -> Alert {

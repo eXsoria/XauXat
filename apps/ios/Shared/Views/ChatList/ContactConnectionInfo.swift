@@ -66,7 +66,11 @@ struct ContactConnectionInfo: View {
                         let policy = xauXatObserveContactInvitePolicy(connectionId: contactConnection.pccConnId)
                         infoRow("Invite status", policy?.state == .expired ? "Expired" : "Unused")
                         if let policy {
-                            infoRow("Expires", policy.expiresAt.formatted(date: .abbreviated, time: .shortened))
+                            if let expiresAt = policy.expiresAt {
+                                infoRow("Expires", expiresAt.formatted(date: .abbreviated, time: .shortened))
+                            }
+                            infoRow("Messages", policy.permissions?.messages == false ? "Blocked" : "Allowed")
+                            infoRow("Audio calls", policy.permissions?.calls == false ? "Blocked" : "Allowed")
                         }
                         if policy?.state != .expired {
                             if let shareLink = xauXatContactInviteShareLink(connLinkInv, short: showShortLink, policy: policy) {
