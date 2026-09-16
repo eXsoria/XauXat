@@ -706,12 +706,8 @@ func deleteContactConnectionAlert(_ contactConnection: PendingContactConnection,
         primaryButton: .destructive(Text("Delete")) {
             Task {
                 do {
-                    try await apiDeleteChat(type: .contactConnection, id: contactConnection.apiId)
-                    _ = xauXatSetContactInviteState(connectionId: contactConnection.pccConnId, state: .revoked)
-                    await MainActor.run {
-                        ChatModel.shared.removeChat(contactConnection.id)
-                        success()
-                    }
+                    try await revokeXauXatContactInvite(contactConnection)
+                    await MainActor.run { success() }
                 } catch let error {
                     await MainActor.run {
                         showErrorAlert(error, NSLocalizedString("Error deleting connection", comment: ""))
@@ -721,6 +717,37 @@ func deleteContactConnectionAlert(_ contactConnection: PendingContactConnection,
         },
         secondaryButton: .cancel()
     )
+}
+
+func revokeXauXatContactInvite(_ contactConnection: PendingContactConnection) async throws {
+    let policy = xauXatObserveContactInvitePolicy(connectionId: contactConnection.pccConnId)
+    let policyIds: Set<Int64> = if let bundleId = policy?.bundleId {
+        Set(xauXatContactInviteBundlePolicies(bundleId: bundleId).map(\.connectionId))
+    } else {
+        [contactConnection.pccConnId]
+    }
+    let bundleConnections = await MainActor.run {
+        ChatModel.shared.chats.compactMap { chat -> PendingContactConnection? in
+            guard case let .contactConnection(connection) = chat.chatInfo,
+                  policyIds.contains(connection.pccConnId) else { return nil }
+            return connection
+        }
+    }
+    let connections = bundleConnections.isEmpty ? [contactConnection] : bundleConnections
+    // Tombstone the whole bundle before the first network deletion. This closes
+    // the race with connection events that arrive while the remaining SimpleX
+    // one-time links are being revoked.
+    policyIds.forEach { _ = xauXatSetContactInviteState(connectionId: $0, state: .revoked) }
+    var firstError: Error?
+    for connection in connections {
+        do {
+            try await apiDeleteChat(type: .contactConnection, id: connection.apiId)
+            await MainActor.run { ChatModel.shared.removeChat(connection.id) }
+        } catch {
+            if firstError == nil { firstError = error }
+        }
+    }
+    if let firstError { throw firstError }
 }
 
 func connectContactViaAddress(_ contactId: Int64, _ incognito: Bool, showAlert: (Alert) -> Void) async -> Bool {

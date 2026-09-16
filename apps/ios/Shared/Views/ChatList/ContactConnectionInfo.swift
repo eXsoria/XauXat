@@ -64,16 +64,32 @@ struct ContactConnectionInfo: View {
                     if contactConnection.initiated,
                        let connLinkInv = contactConnection.connLinkInv {
                         let policy = xauXatObserveContactInvitePolicy(connectionId: contactConnection.pccConnId)
-                        infoRow("Invite status", policy?.state == .expired ? "Expired" : "Unused")
+                        let policies = invitePolicies(policy)
+                        let used = policies.filter { $0.state == .used }.count
+                        let status = if policies.contains(where: { $0.state == .active }) {
+                            "Active"
+                        } else if policies.allSatisfy({ $0.state == .used }) {
+                            "Fully used"
+                        } else if policies.contains(where: { $0.state == .expired }) {
+                            "Expired"
+                        } else {
+                            "Revoked"
+                        }
+                        infoRow("Invite status", status)
                         if let policy {
                             if let expiresAt = policy.expiresAt {
                                 infoRow("Expires", expiresAt.formatted(date: .abbreviated, time: .shortened))
                             }
+                            if let maximumUses = policy.maxUses {
+                                infoRow("Used", "\(used) of \(maximumUses)")
+                                infoRow("Remaining", "\(max(0, maximumUses - used))")
+                            }
                             infoRow("Messages", policy.permissions?.messages == false ? "Blocked" : "Allowed")
                             infoRow("Audio calls", policy.permissions?.calls == false ? "Blocked" : "Allowed")
                         }
-                        if policy?.state != .expired {
-                            if let shareLink = xauXatContactInviteShareLink(connLinkInv, short: showShortLink, policy: policy) {
+                        if policies.isEmpty || policies.contains(where: { $0.state == .active }) {
+                            let links = inviteConnectionLinks(policy, fallback: connLinkInv)
+                            if let shareLink = xauXatContactInviteShareLink(links, short: showShortLink, policy: policy) {
                                 QRCode(uri: shareLink)
                                     .id("simplex-invitation-qrcode-\(shareLink)")
                                 incognitoEnabled()
@@ -180,6 +196,23 @@ struct ContactConnectionInfo: View {
                 IncognitoHelp()
             }
         }
+    }
+
+    private func invitePolicies(_ policy: XauXatContactInvitePolicy?) -> [XauXatContactInvitePolicy] {
+        guard let policy else { return [] }
+        guard let bundleId = policy.bundleId else { return [policy] }
+        return xauXatContactInviteBundlePolicies(bundleId: bundleId)
+    }
+
+    private func inviteConnectionLinks(_ policy: XauXatContactInvitePolicy?, fallback: CreatedConnLink) -> [CreatedConnLink] {
+        guard let bundleId = policy?.bundleId else { return [fallback] }
+        let policyIds = Set(xauXatContactInviteBundlePolicies(bundleId: bundleId).map(\.connectionId))
+        let links = m.chats.compactMap { chat -> CreatedConnLink? in
+            guard case let .contactConnection(connection) = chat.chatInfo,
+                  policyIds.contains(connection.pccConnId) else { return nil }
+            return connection.connLinkInv
+        }
+        return links.isEmpty ? [fallback] : links
     }
 }
 

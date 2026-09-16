@@ -61,10 +61,7 @@ func showKeepInvitationAlert() {
                     style: .destructive,
                     handler: { _ in
                         Task {
-                            await deleteChat(Chat(
-                                chatInfo: .contactConnection(contactConnection: showingInvitation.pcc),
-                                chatItems: []
-                            ))
+                            try? await revokeXauXatContactInvite(showingInvitation.pcc)
                         }
                     }
                 )
@@ -90,10 +87,13 @@ struct NewChatView: View {
     @State private var pastedLink: String = ""
     @State private var alert: NewChatViewAlert?
     @State private var contactConnection: PendingContactConnection? = nil
+    @State private var contactConnections: [PendingContactConnection] = []
+    @State private var connLinkInvitations: [CreatedConnLink] = []
     @State private var inviteLifetime: XauXatContactInviteLifetime = .never
     @State private var customInviteExpiry = Date.now.addingTimeInterval(24 * 60 * 60)
     @State private var allowInviteMessages = true
     @State private var allowInviteCalls = true
+    @State private var inviteMaximumUses = 1
     @State private var invitePolicy: XauXatContactInvitePolicy? = nil
 
     var body: some View {
@@ -185,6 +185,8 @@ struct NewChatView: View {
             if !choosingProfile {
                 showKeepInvitationAlert()
                 contactConnection = nil
+                contactConnections = []
+                connLinkInvitations = []
             }
         }
         .task(id: invitePolicy?.expiresAt) {
@@ -204,7 +206,9 @@ struct NewChatView: View {
                 InviteView(
                     invitationUsed: $invitationUsed,
                     contactConnection: $contactConnection,
+                    contactConnections: $contactConnections,
                     connLinkInvitation: $connLinkInvitation,
+                    connLinkInvitations: $connLinkInvitations,
                     showShortLink: $showShortLink,
                     choosingProfile: $choosingProfile,
                     invitePolicy: $invitePolicy,
@@ -256,6 +260,16 @@ struct NewChatView: View {
             }
 
             Section {
+                Stepper("Maximum uses: \(inviteMaximumUses)", value: $inviteMaximumUses, in: 1...5)
+            } header: {
+                Text("Usage limit")
+            } footer: {
+                Text(inviteMaximumUses == 1
+                     ? "The invite can create one contact."
+                     : "XauXat combines independent SimpleX one-time links so concurrent use cannot exceed this limit.")
+            }
+
+            Section {
                 Button(inviteLifetime == .never ? "Create invite" : "Create expiring invite") {
                     authorizeAndCreateInvitation()
                 }
@@ -290,11 +304,11 @@ struct NewChatView: View {
     }
 
     private func authorizeAndCreateInvitation() {
-        if inviteLifetime == .never && allowInviteMessages && allowInviteCalls {
+        if inviteLifetime == .never && allowInviteMessages && allowInviteCalls && inviteMaximumUses == 1 {
             createInvitation()
             return
         }
-        authenticate(reason: NSLocalizedString("Create an expiring contact invite", comment: "authentication reason")) { result in
+        authenticate(reason: NSLocalizedString("Create an advanced contact invite", comment: "authentication reason")) { result in
             switch result {
             case .success:
                 createInvitation()
@@ -308,35 +322,52 @@ struct NewChatView: View {
 
     private func createInvitation() {
         guard plusEntitlements.isAuthorized(for: .advancedContactInvites) else { return }
-        if connLinkInvitation.connFullLink == "" && contactConnection == nil && !creatingConnReq {
+        if connLinkInvitation.connFullLink == "" && contactConnections.isEmpty && !creatingConnReq {
             creatingConnReq = true
+            let maximumUses = inviteMaximumUses
+            let lifetime = inviteLifetime
+            let customExpiry = customInviteExpiry
+            let messagesAllowed = allowInviteMessages
+            let callsAllowed = allowInviteCalls
             Task {
                 _ = try? await Task.sleep(nanoseconds: 250_000000)
-                if let (connLink, pcc) = await apiAddContact(incognito: incognitoGroupDefault.get()) {
-                    let expiresAt = inviteLifetime.expiresAt(custom: customInviteExpiry)
-                    let permissions = XauXatContactInvitePermissions(
-                        messages: allowInviteMessages,
-                        calls: allowInviteCalls
-                    )
-                    let policy: XauXatContactInvitePolicy? = if expiresAt != nil || permissions.isRestricted {
-                        XauXatContactInvitePolicy(
+                var created: [(CreatedConnLink, PendingContactConnection)] = []
+                for _ in 0..<maximumUses {
+                    guard let invitation = await apiAddContact(incognito: incognitoGroupDefault.get()) else { break }
+                    created.append(invitation)
+                }
+                if created.count == maximumUses, let first = created.first {
+                    let expiresAt = lifetime.expiresAt(custom: customExpiry)
+                    let permissions = XauXatContactInvitePermissions(messages: messagesAllowed, calls: callsAllowed)
+                    let bundleId = maximumUses > 1 ? UUID().uuidString : nil
+                    let needsPolicy = expiresAt != nil || permissions.isRestricted || maximumUses > 1
+                    let policies = created.map { _, pcc in
+                        needsPolicy ? XauXatContactInvitePolicy(
                             connectionId: pcc.pccConnId,
                             createdAt: .now,
                             expiresAt: expiresAt,
-                            permissions: permissions
-                        )
-                    } else {
-                        nil
+                            permissions: permissions,
+                            bundleId: bundleId,
+                            maxUses: maximumUses
+                        ) : nil
                     }
-                    if let policy { _ = xauXatSaveContactInvitePolicy(policy) }
+                    policies.compactMap { $0 }.forEach { _ = xauXatSaveContactInvitePolicy($0) }
                     await MainActor.run {
-                        invitePolicy = policy
-                        m.updateContactConnection(pcc)
-                        m.showingInvitation = ShowingInvitation(pcc: pcc, connChatUsed: false)
-                        connLinkInvitation = connLink
-                        contactConnection = pcc
+                        let links = created.map(\.0)
+                        let connections = created.map(\.1)
+                        invitePolicy = policies.first ?? nil
+                        connections.forEach { m.updateContactConnection($0) }
+                        m.showingInvitation = ShowingInvitation(pcc: first.1, connChatUsed: false)
+                        connLinkInvitation = first.0
+                        connLinkInvitations = links
+                        contactConnection = first.1
+                        contactConnections = connections
                     }
                 } else {
+                    for (_, pcc) in created {
+                        try? await apiDeleteChat(type: .contactConnection, id: pcc.apiId)
+                        await MainActor.run { m.removeChat(pcc.id) }
+                    }
                     await MainActor.run {
                         creatingConnReq = false
                     }
@@ -374,11 +405,17 @@ struct NewChatView: View {
         guard !Task.isCancelled,
               let expired = xauXatObserveContactInvitePolicy(connectionId: policy.connectionId),
               expired.state == .expired else { return }
-        if let pcc = contactConnection, pcc.pccConnId == policy.connectionId {
-            try? await apiDeleteChat(type: .contactConnection, id: pcc.apiId)
+        let expiringConnections = contactConnections.filter { pcc in
+            guard let stored = xauXatObserveContactInvitePolicy(connectionId: pcc.pccConnId) else { return false }
+            return stored.bundleId == policy.bundleId || stored.connectionId == policy.connectionId
+        }
+        if !expiringConnections.isEmpty {
+            for pcc in expiringConnections {
+                try? await apiDeleteChat(type: .contactConnection, id: pcc.apiId)
+            }
             await MainActor.run {
                 invitePolicy = expired
-                m.removeChat(pcc.id)
+                expiringConnections.forEach { m.removeChat($0.id) }
                 m.showingInvitation = nil
             }
         }
@@ -432,7 +469,9 @@ private struct InviteView: View {
     @EnvironmentObject var theme: AppTheme
     @Binding var invitationUsed: Bool
     @Binding var contactConnection: PendingContactConnection?
+    @Binding var contactConnections: [PendingContactConnection]
     @Binding var connLinkInvitation: CreatedConnLink
+    @Binding var connLinkInvitations: [CreatedConnLink]
     @Binding var showShortLink: Bool
     @Binding var choosingProfile: Bool
     @Binding var invitePolicy: XauXatContactInvitePolicy?
@@ -450,19 +489,23 @@ private struct InviteView: View {
 
             if let policy = observedPolicy {
                 Section {
-                    infoRow("Invite status", policy.state == .expired ? "Expired" : "Unused")
+                    infoRow("Invite status", inviteStatus)
                     if let expiresAt = policy.expiresAt {
                         infoRow("Expires", expiresAt.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    if let maximumUses = policy.maxUses {
+                        infoRow("Used", "\(consumedUses) of \(maximumUses)")
+                        infoRow("Remaining", "\(max(0, maximumUses - consumedUses))")
                     }
                     infoRow("Messages", policy.permissions?.messages == false ? "Blocked" : "Allowed")
                     infoRow("Audio calls", policy.permissions?.calls == false ? "Blocked" : "Allowed")
                 }
             }
 
-            if observedPolicy?.state != .expired {
+            if inviteAvailable {
                 qrCodeView()
             }
-            if !onboarding, let selectedProfile = chatModel.currentUser {
+            if !onboarding, contactConnections.count <= 1, let selectedProfile = chatModel.currentUser {
                 Section {
                     NavigationLink {
                         ActiveProfilePicker(
@@ -501,11 +544,35 @@ private struct InviteView: View {
         .onAppear(perform: refreshAuthenticatedShareLink)
         .onChange(of: showShortLink) { _ in refreshAuthenticatedShareLink() }
         .onChange(of: invitePolicy) { _ in refreshAuthenticatedShareLink() }
+        .onReceive(chatModel.$chats) { _ in refreshAuthenticatedShareLink() }
     }
 
     private var observedPolicy: XauXatContactInvitePolicy? {
         guard let connectionId = contactConnection?.pccConnId else { return invitePolicy }
         return xauXatObserveContactInvitePolicy(connectionId: connectionId) ?? invitePolicy
+    }
+
+    private var bundlePolicies: [XauXatContactInvitePolicy] {
+        guard let policy = observedPolicy else { return [] }
+        guard let bundleId = policy.bundleId else { return [policy] }
+        return xauXatContactInviteBundlePolicies(bundleId: bundleId)
+    }
+
+    private var consumedUses: Int {
+        bundlePolicies.filter { $0.state == .used }.count
+    }
+
+    private var inviteAvailable: Bool {
+        observedPolicy == nil || bundlePolicies.contains(where: { $0.state == .active })
+    }
+
+    private var inviteStatus: String {
+        guard let policy = observedPolicy else { return "Unused" }
+        if bundlePolicies.allSatisfy({ $0.state == .used }) { return "Fully used" }
+        if bundlePolicies.contains(where: { $0.state == .active }) { return "Active" }
+        if bundlePolicies.contains(where: { $0.state == .expired }) { return "Expired" }
+        if bundlePolicies.contains(where: { $0.state == .revoked }) { return "Revoked" }
+        return policy.state == .used ? "Used" : "Unused"
     }
 
     private var sectionHeader: some View {
@@ -531,7 +598,8 @@ private struct InviteView: View {
             Text("Send the link via any messenger - it's secure. Ask to paste into SimpleX.")
                 .font(.body).foregroundColor(theme.colors.onBackground).textCase(nil)
         } else {
-            Text("Share this 1-time invite link").foregroundColor(theme.colors.secondary)
+            Text((observedPolicy?.maxUses ?? 1) > 1 ? "Share this limited-use invite link" : "Share this 1-time invite link")
+                .foregroundColor(theme.colors.secondary)
         }
     }
 
@@ -547,7 +615,7 @@ private struct InviteView: View {
                     .padding(.top, -7)
                     .padding(.horizontal, 8)
             }
-            .disabled(observedPolicy?.state == .expired || authenticatedShareLink == nil)
+            .disabled(!inviteAvailable || authenticatedShareLink == nil)
         }
         .frame(maxWidth: .infinity)
     }
@@ -577,8 +645,12 @@ private struct InviteView: View {
     }
 
     private func refreshAuthenticatedShareLink() {
+        let activeLinks = zip(contactConnections, connLinkInvitations).compactMap { connection, link in
+            let state = xauXatObserveContactInvitePolicy(connectionId: connection.pccConnId)?.state
+            return state == nil || state == .active ? link : nil
+        }
         authenticatedShareLink = xauXatContactInviteShareLink(
-            connLinkInvitation,
+            activeLinks.isEmpty ? (connLinkInvitations.isEmpty ? [connLinkInvitation] : connLinkInvitations) : activeLinks,
             short: showShortLink,
             policy: observedPolicy
         )
@@ -600,6 +672,20 @@ func xauXatContactInviteShareLink(
     guard let policy else { return link }
     return xauXatSignedContactInviteLink(
         link: link,
+        expiresAt: policy.expiresAt,
+        permissions: policy.permissions ?? .init()
+    )
+}
+
+func xauXatContactInviteShareLink(
+    _ connectionLinks: [CreatedConnLink],
+    short: Bool,
+    policy: XauXatContactInvitePolicy?
+) -> String? {
+    let links = connectionLinks.map { $0.simplexChatUri(short: short) }
+    guard let policy else { return links.first }
+    return xauXatSignedContactInviteLink(
+        links: links,
         expiresAt: policy.expiresAt,
         permissions: policy.permissions ?? .init()
     )
@@ -1075,7 +1161,7 @@ struct InfoSheetButton<Content: View>: View {
 func strIsSimplexLink(_ str: String) -> Bool {
     let link = switch xauXatValidateContactInviteLink(str) {
     case .notEnvelope: str
-    case let .valid(link, _, _), let .expired(link, _): link
+    case let .valid(links, _, _), let .expired(links, _): links.first ?? ""
     case .invalid: ""
     }
     if let parsedMd = parseSimpleXMarkdown(link),
@@ -1095,7 +1181,7 @@ enum ConnectTarget {
 func strConnectTarget(_ str: String) -> ConnectTarget? {
     let link = switch xauXatValidateContactInviteLink(str) {
     case .notEnvelope: str
-    case let .valid(link, _, _), let .expired(link, _): link
+    case let .valid(links, _, _), let .expired(links, _): links.first ?? ""
     case .invalid: ""
     }
     let parsedMd = parseSimpleXMarkdown(link)
@@ -1584,8 +1670,8 @@ func planAndConnect(
         effectiveLink = shortOrFullLink
         xauXatExpiresAt = nil
         xauXatPermissions = nil
-    case let .valid(link, expiresAt, permissions):
-        effectiveLink = link
+    case let .valid(links, expiresAt, permissions):
+        effectiveLink = links.randomElement() ?? links[0]
         xauXatExpiresAt = expiresAt
         xauXatPermissions = permissions
     case let .expired(_, expiresAt):
