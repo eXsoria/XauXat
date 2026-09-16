@@ -17,4 +17,4 @@ XauXat Free limits private groups to 20 occupied member seats without reducing t
 - Contact invitations, batch invitations, link creation, link sharing and pending-member approval all perform a fresh capacity check.
 - The member picker prevents selecting more contacts than the remaining capacity and explains the limit before submission.
 
-Existing imported groups with more than 20 members keep every member. XauXat blocks only new admissions while they remain at or above the Free limit. Channel/relay behavior and the larger group support in the SimpleX core are unchanged, so a future Plus entitlement can replace this iOS policy without a protocol fork.
+Existing imported groups with more than 20 members keep every member. XauXat blocks only new admissions while they remain at or above the Free limit. Plus raises the same admission policy to 100 members without changing the SimpleX protocol; see `PLUS_GROUP_MEMBER_LIMIT.md`.

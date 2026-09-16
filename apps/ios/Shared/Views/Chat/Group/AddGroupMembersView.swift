@@ -23,6 +23,7 @@ struct AddGroupMembersView: View {
 struct AddGroupMembersViewCommon: View {
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     var chat: Chat
     @State var groupInfo: GroupInfo
     var creatingGroup: Bool = false
@@ -32,8 +33,8 @@ struct AddGroupMembersViewCommon: View {
     @State private var selectedRole: GroupMemberRole = .member
     @State private var alert: AddGroupMembersAlert?
     @State private var searchText: String = ""
-    @State private var freeCapacity: XauXatFreeGroupCapacity?
-    @State private var loadingFreeCapacity = true
+    @State private var groupCapacity: XauXatGroupCapacity?
+    @State private var loadingGroupCapacity = true
     @FocusState private var searchFocussed
 
     private enum AddGroupMembersAlert: Identifiable {
@@ -67,7 +68,7 @@ struct AddGroupMembersViewCommon: View {
     private func addGroupMembersView() -> some View {
         VStack {
             let membersToAdd = filterMembersToAdd(chatModel.groupMembers)
-            let remaining = freeCapacity?.remaining ?? 0
+            let remaining = groupCapacity?.remaining ?? 0
             List {
                 ChatInfoToolbar(chat: chat, imageSize: 48)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -93,15 +94,15 @@ struct AddGroupMembersViewCommon: View {
                         }
                         rolePicker()
                         inviteMembersButton()
-                            .disabled(count < 1 || loadingFreeCapacity || count > remaining)
+                            .disabled(count < 1 || loadingGroupCapacity || count > remaining)
                     } footer: {
                         VStack(alignment: .leading, spacing: 5) {
-                            if loadingFreeCapacity {
-                                Text("Checking the XauXat Free group limit…")
-                            } else if let freeCapacity {
-                                Text("\(freeCapacity.occupied) of \(XAUXAT_FREE_GROUP_MEMBER_LIMIT) member spots used")
-                                if freeCapacity.isFull {
-                                    Text("This group is full on XauXat Free. Existing members are not affected.")
+                            if loadingGroupCapacity {
+                                Text("Checking the XauXat group limit…")
+                            } else if let groupCapacity {
+                                Text("\(groupCapacity.occupied) of \(groupCapacity.limit) member spots used")
+                                if groupCapacity.isFull {
+                                    Text("This group is full on the current plan. Existing members are not affected.")
                                 }
                             }
                             if showFooterCounter {
@@ -145,7 +146,7 @@ struct AddGroupMembersViewCommon: View {
             case .freeLimit:
                 return Alert(
                     title: Text("Group limit reached"),
-                    message: Text("XauXat Free groups support up to 20 members. Existing members remain in the group.")
+                    message: Text("This group has reached the \(currentGroupMemberLimit)-member limit for the current plan. Existing members remain in the group.")
                 )
             case let .error(title, error):
                 return mkAlert(title: title, message: error)
@@ -155,7 +156,7 @@ struct AddGroupMembersViewCommon: View {
             searchFocussed = false
         }
         .task {
-            await refreshFreeCapacity()
+            await refreshGroupCapacity()
         }
         .modifier(ThemedBackground(grouped: true))
     }
@@ -184,9 +185,18 @@ struct AddGroupMembersViewCommon: View {
     private func inviteMembers() {
         Task {
             do {
-                _ = try await apiRequireXauXatFreeGroupCapacity(groupInfo.groupId, adding: selectedContacts.count)
+                _ = try await apiRequireXauXatGroupCapacity(
+                    groupInfo.groupId,
+                    adding: selectedContacts.count,
+                    allowLargeGroup: canUseLargeGroups
+                )
                 for contactId in selectedContacts {
-                    let member = try await apiAddMember(groupInfo.groupId, contactId, selectedRole)
+                    let member = try await apiAddMember(
+                        groupInfo.groupId,
+                        contactId,
+                        selectedRole,
+                        allowLargeGroup: canUseLargeGroups
+                    )
                     await MainActor.run { _ = chatModel.upsertGroupMember(groupInfo, member) }
                 }
                 addedMembersCb(selectedContacts)
@@ -230,7 +240,7 @@ struct AddGroupMembersViewCommon: View {
             } else {
                 if checked {
                     selectedContacts.remove(contact.apiId)
-                } else if let freeCapacity, selectedContacts.count >= freeCapacity.remaining {
+                } else if let groupCapacity, selectedContacts.count >= groupCapacity.remaining {
                     alert = .freeLimit
                 } else {
                     selectedContacts.insert(contact.apiId)
@@ -253,16 +263,27 @@ struct AddGroupMembersViewCommon: View {
         }
     }
 
-    private func refreshFreeCapacity() async {
+    private var canUseLargeGroups: Bool {
+        plusEntitlements.isAuthorized(for: .largeGroups)
+    }
+
+    private var currentGroupMemberLimit: Int {
+        canUseLargeGroups ? XAUXAT_PLUS_GROUP_MEMBER_LIMIT : XAUXAT_FREE_GROUP_MEMBER_LIMIT
+    }
+
+    private func refreshGroupCapacity() async {
         do {
-            let capacity = try await apiXauXatFreeGroupCapacity(groupInfo.groupId)
+            let capacity = try await apiXauXatGroupCapacity(
+                groupInfo.groupId,
+                allowLargeGroup: canUseLargeGroups
+            )
             await MainActor.run {
-                freeCapacity = capacity
-                loadingFreeCapacity = false
+                groupCapacity = capacity
+                loadingGroupCapacity = false
             }
         } catch {
             await MainActor.run {
-                loadingFreeCapacity = false
+                loadingGroupCapacity = false
                 alert = .error(
                     title: "Couldn't check group capacity",
                     error: LocalizedStringKey(responseError(error))

@@ -2055,7 +2055,7 @@ private func sendCommandOkRespSync(_ cmd: ChatCommand) throws {
 
 func apiNewGroup(incognito: Bool, groupProfile: GroupProfile) throws -> GroupInfo {
     let userId = try currentUserId("apiNewGroup")
-    let r: ChatResponse2 = try chatSendCmdSync(.apiNewGroup(userId: userId, incognito: incognito, groupProfile: xauxatFreeGroupProfile(groupProfile)))
+    let r: ChatResponse2 = try chatSendCmdSync(.apiNewGroup(userId: userId, incognito: incognito, groupProfile: xauxatPrivateGroupProfile(groupProfile)))
     if case let .groupCreated(_, groupInfo) = r { return groupInfo }
     throw r.unexpected
 }
@@ -2100,32 +2100,41 @@ func apiAddGroupRelays(_ groupId: Int64, relayIds: [Int64]) async throws -> AddG
 }
 
 let XAUXAT_FREE_GROUP_MEMBER_LIMIT = 20
+let XAUXAT_PLUS_GROUP_MEMBER_LIMIT = 100
 
-struct XauXatFreeGroupCapacity: Equatable {
+struct XauXatGroupCapacity: Equatable {
     let occupied: Int
+    let limit: Int
 
-    var remaining: Int { max(0, XAUXAT_FREE_GROUP_MEMBER_LIMIT - occupied) }
+    var remaining: Int { max(0, limit - occupied) }
     var isFull: Bool { remaining == 0 }
 }
 
-private enum XauXatFreeGroupLimitError: Error, CustomStringConvertible {
-    case reached
-    case insufficientCapacity(remaining: Int)
+private enum XauXatGroupLimitError: Error, CustomStringConvertible {
+    case reached(limit: Int)
+    case insufficientCapacity(remaining: Int, limit: Int)
 
     var description: String {
         switch self {
-        case .reached:
-            return NSLocalizedString("XauXat Free groups support up to 20 members.", comment: "Free group member limit error")
-        case let .insufficientCapacity(remaining):
+        case let .reached(limit):
             return String.localizedStringWithFormat(
-                NSLocalizedString("XauXat Free has room for only %d more member(s).", comment: "Free group remaining capacity error"),
+                NSLocalizedString("This XauXat plan supports groups with up to %d members.", comment: "Group member limit error"),
+                limit
+            )
+        case let .insufficientCapacity(remaining, _):
+            return String.localizedStringWithFormat(
+                NSLocalizedString("This group has room for only %d more member(s) on the current plan.", comment: "Group remaining capacity error"),
                 remaining
             )
         }
     }
 }
 
-private func xauxatFreeGroupProfile(_ groupProfile: GroupProfile) -> GroupProfile {
+private func xauxatGroupMemberLimit(allowLargeGroup: Bool) -> Int {
+    allowLargeGroup ? XAUXAT_PLUS_GROUP_MEMBER_LIMIT : XAUXAT_FREE_GROUP_MEMBER_LIMIT
+}
+
+private func xauxatPrivateGroupProfile(_ groupProfile: GroupProfile) -> GroupProfile {
     guard !groupProfile.isChannel else { return groupProfile }
     var profile = groupProfile
     var admission = profile.memberAdmission_
@@ -2138,29 +2147,32 @@ private func xauxatFreeGroupSeatOccupied(_ member: GroupMember) -> Bool {
     member.memberCurrent || member.memberStatus == .memInvited
 }
 
-func apiXauXatFreeGroupCapacity(_ groupId: Int64) async throws -> XauXatFreeGroupCapacity {
+func apiXauXatGroupCapacity(_ groupId: Int64, allowLargeGroup: Bool = false) async throws -> XauXatGroupCapacity {
     let r: ChatResponse2 = try await chatSendCmd(.apiListMembers(groupId: groupId))
     guard case let .groupMembers(_, group) = r else { throw r.unexpected }
-    return XauXatFreeGroupCapacity(occupied: group.members.filter(xauxatFreeGroupSeatOccupied).count)
+    return XauXatGroupCapacity(
+        occupied: group.members.filter(xauxatFreeGroupSeatOccupied).count,
+        limit: xauxatGroupMemberLimit(allowLargeGroup: allowLargeGroup)
+    )
 }
 
-func apiRequireXauXatFreeGroupCapacity(_ groupId: Int64, adding: Int = 1) async throws -> XauXatFreeGroupCapacity {
-    let capacity = try await apiXauXatFreeGroupCapacity(groupId)
+func apiRequireXauXatGroupCapacity(_ groupId: Int64, adding: Int = 1, allowLargeGroup: Bool = false) async throws -> XauXatGroupCapacity {
+    let capacity = try await apiXauXatGroupCapacity(groupId, allowLargeGroup: allowLargeGroup)
     guard adding <= capacity.remaining else {
         throw capacity.isFull
-            ? XauXatFreeGroupLimitError.reached
-            : XauXatFreeGroupLimitError.insufficientCapacity(remaining: capacity.remaining)
+            ? XauXatGroupLimitError.reached(limit: capacity.limit)
+            : XauXatGroupLimitError.insufficientCapacity(remaining: capacity.remaining, limit: capacity.limit)
     }
     return capacity
 }
 
-func apiEnsureXauXatFreeGroupAdmission(_ groupInfo: GroupInfo) async throws -> GroupInfo {
+func apiEnsureXauXatGroupAdmission(_ groupInfo: GroupInfo) async throws -> GroupInfo {
     guard !groupInfo.isChannel, groupInfo.groupProfile.memberAdmission_.review != .all else { return groupInfo }
     return try await apiUpdateGroup(groupInfo.groupId, groupInfo.groupProfile)
 }
 
-func apiAddMember(_ groupId: Int64, _ contactId: Int64, _ memberRole: GroupMemberRole) async throws -> GroupMember {
-    _ = try await apiRequireXauXatFreeGroupCapacity(groupId)
+func apiAddMember(_ groupId: Int64, _ contactId: Int64, _ memberRole: GroupMemberRole, allowLargeGroup: Bool = false) async throws -> GroupMember {
+    _ = try await apiRequireXauXatGroupCapacity(groupId, allowLargeGroup: allowLargeGroup)
     let r: ChatResponse2 = try await chatSendCmd(.apiAddMember(groupId: groupId, contactId: contactId, memberRole: memberRole))
     if case let .sentGroupInvitation(_, _, _, member) = r { return member }
     throw r.unexpected
@@ -2182,8 +2194,8 @@ func apiJoinGroup(_ groupId: Int64) async throws -> JoinGroupResult? {
     }
 }
 
-func apiAcceptMember(_ groupId: Int64, _ groupMemberId: Int64, _ memberRole: GroupMemberRole) async throws -> (GroupInfo, GroupMember) {
-    _ = try await apiRequireXauXatFreeGroupCapacity(groupId)
+func apiAcceptMember(_ groupId: Int64, _ groupMemberId: Int64, _ memberRole: GroupMemberRole, allowLargeGroup: Bool = false) async throws -> (GroupInfo, GroupMember) {
+    _ = try await apiRequireXauXatGroupCapacity(groupId, allowLargeGroup: allowLargeGroup)
     let r: ChatResponse2 = try await chatSendCmd(.apiAcceptMember(groupId: groupId, groupMemberId: groupMemberId, memberRole: memberRole))
     if case let .memberAccepted(_, groupInfo, member) = r { return (groupInfo, member) }
     throw r.unexpected
@@ -2244,7 +2256,7 @@ func filterMembersToAdd(_ ms: [GMember]) -> [Contact] {
 }
 
 func apiUpdateGroup(_ groupId: Int64, _ groupProfile: GroupProfile) async throws -> GroupInfo {
-    let r: ChatResponse2 = try await chatSendCmd(.apiUpdateGroupProfile(groupId: groupId, groupProfile: xauxatFreeGroupProfile(groupProfile)))
+    let r: ChatResponse2 = try await chatSendCmd(.apiUpdateGroupProfile(groupId: groupId, groupProfile: xauxatPrivateGroupProfile(groupProfile)))
     if case let .groupUpdated(_, toGroup) = r { return toGroup }
     throw r.unexpected
 }
@@ -2262,9 +2274,9 @@ func apiSetPublicGroupAccess(_ groupId: Int64, access: PublicGroupAccess) async 
     throw r.unexpected
 }
 
-func apiCreateGroupLink(_ groupId: Int64, memberRole: GroupMemberRole = .member, enforceFreeGroupLimit: Bool = true) async throws -> GroupLink? {
-    if enforceFreeGroupLimit {
-        _ = try await apiRequireXauXatFreeGroupCapacity(groupId)
+func apiCreateGroupLink(_ groupId: Int64, memberRole: GroupMemberRole = .member, enforceGroupLimit: Bool = true, allowLargeGroup: Bool = false) async throws -> GroupLink? {
+    if enforceGroupLimit {
+        _ = try await apiRequireXauXatGroupCapacity(groupId, allowLargeGroup: allowLargeGroup)
     }
     let r: APIResult<ChatResponse2>? = await chatApiSendCmdWithRetry(.apiCreateGroupLink(groupId: groupId, memberRole: memberRole))
     if case let .result(.groupLinkCreated(_, _, groupLink)) = r { return groupLink }

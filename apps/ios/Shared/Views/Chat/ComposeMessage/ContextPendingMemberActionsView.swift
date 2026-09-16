@@ -11,11 +11,12 @@ import SimpleXChat
 
 struct ContextPendingMemberActionsView: View {
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     @Environment(\.dismiss) var dismiss
     var groupInfo: GroupInfo
     var member: GroupMember
     @UserDefault(DEFAULT_TOOLBAR_MATERIAL) private var toolbarMaterial = ToolbarMaterial.defaultMaterial
-    @State private var freeCapacity: XauXatFreeGroupCapacity?
+    @State private var groupCapacity: XauXatGroupCapacity?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -29,15 +30,15 @@ struct ContextPendingMemberActionsView: View {
                 showRejectMemberAlert(groupInfo, member, dismiss: dismiss)
             }
 
-            if let freeCapacity {
+            if let groupCapacity {
                 ZStack {
-                    Text(freeCapacity.isFull ? "Free limit reached" : "Accept")
-                        .foregroundColor(freeCapacity.isFull ? theme.colors.secondary : theme.colors.primary)
+                    Text(groupCapacity.isFull ? "Plan limit reached" : "Accept")
+                        .foregroundColor(groupCapacity.isFull ? theme.colors.secondary : theme.colors.primary)
                 }
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    if !freeCapacity.isFull {
+                    if !groupCapacity.isFull {
                         showAcceptMemberAlert(groupInfo, member, dismiss: dismiss)
                     }
                 }
@@ -50,7 +51,10 @@ struct ContextPendingMemberActionsView: View {
         .frame(maxWidth: .infinity)
         .background(ToolbarMaterial.material(toolbarMaterial))
         .task {
-            freeCapacity = try? await apiXauXatFreeGroupCapacity(groupInfo.groupId)
+            groupCapacity = try? await apiXauXatGroupCapacity(
+                groupInfo.groupId,
+                allowLargeGroup: plusEntitlements.isAuthorized(for: .largeGroups)
+            )
         }
     }
 }
@@ -64,7 +68,9 @@ func showRejectMemberAlert(_ groupInfo: GroupInfo, _ member: GroupMember, dismis
     )
 }
 
+@MainActor
 func showAcceptMemberAlert(_ groupInfo: GroupInfo, _ member: GroupMember, dismiss: DismissAction? = nil) {
+    let allowLargeGroup = XauXatPlusEntitlements.shared.isAuthorized(for: .largeGroups)
     showAlert(
         NSLocalizedString("Accept member", comment: "alert title"),
         message: NSLocalizedString("Member will join the group, accept member?", comment: "alert message"),
@@ -73,14 +79,14 @@ func showAcceptMemberAlert(_ groupInfo: GroupInfo, _ member: GroupMember, dismis
                 title: NSLocalizedString("Accept as member", comment: "alert action"),
                 style: .default,
                 handler: { _ in
-                    acceptMember(groupInfo, member, .member, dismiss: dismiss)
+                    acceptMember(groupInfo, member, .member, allowLargeGroup: allowLargeGroup, dismiss: dismiss)
                 }
             ),
             UIAlertAction(
                 title: NSLocalizedString("Accept as observer", comment: "alert action"),
                 style: .default,
                 handler: { _ in
-                    acceptMember(groupInfo, member, .observer, dismiss: dismiss)
+                    acceptMember(groupInfo, member, .observer, allowLargeGroup: allowLargeGroup, dismiss: dismiss)
                 }
             ),
             cancelAlertAction
@@ -88,10 +94,16 @@ func showAcceptMemberAlert(_ groupInfo: GroupInfo, _ member: GroupMember, dismis
     )
 }
 
-func acceptMember(_ groupInfo: GroupInfo, _ member: GroupMember, _ role: GroupMemberRole, dismiss: DismissAction? = nil) {
+@MainActor
+func acceptMember(_ groupInfo: GroupInfo, _ member: GroupMember, _ role: GroupMemberRole, allowLargeGroup: Bool, dismiss: DismissAction? = nil) {
     Task {
         do {
-            let (gInfo, acceptedMember) = try await apiAcceptMember(groupInfo.groupId, member.groupMemberId, role)
+            let (gInfo, acceptedMember) = try await apiAcceptMember(
+                groupInfo.groupId,
+                member.groupMemberId,
+                role,
+                allowLargeGroup: allowLargeGroup
+            )
             await MainActor.run {
                 _ = ChatModel.shared.upsertGroupMember(gInfo, acceptedMember)
                 ChatModel.shared.updateGroup(gInfo)
