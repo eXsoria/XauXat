@@ -965,6 +965,11 @@ private struct ConnectView: View {
                 Button {
                     if let str = UIPasteboard.general.string {
                         let candidate = str.trimmingCharacters(in: .whitespaces)
+                        if xauXatIsProtectedGroupInviteLink(candidate) {
+                            pastedLink = candidate
+                            connect(candidate)
+                            return
+                        }
                         switch strConnectTarget(candidate) {
                         case let .link(text, _, _):
                             pastedLink = text
@@ -1002,7 +1007,7 @@ private struct ConnectView: View {
         switch resp {
         case let .success(r):
             let link = r.string
-            if strIsSimplexLink(r.string) {
+            if strIsSimplexLink(r.string) || xauXatIsProtectedGroupInviteLink(r.string) {
                 connect(link)
             } else {
                 alert = .newChatSomeAlert(alert: SomeAlert(
@@ -1652,6 +1657,77 @@ private func showOpenKnownGroupAlert(
     )
 }
 
+@MainActor
+private func requestXauXatGroupAccessCode(
+    protectedLink: String,
+    linkOwnerSig: LinkOwnerSig?,
+    theme: AppTheme,
+    dismiss: Bool,
+    cleanup: (() -> Void)?,
+    filterKnownContact: ((Contact) -> Void)?,
+    filterKnownGroup: ((GroupInfo) -> Void)?
+) {
+    guard let topController = getTopViewController() else {
+        cleanup?()
+        return
+    }
+    let alert = UIAlertController(
+        title: NSLocalizedString("Group access code", comment: "protected group invite title"),
+        message: NSLocalizedString("Enter the code shared separately by the group admin. The code is checked locally and is never sent.", comment: "protected group invite message"),
+        preferredStyle: .alert
+    )
+    alert.addTextField { field in
+        field.placeholder = NSLocalizedString("XXXX-XXXX-XXXX", comment: "protected group code placeholder")
+        field.isSecureTextEntry = true
+        field.textContentType = .oneTimeCode
+        field.autocapitalizationType = .allCharacters
+        field.autocorrectionType = .no
+    }
+    alert.addAction(UIAlertAction(title: NSLocalizedString("Cancel", comment: "alert button"), style: .cancel) { _ in
+        cleanup?()
+    })
+    alert.addAction(UIAlertAction(title: NSLocalizedString("Unlock", comment: "protected group invite action"), style: .default) { _ in
+        let code = alert.textFields?.first?.text ?? ""
+        Task {
+            let result = await Task.detached {
+                xauXatUnlockProtectedGroupInvite(protectedLink, accessCode: code)
+            }.value
+            await MainActor.run {
+                switch result {
+                case let .unlocked(link):
+                    planAndConnect(
+                        link,
+                        linkOwnerSig: linkOwnerSig,
+                        theme: theme,
+                        dismiss: dismiss,
+                        cleanup: cleanup,
+                        filterKnownContact: filterKnownContact,
+                        filterKnownGroup: filterKnownGroup
+                    )
+                case let .incorrectCode(retryAfter), let .rateLimited(retryAfter):
+                    showAlert(
+                        NSLocalizedString("Access denied", comment: "protected group invite error title"),
+                        message: String.localizedStringWithFormat(
+                            NSLocalizedString("The code is incorrect. Try again in %d second(s).", comment: "protected group invite retry message"),
+                            retryAfter
+                        )
+                    )
+                    cleanup?()
+                case .invalid:
+                    showAlert(
+                        NSLocalizedString("Invalid protected invite", comment: "protected group invite error title"),
+                        message: NSLocalizedString("This protected group link is damaged or unsupported.", comment: "protected group invite error message")
+                    )
+                    cleanup?()
+                case .notProtected:
+                    cleanup?()
+                }
+            }
+        }
+    })
+    topController.present(alert, animated: true)
+}
+
 // Spec: spec/client/navigation.md#planAndConnect
 func planAndConnect(
     _ shortOrFullLink: String,
@@ -1662,6 +1738,20 @@ func planAndConnect(
     filterKnownContact: ((Contact) -> Void)? = nil,
     filterKnownGroup: ((GroupInfo) -> Void)? = nil
 ) {
+    if xauXatIsProtectedGroupInviteLink(shortOrFullLink) {
+        Task { @MainActor in
+            requestXauXatGroupAccessCode(
+                protectedLink: shortOrFullLink,
+                linkOwnerSig: linkOwnerSig,
+                theme: theme,
+                dismiss: dismiss,
+                cleanup: cleanup,
+                filterKnownContact: filterKnownContact,
+                filterKnownGroup: filterKnownGroup
+            )
+        }
+        return
+    }
     let effectiveLink: String
     let xauXatExpiresAt: Date?
     let xauXatPermissions: XauXatContactInvitePermissions?

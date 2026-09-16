@@ -717,6 +717,18 @@ struct ChatListSearchBar: View {
                 ignoreSearchTextChange = false
             } else {
                 let s = t.trimmingCharacters(in: .whitespaces)
+                if xauXatIsProtectedGroupInviteLink(s) {
+                    nameSearchTask?.cancel()
+                    nameSearchTask = nil
+                    searchFocussed = false
+                    ignoreSearchTextChange = true
+                    searchText = s
+                    searchShowingSimplexLink = true
+                    searchChatFilteredBySimplexLink = []
+                    connectNameCandidate = nil
+                    connect(s)
+                    return
+                }
                 switch strConnectTarget(s) {
                 case let .link(_, _, linkText):
                     nameSearchTask?.cancel()

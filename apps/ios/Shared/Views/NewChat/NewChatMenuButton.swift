@@ -408,6 +408,16 @@ struct ContactsListSearchBar: View {
                 ignoreSearchTextChange = false
             } else {
                 let s = t.trimmingCharacters(in: .whitespaces)
+                if xauXatIsProtectedGroupInviteLink(s) {
+                    searchFocussed = false
+                    ignoreSearchTextChange = true
+                    searchText = s
+                    searchShowingSimplexLink = true
+                    searchChatFilteredBySimplexLink = nil
+                    connectNameCandidate = nil
+                    connect(s)
+                    return
+                }
                 switch strConnectTarget(s) {
                 case let .link(_, _, linkText):
                     searchFocussed = false
