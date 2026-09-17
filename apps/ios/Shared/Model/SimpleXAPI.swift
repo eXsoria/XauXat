@@ -2554,7 +2554,10 @@ func getUserChatData() throws {
     let chats = try apiGetChats()
     let tags = try apiGetChatTags()
     m.updateChats(chats)
-    Task { await expirePendingXauXatContactInvites() }
+    Task {
+        await expirePendingXauXatContactInvites()
+        await expirePendingXauXatGroupAccesses()
+    }
     let tm = ChatTagsModel.shared
     tm.activeFilter = nil
     tm.userTags = tags
@@ -2578,6 +2581,7 @@ private func getUserChatDataAsync(keepingChatId: String?) async throws {
             tm.updateChatTags(m.chats)
         }
         await expirePendingXauXatContactInvites()
+        await expirePendingXauXatGroupAccesses()
     } else {
         await MainActor.run {
             m.userAddress = nil
@@ -3275,6 +3279,35 @@ func expirePendingXauXatContactInvites() async {
             await MainActor.run { ChatModel.shared.removeChat(contact.id) }
         } else if policy.state == .active {
             _ = xauXatSetContactInviteState(connectionId: connectionId, state: .used)
+        }
+    }
+}
+
+func expirePendingXauXatGroupAccesses() async {
+    let expiredProtectedLinks = xauXatGroupAccessPolicies().filter { $0.isExpired() }
+    for policy in expiredProtectedLinks {
+        do {
+            try await apiDeleteGroupLink(policy.groupId)
+            _ = xauXatRemoveGroupAccessPolicy(groupId: policy.groupId)
+        } catch {
+            // Keep the expired policy locally. Its authenticated envelope still
+            // rejects access, and cleanup will be retried after connectivity returns.
+            logger.warning("Unable to remove expired protected group access: \(responseError(error))")
+        }
+    }
+
+    let expiredOneTimeInvites = xauXatOneTimeGroupInvites().filter {
+        $0.state == .expired && $0.coreAccessDeletedAt == nil
+    }
+    for invite in expiredOneTimeInvites {
+        do {
+            try await apiDeleteChat(type: .contactConnection, id: invite.connectionId)
+            _ = xauXatMarkOneTimeGroupInviteCoreDeleted(connectionId: invite.connectionId)
+            await MainActor.run { ChatModel.shared.removeChat(":\(invite.connectionId)") }
+        } catch {
+            // The signed or encrypted public envelope rejects the expired access
+            // even while deletion of the pending SimpleX connection is retried.
+            logger.warning("Unable to remove expired one-time group access: \(responseError(error))")
         }
     }
 }

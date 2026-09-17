@@ -203,6 +203,7 @@ struct SimpleXApp: App {
             let chats = try await apiGetChatsAsync()
             await MainActor.run { chatModel.updateChats(chats) }
             await expirePendingXauXatContactInvites()
+            await expirePendingXauXatGroupAccesses()
             if let id = chatModel.chatId,
                let chat = chatModel.getChat(id),
                !NtfManager.shared.navigatingToChat {

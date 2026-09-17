@@ -1713,6 +1713,12 @@ private func requestXauXatGroupAccessCode(
                         )
                     )
                     cleanup?()
+                case .expired:
+                    showAlert(
+                        NSLocalizedString("Group access expired", comment: "protected group invite error title"),
+                        message: NSLocalizedString("Ask the group admin for a new access link.", comment: "protected group invite expired message")
+                    )
+                    cleanup?()
                 case .invalid:
                     showAlert(
                         NSLocalizedString("Invalid protected invite", comment: "protected group invite error title"),
