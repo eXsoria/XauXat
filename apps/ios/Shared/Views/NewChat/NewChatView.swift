@@ -1758,16 +1758,16 @@ func planAndConnect(
         }
         return
     }
-    let effectiveLink: String
+    let effectiveLinks: [String]
     let xauXatExpiresAt: Date?
     let xauXatPermissions: XauXatContactInvitePermissions?
     switch xauXatValidateContactInviteLink(shortOrFullLink) {
     case .notEnvelope:
-        effectiveLink = shortOrFullLink
+        effectiveLinks = [shortOrFullLink]
         xauXatExpiresAt = nil
         xauXatPermissions = nil
     case let .valid(links, expiresAt, permissions):
-        effectiveLink = links.randomElement() ?? links[0]
+        effectiveLinks = links.shuffled()
         xauXatExpiresAt = expiresAt
         xauXatPermissions = permissions
     case let .expired(_, expiresAt):
@@ -1785,6 +1785,10 @@ func planAndConnect(
             NSLocalizedString("Invalid invite", comment: "alert title"),
             message: NSLocalizedString("The XauXat invite signature could not be verified.", comment: "invalid invite alert")
         )
+        cleanup?()
+        return
+    }
+    guard let effectiveLink = effectiveLinks.first else {
         cleanup?()
         return
     }
@@ -1812,7 +1816,17 @@ func planAndConnect(
 
     func connectTask(_ inProgress: BoxedValue<Bool>) {
         Task {
-            let result = await apiConnectPlan(connLink: effectiveLink, linkOwnerSig: linkOwnerSig, inProgress: inProgress)
+            var result: ConnectionPlanResult?
+            var fallbackResult: ConnectionPlanResult?
+            for candidate in effectiveLinks where inProgress.boxedValue {
+                guard let candidateResult = await apiConnectPlan(connLink: candidate, linkOwnerSig: linkOwnerSig, inProgress: inProgress) else { continue }
+                fallbackResult = fallbackResult ?? candidateResult
+                if effectiveLinks.count == 1 || xauXatBundleCandidateIsAvailable(candidateResult.connectionPlan) {
+                    result = candidateResult
+                    break
+                }
+            }
+            result = result ?? fallbackResult
             await MainActor.run {
                 ConnectProgressManager.shared.stopConnectProgress()
             }
@@ -2130,6 +2144,12 @@ func planAndConnect(
             }
         }
     }
+}
+
+private func xauXatBundleCandidateIsAvailable(_ plan: ConnectionPlan) -> Bool {
+    guard case let .invitationLink(invitationPlan) = plan else { return true }
+    if case .ok = invitationPlan { return true }
+    return false
 }
 
 private func connectContactViaAddress_(_ contact: Contact, dismiss: Bool, incognito: Bool, cleanup: (() -> Void)? = nil) {

@@ -576,6 +576,8 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
     public let accessCodeIsOneTime: Bool?
     public let createdAt: Date
     public let expiresAt: Date?
+    public let bundleId: String?
+    public let maxUses: Int?
     public var state: XauXatOneTimeGroupInviteState
     public var contactId: Int64?
     public var consumedAt: Date?
@@ -597,6 +599,8 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
         accessCodeIsOneTime: Bool = false,
         createdAt: Date = .now,
         expiresAt: Date? = nil,
+        bundleId: String? = nil,
+        maxUses: Int? = nil,
         state: XauXatOneTimeGroupInviteState = .active,
         contactId: Int64? = nil,
         consumedAt: Date? = nil,
@@ -613,6 +617,8 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
         self.accessCodeIsOneTime = accessCodeIsOneTime
         self.createdAt = createdAt
         self.expiresAt = expiresAt
+        self.bundleId = bundleId
+        self.maxUses = maxUses
         self.state = state
         self.contactId = contactId
         self.consumedAt = consumedAt
@@ -701,6 +707,25 @@ public func xauXatSaveOneTimeGroupInvite(_ invite: XauXatOneTimeGroupInvite) -> 
     return xauXatWriteOneTimeGroupInvites(invites)
 }
 
+@discardableResult
+public func xauXatSaveOneTimeGroupInvites(_ newInvites: [XauXatOneTimeGroupInvite]) -> Bool {
+    guard !newInvites.isEmpty else { return false }
+    xauXatOneTimeGroupInvitesLock.lock()
+    defer { xauXatOneTimeGroupInvitesLock.unlock() }
+    var invites = xauXatReadOneTimeGroupInvites()
+    for invite in newInvites {
+        invites[invite.connectionId] = invite
+    }
+    return xauXatWriteOneTimeGroupInvites(invites)
+}
+
+public func xauXatOneTimeGroupInviteBundle(connectionId: Int64) -> [XauXatOneTimeGroupInvite] {
+    let invites = xauXatOneTimeGroupInvites()
+    guard let invite = invites.first(where: { $0.connectionId == connectionId }),
+          let bundleId = invite.bundleId else { return invites.filter { $0.connectionId == connectionId } }
+    return invites.filter { $0.bundleId == bundleId && $0.groupId == invite.groupId }
+}
+
 public func xauXatClaimOneTimeGroupInvite(connectionId: Int64, contactId: Int64, at now: Date = .now) -> XauXatOneTimeGroupInvite? {
     xauXatOneTimeGroupInvitesLock.lock()
     defer { xauXatOneTimeGroupInvitesLock.unlock() }
@@ -761,6 +786,30 @@ public func xauXatRevokeOneTimeGroupInvite(connectionId: Int64) -> Bool {
     if invite.usesOneTimeAccessCode { invite.accessCode = nil }
     invites[connectionId] = invite
     return xauXatWriteOneTimeGroupInvites(invites)
+}
+
+@discardableResult
+public func xauXatRevokeOneTimeGroupInviteBundle(connectionId: Int64, at now: Date = .now) -> [Int64] {
+    xauXatOneTimeGroupInvitesLock.lock()
+    defer { xauXatOneTimeGroupInvitesLock.unlock() }
+    var invites = xauXatReadOneTimeGroupInvites()
+    guard let selected = invites[connectionId] else { return [] }
+    let targets = invites.values.filter {
+        if let bundleId = selected.bundleId { return $0.bundleId == bundleId && $0.groupId == selected.groupId }
+        return $0.connectionId == connectionId
+    }
+    var revoked: [Int64] = []
+    for target in targets where target.state == .active || target.state == .failed {
+        var invite = target
+        invite.state = .revoked
+        invite.coreAccessDeletedAt = now
+        invite.shareLink = nil
+        if invite.usesOneTimeAccessCode { invite.accessCode = nil }
+        invites[invite.connectionId] = invite
+        revoked.append(invite.connectionId)
+    }
+    guard !revoked.isEmpty, xauXatWriteOneTimeGroupInvites(invites) else { return [] }
+    return revoked
 }
 
 @discardableResult
