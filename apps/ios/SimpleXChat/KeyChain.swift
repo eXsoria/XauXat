@@ -570,7 +570,7 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
     public let groupId: Int64
     public let groupDisplayName: String
     public let memberRole: GroupMemberRole
-    public let shareLink: String
+    public var shareLink: String?
     public var accessCode: String?
     public let accessCodeIsOneTime: Bool?
     public let createdAt: Date
@@ -662,7 +662,18 @@ public func xauXatOneTimeGroupInvites(groupId: Int64? = nil, at now: Date = .now
     for (connectionId, var invite) in invites {
         if invite.state == .active, let expiresAt = invite.expiresAt, expiresAt <= now {
             invite.state = .expired
+            invite.shareLink = nil
             if invite.usesOneTimeAccessCode { invite.accessCode = nil }
+            invites[connectionId] = invite
+            changed = true
+        } else if invite.state == .processing,
+                  let consumedAt = invite.consumedAt,
+                  now.timeIntervalSince(consumedAt) >= 120 {
+            invite.state = .failed
+            invite.lastError = NSLocalizedString(
+                "Group invitation delivery was interrupted. Retry is safe and does not reactivate the public link.",
+                comment: "one-time group invite interrupted delivery"
+            )
             invites[connectionId] = invite
             changed = true
         }
@@ -702,6 +713,7 @@ public func xauXatClaimOneTimeGroupInvite(connectionId: Int64, contactId: Int64,
     invite.contactId = contactId
     invite.consumedAt = invite.consumedAt ?? now
     invite.lastError = nil
+    invite.shareLink = nil
     if invite.usesOneTimeAccessCode { invite.accessCode = nil }
     invites[connectionId] = invite
     guard xauXatWriteOneTimeGroupInvites(invites) else { return nil }
@@ -740,6 +752,7 @@ public func xauXatRevokeOneTimeGroupInvite(connectionId: Int64) -> Bool {
     var invites = xauXatReadOneTimeGroupInvites()
     guard var invite = invites[connectionId], invite.state == .active || invite.state == .failed else { return false }
     invite.state = .revoked
+    invite.shareLink = nil
     if invite.usesOneTimeAccessCode { invite.accessCode = nil }
     invites[connectionId] = invite
     return xauXatWriteOneTimeGroupInvites(invites)
