@@ -34,6 +34,8 @@ private let PRIMARY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM: String = "expiredCont
 private let DECOY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM: String = "expiredContactInviteEnvelopes.localProfile"
 private let PRIMARY_GROUP_ACCESS_POLICIES_ITEM: String = "groupAccessPolicies"
 private let DECOY_GROUP_ACCESS_POLICIES_ITEM: String = "groupAccessPolicies.localProfile"
+private let PRIMARY_ONE_TIME_GROUP_INVITES_ITEM: String = "oneTimeGroupInvites"
+private let DECOY_ONE_TIME_GROUP_INVITES_ITEM: String = "oneTimeGroupInvites.localProfile"
 private let GROUP_ACCESS_ATTEMPTS_PREFIX: String = "groupAccessAttempts"
 
 public enum XauXatStorageScope: Sendable {
@@ -82,9 +84,12 @@ private let kcPrimaryContactInvitePolicies = KeyChainItem(forKey: PRIMARY_CONTAC
 private let kcDecoyContactInvitePolicies = KeyChainItem(forKey: DECOY_CONTACT_INVITE_POLICIES_ITEM)
 private let kcPrimaryGroupAccessPolicies = KeyChainItem(forKey: PRIMARY_GROUP_ACCESS_POLICIES_ITEM)
 private let kcDecoyGroupAccessPolicies = KeyChainItem(forKey: DECOY_GROUP_ACCESS_POLICIES_ITEM)
+private let kcPrimaryOneTimeGroupInvites = KeyChainItem(forKey: PRIMARY_ONE_TIME_GROUP_INVITES_ITEM)
+private let kcDecoyOneTimeGroupInvites = KeyChainItem(forKey: DECOY_ONE_TIME_GROUP_INVITES_ITEM)
 private let xauXatContactInvitePoliciesLock = NSLock()
 private let xauXatExpiredContactInviteEnvelopesLock = NSLock()
 private let xauXatGroupAccessPoliciesLock = NSLock()
+private let xauXatOneTimeGroupInvitesLock = NSLock()
 private let kcPrimaryExpiredContactInviteEnvelopes = KeyChainItem(forKey: PRIMARY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM)
 private let kcDecoyExpiredContactInviteEnvelopes = KeyChainItem(forKey: DECOY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM)
 
@@ -549,6 +554,198 @@ public func xauXatContactInvitePermissions(connectionId: Int64) -> XauXatContact
 public func xauXatContactInvitePermissions(_ contact: Contact) -> XauXatContactInvitePermissions {
     guard let connectionId = contact.activeConn?.connId else { return .init() }
     return xauXatContactInvitePermissions(connectionId: connectionId)
+}
+
+public enum XauXatOneTimeGroupInviteState: String, Codable, Hashable {
+    case active
+    case processing
+    case consumed
+    case failed
+    case revoked
+    case expired
+}
+
+public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
+    public let connectionId: Int64
+    public let groupId: Int64
+    public let groupDisplayName: String
+    public let memberRole: GroupMemberRole
+    public let shareLink: String
+    public let accessCode: String?
+    public let createdAt: Date
+    public let expiresAt: Date?
+    public var state: XauXatOneTimeGroupInviteState
+    public var contactId: Int64?
+    public var consumedAt: Date?
+    public var groupInvitationSentAt: Date?
+    public var lastError: String?
+
+    public var id: Int64 { connectionId }
+    public var isProtected: Bool { accessCode != nil }
+
+    public init(
+        connectionId: Int64,
+        groupId: Int64,
+        groupDisplayName: String,
+        memberRole: GroupMemberRole,
+        shareLink: String,
+        accessCode: String?,
+        createdAt: Date = .now,
+        expiresAt: Date? = nil,
+        state: XauXatOneTimeGroupInviteState = .active,
+        contactId: Int64? = nil,
+        consumedAt: Date? = nil,
+        groupInvitationSentAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.connectionId = connectionId
+        self.groupId = groupId
+        self.groupDisplayName = groupDisplayName
+        self.memberRole = memberRole
+        self.shareLink = shareLink
+        self.accessCode = accessCode
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.state = state
+        self.contactId = contactId
+        self.consumedAt = consumedAt
+        self.groupInvitationSentAt = groupInvitationSentAt
+        self.lastError = lastError
+    }
+}
+
+public extension Notification.Name {
+    static let xauXatOneTimeGroupInvitesChanged = Notification.Name("xauXatOneTimeGroupInvitesChanged")
+}
+
+private var kcOneTimeGroupInvites: KeyChainItem {
+    xauXatStorageScope() == .decoy ? kcDecoyOneTimeGroupInvites : kcPrimaryOneTimeGroupInvites
+}
+
+private func xauXatReadOneTimeGroupInvites() -> [Int64: XauXatOneTimeGroupInvite] {
+    guard let value = kcOneTimeGroupInvites.get(),
+          let data = value.data(using: .utf8),
+          let invites = try? JSONDecoder().decode([String: XauXatOneTimeGroupInvite].self, from: data) else { return [:] }
+    return Dictionary(uniqueKeysWithValues: invites.compactMap { key, value in
+        Int64(key).map { ($0, value) }
+    })
+}
+
+@discardableResult
+private func xauXatWriteOneTimeGroupInvites(_ invites: [Int64: XauXatOneTimeGroupInvite]) -> Bool {
+    let saved: Bool
+    if invites.isEmpty {
+        saved = kcOneTimeGroupInvites.remove()
+    } else {
+        let encoded = Dictionary(uniqueKeysWithValues: invites.map { (String($0.key), $0.value) })
+        guard let data = try? JSONEncoder().encode(encoded),
+              let value = String(data: data, encoding: .utf8) else { return false }
+        saved = kcOneTimeGroupInvites.set(value)
+    }
+    if saved {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .xauXatOneTimeGroupInvitesChanged, object: nil)
+        }
+    }
+    return saved
+}
+
+public func xauXatOneTimeGroupInvites(groupId: Int64? = nil, at now: Date = .now) -> [XauXatOneTimeGroupInvite] {
+    xauXatOneTimeGroupInvitesLock.lock()
+    defer { xauXatOneTimeGroupInvitesLock.unlock() }
+    var invites = xauXatReadOneTimeGroupInvites()
+    var changed = false
+    for (connectionId, var invite) in invites {
+        if invite.state == .active, let expiresAt = invite.expiresAt, expiresAt <= now {
+            invite.state = .expired
+            invites[connectionId] = invite
+            changed = true
+        }
+    }
+    if changed { _ = xauXatWriteOneTimeGroupInvites(invites) }
+    return invites.values
+        .filter { groupId == nil || $0.groupId == groupId }
+        .sorted { $0.createdAt > $1.createdAt }
+}
+
+public func xauXatOneTimeGroupInvite(connectionId: Int64) -> XauXatOneTimeGroupInvite? {
+    xauXatOneTimeGroupInvites(groupId: nil).first { $0.connectionId == connectionId }
+}
+
+@discardableResult
+public func xauXatSaveOneTimeGroupInvite(_ invite: XauXatOneTimeGroupInvite) -> Bool {
+    xauXatOneTimeGroupInvitesLock.lock()
+    defer { xauXatOneTimeGroupInvitesLock.unlock() }
+    var invites = xauXatReadOneTimeGroupInvites()
+    invites[invite.connectionId] = invite
+    return xauXatWriteOneTimeGroupInvites(invites)
+}
+
+public func xauXatClaimOneTimeGroupInvite(connectionId: Int64, contactId: Int64, at now: Date = .now) -> XauXatOneTimeGroupInvite? {
+    xauXatOneTimeGroupInvitesLock.lock()
+    defer { xauXatOneTimeGroupInvitesLock.unlock() }
+    var invites = xauXatReadOneTimeGroupInvites()
+    guard var invite = invites[connectionId] else { return nil }
+    if invite.state == .active, let expiresAt = invite.expiresAt, expiresAt <= now {
+        invite.state = .expired
+        invites[connectionId] = invite
+        _ = xauXatWriteOneTimeGroupInvites(invites)
+        return nil
+    }
+    guard invite.state == .active || (invite.state == .failed && invite.contactId == contactId) else { return nil }
+    invite.state = .processing
+    invite.contactId = contactId
+    invite.consumedAt = invite.consumedAt ?? now
+    invite.lastError = nil
+    invites[connectionId] = invite
+    guard xauXatWriteOneTimeGroupInvites(invites) else { return nil }
+    return invite
+}
+
+@discardableResult
+public func xauXatCompleteOneTimeGroupInvite(connectionId: Int64, at now: Date = .now) -> Bool {
+    xauXatOneTimeGroupInvitesLock.lock()
+    defer { xauXatOneTimeGroupInvitesLock.unlock() }
+    var invites = xauXatReadOneTimeGroupInvites()
+    guard var invite = invites[connectionId], invite.state == .processing else { return false }
+    invite.state = .consumed
+    invite.groupInvitationSentAt = now
+    invite.lastError = nil
+    invites[connectionId] = invite
+    return xauXatWriteOneTimeGroupInvites(invites)
+}
+
+@discardableResult
+public func xauXatFailOneTimeGroupInvite(connectionId: Int64, error: String) -> Bool {
+    xauXatOneTimeGroupInvitesLock.lock()
+    defer { xauXatOneTimeGroupInvitesLock.unlock() }
+    var invites = xauXatReadOneTimeGroupInvites()
+    guard var invite = invites[connectionId], invite.state == .processing else { return false }
+    invite.state = .failed
+    invite.lastError = error
+    invites[connectionId] = invite
+    return xauXatWriteOneTimeGroupInvites(invites)
+}
+
+@discardableResult
+public func xauXatRevokeOneTimeGroupInvite(connectionId: Int64) -> Bool {
+    xauXatOneTimeGroupInvitesLock.lock()
+    defer { xauXatOneTimeGroupInvitesLock.unlock() }
+    var invites = xauXatReadOneTimeGroupInvites()
+    guard var invite = invites[connectionId], invite.state == .active || invite.state == .failed else { return false }
+    invite.state = .revoked
+    invites[connectionId] = invite
+    return xauXatWriteOneTimeGroupInvites(invites)
+}
+
+@discardableResult
+public func xauXatRemoveOneTimeGroupInvites(_ scope: XauXatStorageScope) -> Bool {
+    xauXatOneTimeGroupInvitesLock.lock()
+    defer { xauXatOneTimeGroupInvitesLock.unlock() }
+    switch scope {
+    case .primary: return kcPrimaryOneTimeGroupInvites.remove()
+    case .decoy: return kcDecoyOneTimeGroupInvites.remove()
+    }
 }
 
 public struct XauXatGroupAccessPolicy: Codable, Hashable, Sendable {

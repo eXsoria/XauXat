@@ -2649,6 +2649,7 @@ func processReceivedMsg(_ res: ChatEvent) async {
     case let .contactConnected(user, contact, _):
         if await rejectExpiredContactInvite(contact) { return }
         markContactInviteUsed(contact)
+        await fulfillXauXatOneTimeGroupInvite(contact)
         if active(user) && contact.directOrUsed {
             await MainActor.run {
                 m.updateContact(contact)
@@ -2680,6 +2681,7 @@ func processReceivedMsg(_ res: ChatEvent) async {
     case let .contactSndReady(user, contact):
         if await rejectExpiredContactInvite(contact) { return }
         markContactInviteUsed(contact)
+        await fulfillXauXatOneTimeGroupInvite(contact)
         if active(user) && contact.directOrUsed {
             await MainActor.run {
                 m.updateContact(contact)
@@ -3182,6 +3184,36 @@ func processReceivedMsg(_ res: ChatEvent) async {
 private func markContactInviteUsed(_ contact: Contact) {
     guard let connectionId = contact.activeConn?.connId else { return }
     _ = xauXatSetContactInviteState(connectionId: connectionId, state: .used)
+}
+
+private func fulfillXauXatOneTimeGroupInvite(_ contact: Contact) async {
+    guard let connectionId = contact.activeConn?.connId else { return }
+    await fulfillXauXatOneTimeGroupInvite(connectionId: connectionId, contactId: contact.apiId)
+}
+
+func fulfillXauXatOneTimeGroupInvite(connectionId: Int64, contactId: Int64) async {
+    guard let invite = xauXatClaimOneTimeGroupInvite(connectionId: connectionId, contactId: contactId) else { return }
+    let allowLargeGroup = await MainActor.run {
+        XauXatPlusEntitlements.shared.isAuthorized(for: .largeGroups)
+    }
+    do {
+        let member = try await apiAddMember(
+            invite.groupId,
+            contactId,
+            invite.memberRole,
+            allowLargeGroup: allowLargeGroup
+        )
+        _ = xauXatCompleteOneTimeGroupInvite(connectionId: connectionId)
+        await MainActor.run {
+            guard let chat = ChatModel.shared.getGroupChat(invite.groupId),
+                  case let .group(groupInfo, _) = chat.chatInfo else { return }
+            _ = ChatModel.shared.upsertGroupMember(groupInfo, member)
+        }
+    } catch {
+        let message = responseError(error)
+        _ = xauXatFailOneTimeGroupInvite(connectionId: connectionId, error: message)
+        logger.error("fulfillXauXatOneTimeGroupInvite: \(message)")
+    }
 }
 
 private func rejectExpiredContactInvite(_ contact: Contact) async -> Bool {
