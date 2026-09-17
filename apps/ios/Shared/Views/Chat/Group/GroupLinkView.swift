@@ -33,6 +33,7 @@ struct GroupLinkView: View {
     @State private var preparingProtectedAccess = false
     @State private var oneTimeInvites: [XauXatOneTimeGroupInvite] = []
     @State private var creatingOneTimeInvite = false
+    @State private var protectOneTimeInviteWithCode = false
 
     private enum GroupLinkAlert: Identifiable {
         case deleteLink
@@ -221,6 +222,7 @@ struct GroupLinkView: View {
             }
             .task {
                 groupAccessPolicy = xauXatGroupAccessPolicy(groupId: groupId)
+                protectOneTimeInviteWithCode = groupAccessPolicy != nil
                 refreshOneTimeInvites()
                 await prepareGroupLinkView()
                 refreshProtectedAccessLinkIfNeeded()
@@ -309,6 +311,12 @@ struct GroupLinkView: View {
     @ViewBuilder
     private func oneTimeGroupInviteRows() -> some View {
         if canUseOneTimeGroupInvites {
+            if !oneTimeInvites.contains(where: { $0.state == .active || $0.state == .processing }) {
+                Toggle("Protect with a one-time code", isOn: $protectOneTimeInviteWithCode)
+                Text("The code unlocks only this access and is erased locally as soon as the SimpleX invitation is used.")
+                    .font(.caption)
+                    .foregroundColor(theme.colors.secondary)
+            }
             if let activeInvite = oneTimeInvites.first(where: { $0.state == .active }) {
                 QRCode(uri: activeInvite.shareLink)
                     .id("xauxat-one-time-group-qr-\(activeInvite.connectionId)")
@@ -379,6 +387,11 @@ struct GroupLinkView: View {
             Text("Role: \(invite.memberRole.text(isChannel: false))")
                 .font(.caption)
                 .foregroundColor(theme.colors.secondary)
+            if invite.usesOneTimeAccessCode {
+                Text("Protected by a one-time access code")
+                    .font(.caption)
+                    .foregroundColor(theme.colors.secondary)
+            }
             if let lastError = invite.lastError, invite.state == .failed {
                 Text(lastError)
                     .font(.caption)
@@ -455,7 +468,11 @@ struct GroupLinkView: View {
                     throw XauXatGroupAccessSetupError.inviteCreationFailed
                 }
                 let rawLink = createdLink.simplexChatUri(short: false)
-                let code = groupAccessPolicy?.accessCode
+                let code = protectOneTimeInviteWithCode ? xauXatGenerateGroupAccessCode() : nil
+                guard !protectOneTimeInviteWithCode || code != nil else {
+                    try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
+                    throw XauXatGroupAccessSetupError.encryptionFailed
+                }
                 let shareLink: String
                 if let code {
                     guard let protectedLink = await Task.detached(operation: {
@@ -474,7 +491,8 @@ struct GroupLinkView: View {
                     groupDisplayName: groupInfo?.displayName ?? "Group",
                     memberRole: groupLinkMemberRole,
                     shareLink: shareLink,
-                    accessCode: code
+                    accessCode: code,
+                    accessCodeIsOneTime: code != nil
                 )
                 guard xauXatSaveOneTimeGroupInvite(invite) else {
                     try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)

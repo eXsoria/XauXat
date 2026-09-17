@@ -571,7 +571,8 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
     public let groupDisplayName: String
     public let memberRole: GroupMemberRole
     public let shareLink: String
-    public let accessCode: String?
+    public var accessCode: String?
+    public let accessCodeIsOneTime: Bool?
     public let createdAt: Date
     public let expiresAt: Date?
     public var state: XauXatOneTimeGroupInviteState
@@ -581,7 +582,8 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
     public var lastError: String?
 
     public var id: Int64 { connectionId }
-    public var isProtected: Bool { accessCode != nil }
+    public var isProtected: Bool { accessCode != nil || accessCodeIsOneTime == true }
+    public var usesOneTimeAccessCode: Bool { accessCodeIsOneTime == true }
 
     public init(
         connectionId: Int64,
@@ -590,6 +592,7 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
         memberRole: GroupMemberRole,
         shareLink: String,
         accessCode: String?,
+        accessCodeIsOneTime: Bool = false,
         createdAt: Date = .now,
         expiresAt: Date? = nil,
         state: XauXatOneTimeGroupInviteState = .active,
@@ -604,6 +607,7 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
         self.memberRole = memberRole
         self.shareLink = shareLink
         self.accessCode = accessCode
+        self.accessCodeIsOneTime = accessCodeIsOneTime
         self.createdAt = createdAt
         self.expiresAt = expiresAt
         self.state = state
@@ -658,6 +662,7 @@ public func xauXatOneTimeGroupInvites(groupId: Int64? = nil, at now: Date = .now
     for (connectionId, var invite) in invites {
         if invite.state == .active, let expiresAt = invite.expiresAt, expiresAt <= now {
             invite.state = .expired
+            if invite.usesOneTimeAccessCode { invite.accessCode = nil }
             invites[connectionId] = invite
             changed = true
         }
@@ -697,6 +702,7 @@ public func xauXatClaimOneTimeGroupInvite(connectionId: Int64, contactId: Int64,
     invite.contactId = contactId
     invite.consumedAt = invite.consumedAt ?? now
     invite.lastError = nil
+    if invite.usesOneTimeAccessCode { invite.accessCode = nil }
     invites[connectionId] = invite
     guard xauXatWriteOneTimeGroupInvites(invites) else { return nil }
     return invite
@@ -734,6 +740,7 @@ public func xauXatRevokeOneTimeGroupInvite(connectionId: Int64) -> Bool {
     var invites = xauXatReadOneTimeGroupInvites()
     guard var invite = invites[connectionId], invite.state == .active || invite.state == .failed else { return false }
     invite.state = .revoked
+    if invite.usesOneTimeAccessCode { invite.accessCode = nil }
     invites[connectionId] = invite
     return xauXatWriteOneTimeGroupInvites(invites)
 }
