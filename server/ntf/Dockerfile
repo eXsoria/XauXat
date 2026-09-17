@@ -21,7 +21,10 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org \
 
 RUN git clone --filter=blob:none https://github.com/eXsoria/simplexmq.git /src/simplexmq \
     && git -C /src/simplexmq checkout "$SIMPLEXMQ_REF" \
-    && test "$(git -C /src/simplexmq rev-parse HEAD)" = "$SIMPLEXMQ_REF"
+    && test "$(git -C /src/simplexmq rev-parse HEAD)" = "$SIMPLEXMQ_REF" \
+    && git -C /src/simplexmq submodule update --init --recursive --depth 1 \
+    && test -f /src/simplexmq/cbits/blst/src/server.c \
+    && test -f /src/simplexmq/cbits/libbbs/CMakeLists.txt
 
 WORKDIR /src/simplexmq
 RUN cabal update \
