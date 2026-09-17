@@ -1,0 +1,33 @@
+name: XauXat notification server
+
+on:
+  pull_request:
+    paths:
+      - server/ntf/**
+      - .github/workflows/xauxat-ntf-server.yml
+  push:
+    branches:
+      - xauxat/main
+    paths:
+      - server/ntf/**
+      - .github/workflows/xauxat-ntf-server.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Validate deployment configuration
+        env:
+          NTF_PUBLIC_HOST: ntf.example.com
+          APNS_KEY_FILE: ./.env.example
+          APNS_KEY_ID: CI_PLACEHOLDER
+          APNS_TEAM_ID: CI_PLACEHOLDER
+        run: docker compose -f server/ntf/docker-compose.yml config --quiet
+      - name: Build pinned XauXat notification server
+        run: docker build -f server/ntf/Dockerfile -t xauxat-ntf-server:test .

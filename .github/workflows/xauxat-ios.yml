@@ -2,8 +2,6 @@ name: XauXat iOS
 
 on:
   pull_request:
-    branches:
-      - xauxat/main
     paths:
       - apps/ios/**
       - src/**

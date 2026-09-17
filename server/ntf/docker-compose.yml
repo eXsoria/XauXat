@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ntf_server_store
+      POSTGRES_USER: ntf
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - ntf-database:/var/lib/postgresql/data
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/10-xauxat-ntf.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ntf -d ntf_server_store"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - ntf-private
+
+  ntf:
+    build:
+      context: ../..
+      dockerfile: server/ntf/Dockerfile
+      args:
+        SIMPLEXMQ_REF: c5184b72cdd48d9ecede01eff4f639f9d2b0f0f4
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NTF_PUBLIC_HOST: ${NTF_PUBLIC_HOST:?set NTF_PUBLIC_HOST in server/ntf/.env}
+      NTF_DATABASE_URL: postgresql://ntf@postgres/ntf_server_store
+      APNS_KEY_FILE: /run/secrets/apns_key
+      APNS_KEY_ID: ${APNS_KEY_ID:?set APNS_KEY_ID in server/ntf/.env}
+      APNS_TEAM_ID: ${APNS_TEAM_ID:?set APNS_TEAM_ID in server/ntf/.env}
+      APNS_APP_BUNDLE_ID: pt.exsoria.xauxat
+    secrets:
+      - apns_key
+    volumes:
+      - ntf-config:/etc/opt/simplex-notifications
+      - ntf-logs:/var/opt/simplex-notifications
+    ports:
+      - "443:443"
+    healthcheck:
+      test: ["CMD-SHELL", "echo | timeout 5 openssl s_client -connect 127.0.0.1:443 -servername $$NTF_PUBLIC_HOST >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 30s
+    networks:
+      - ntf-private
+      - ntf-egress
+
+secrets:
+  apns_key:
+    file: ${APNS_KEY_FILE:?set APNS_KEY_FILE in server/ntf/.env}
+
+volumes:
+  ntf-config:
+  ntf-logs:
+  ntf-database:
+
+networks:
+  ntf-private:
+    internal: true
+  ntf-egress:

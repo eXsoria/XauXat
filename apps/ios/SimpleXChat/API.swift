@@ -7,6 +7,10 @@
 //
 
 import Foundation
+import Darwin
+
+private let XAUXAT_NTF_SERVER_INFO_KEY = "XauXatNotificationServerBase64"
+private let XAUXAT_NTF_SERVER_ENV = "XAUXAT_NTF_SERVER"
 
 private var chatController: chat_ctrl?
 
@@ -23,6 +27,7 @@ public func getChatCtrl() -> chat_ctrl {
 
 public func chatMigrateInit(_ useKey: String? = nil, confirmMigrations: MigrationConfirmation? = nil, backgroundMode: Bool = false) -> (Bool, DBMigrationResult) {
     if let res = migrationResult { return res }
+    applyXauXatNotificationServerEnvironment()
     let dbPath = getAppDatabasePath().path
     var dbKey = ""
     let useKeychain = storeDBPassphraseGroupDefault.get()
@@ -55,6 +60,7 @@ public func chatMigrateInit(_ useKey: String? = nil, confirmMigrations: Migratio
 }
 
 public func chatInitTemporaryDatabase(url: URL, key: String? = nil, confirmation: MigrationConfirmation = .error) -> (DBMigrationResult, chat_ctrl?) {
+    applyXauXatNotificationServerEnvironment()
     let dbPath = url.path
     let dbKey = key ?? randomDatabasePassword()
     logger.debug("chatInitTemporaryDatabase path: \(dbPath)")
@@ -67,6 +73,7 @@ public func chatInitTemporaryDatabase(url: URL, key: String? = nil, confirmation
 }
 
 public func chatInitControllerRemovingDatabases() {
+    applyXauXatNotificationServerEnvironment()
     let dbPath = getAppDatabasePath().path
     let fm = FileManager.default
     // Remove previous databases, otherwise, can be .errorNotADatabase with nil controller
@@ -83,6 +90,27 @@ public func chatInitControllerRemovingDatabases() {
     // We need only controller, not databases
     try? fm.removeItem(atPath: dbPath + CHAT_DB)
     try? fm.removeItem(atPath: dbPath + AGENT_DB)
+}
+
+public var xauXatNotificationServerConfigured: Bool {
+    xauXatNotificationServerAddress() != nil
+}
+
+private func applyXauXatNotificationServerEnvironment() {
+    guard Bundle.main.object(forInfoDictionaryKey: XAUXAT_NTF_SERVER_INFO_KEY) != nil else { return }
+    setenv(XAUXAT_NTF_SERVER_ENV, xauXatNotificationServerAddress() ?? "", 1)
+}
+
+private func xauXatNotificationServerAddress() -> String? {
+    guard let encoded = Bundle.main.object(forInfoDictionaryKey: XAUXAT_NTF_SERVER_INFO_KEY) as? String,
+          !encoded.isEmpty,
+          !encoded.contains("$("),
+          let data = Data(base64Encoded: encoded),
+          let address = String(data: data, encoding: .utf8),
+          address.hasPrefix("ntf://"),
+          address.contains("@")
+    else { return nil }
+    return address
 }
 
 
