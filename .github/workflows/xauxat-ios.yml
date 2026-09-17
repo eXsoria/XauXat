@@ -109,6 +109,9 @@ jobs:
       - name: Verify notification acceptance matrix coverage
         run: ./scripts/ios/validate-notification-matrix.sh --allow-pending docs/xauxat/ios-notification-test-matrix.json
 
+      - name: Verify notification privacy policy
+        run: ./scripts/ios/verify-notification-privacy-policy.sh
+
       - name: Download XauXat native core archive
         uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
         with:
@@ -181,6 +184,9 @@ jobs:
 
       - name: Verify notification acceptance matrix coverage
         run: ./scripts/ios/validate-notification-matrix.sh --allow-pending docs/xauxat/ios-notification-test-matrix.json
+
+      - name: Verify notification privacy policy
+        run: ./scripts/ios/verify-notification-privacy-policy.sh
 
       - name: Download XauXat native core archive
         uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317

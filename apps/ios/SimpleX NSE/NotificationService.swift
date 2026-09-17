@@ -683,7 +683,11 @@ class NotificationService: UNNotificationServiceExtension {
 
     @inline(__always)
     private func deliverCallkitOrNotification(urgent: Bool, suspend: Bool = false, handler: @escaping (UNNotificationContent) -> Void) {
-        let callInv = notificationEntities.lazy.compactMap({ $0.value.msgBestAttemptNtf.callInvitation }).first
+        let callInv = notificationEntities.lazy.compactMap { entry -> RcvCallInvitation? in
+            let notification = entry.value.msgBestAttemptNtf
+            guard !notification.xauXatShouldSuppress else { return nil }
+            return notification.callInvitation
+        }.first
         if callInv != nil && useCallKit() {
             logger.debug("NotificationService.deliverCallkitOrNotification: will suspend, callkit")
             // suspending NSE even though there may be other notifications
@@ -732,7 +736,7 @@ class NotificationService: UNNotificationServiceExtension {
                 if useCallKit() {
                     logger.debug("NotificationService: reporting incoming audio call")
                     CXProvider.reportNewIncomingVoIPPushPayload([
-                        "displayName": xauXatIsChatHidden(callInv.contact.id) || callInv.user.hidden || xauXatIsProfileProtected(callInv.user.userId) ? NSLocalizedString("XauXat call", comment: "protected profile callkit banner") : callInv.contact.displayName,
+                        "displayName": NSLocalizedString("XauXat call", comment: "private callkit banner"),
                         "contactId": callInv.contact.id,
                         "callUUID": callInv.callUUID ?? "",
                         "media": CallMediaType.audio.rawValue,
