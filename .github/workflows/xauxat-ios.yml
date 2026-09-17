@@ -144,6 +144,7 @@ jobs:
           xcrun vtool -show-build "$app_path/SimpleX" | grep -q 'platform IOS'
           xcrun vtool -show-build "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'platform IOS'
           otool -L "$app_path/SimpleX" | grep -q '@rpath/Tor.framework/Tor'
+          ./scripts/ios/verify-xauxat-identifiers.sh "$app_path" development
 
       - name: Upload arm64 device app
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -233,13 +234,13 @@ jobs:
           tor_binary="$app_path/Frameworks/Tor.framework/Tor"
           test -d "$app_path"
           test "$(plutil -extract CFBundleDisplayName raw "$app_path/Info.plist")" = "XauXat"
-          test "$(plutil -extract CFBundleIdentifier raw "$app_path/Info.plist")" = "chat.simplex.app"
+          ./scripts/ios/verify-xauxat-identifiers.sh "$app_path" development
           file "$app_binary" | grep -q 'arm64'
           file "$tor_binary" | grep -q 'arm64'
           xcrun vtool -show-build "$app_binary" | grep -q 'platform IOSSIMULATOR'
           xcrun vtool -show-build "$tor_binary" | grep -q 'platform IOSSIMULATOR'
           xcrun simctl install '${{ steps.simulator.outputs.udid }}' "$app_path"
-          launch_result=$(xcrun simctl launch '${{ steps.simulator.outputs.udid }}' chat.simplex.app)
+          launch_result=$(xcrun simctl launch '${{ steps.simulator.outputs.udid }}' pt.exsoria.xauxat)
           app_pid=${launch_result##*: }
           test -n "$app_pid"
           for attempt in $(seq 1 12); do

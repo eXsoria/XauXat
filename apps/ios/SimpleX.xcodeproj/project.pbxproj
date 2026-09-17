@@ -2199,7 +2199,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 351;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 5NN7GUYB6T;
+				DEVELOPMENT_TEAM = "$(XAUXAT_DEVELOPMENT_TEAM)";
 				ENABLE_BITCODE = NO;
 				ENABLE_PREVIEWS = YES;
 				GCC_OPTIMIZATION_LEVEL = s;
@@ -2228,7 +2228,7 @@
 					"$(inherited)",
 					"-Wl,-stack_size,0x1000000",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = chat.simplex.app;
+				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat;
 				PRODUCT_NAME = SimpleX;
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -2251,11 +2251,11 @@
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_TIDY_BUGPRONE_REDUNDANT_BRANCH_CONDITION = YES;
 				CLANG_TIDY_MISC_REDUNDANT_EXPRESSION = YES;
-				CODE_SIGN_ENTITLEMENTS = "SimpleX (iOS).entitlements";
+				CODE_SIGN_ENTITLEMENTS = "XauXat Release.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 351;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = 5NN7GUYB6T;
+				DEVELOPMENT_TEAM = "$(XAUXAT_DEVELOPMENT_TEAM)";
 				ENABLE_BITCODE = NO;
 				ENABLE_CODE_COVERAGE = NO;
 				ENABLE_PREVIEWS = NO;
@@ -2284,7 +2284,7 @@
 					"$(inherited)",
 					"-Wl,-stack_size,0x1000000",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = chat.simplex.app;
+				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat;
 				PRODUCT_NAME = SimpleX;
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -2301,11 +2301,11 @@
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 351;
-				DEVELOPMENT_TEAM = 5NN7GUYB6T;
+				DEVELOPMENT_TEAM = "$(XAUXAT_DEVELOPMENT_TEAM)";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 7.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = "chat.simplex.Tests-iOS";
+				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -2321,11 +2321,11 @@
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 351;
-				DEVELOPMENT_TEAM = 5NN7GUYB6T;
+				DEVELOPMENT_TEAM = "$(XAUXAT_DEVELOPMENT_TEAM)";
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 7.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = "chat.simplex.Tests-iOS";
+				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -2344,16 +2344,15 @@
 				CLANG_TIDY_BUGPRONE_REDUNDANT_BRANCH_CONDITION = YES;
 				CLANG_TIDY_MISC_REDUNDANT_EXPRESSION = YES;
 				CODE_SIGN_ENTITLEMENTS = "SimpleX NSE/SimpleX NSE.entitlements";
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 351;
-				DEVELOPMENT_TEAM = 5NN7GUYB6T;
+				DEVELOPMENT_TEAM = "$(XAUXAT_DEVELOPMENT_TEAM)";
 				ENABLE_BITCODE = NO;
 				GCC_OPTIMIZATION_LEVEL = s;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "SimpleX NSE/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "SimpleX NSE";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2022 SimpleX Chat. All rights reserved.";
+				INFOPLIST_KEY_CFBundleDisplayName = "XauXat Notifications";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Exsoria. All rights reserved.";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2362,7 +2361,7 @@
 				);
 				LLVM_LTO = YES;
 				MARKETING_VERSION = 7.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = "chat.simplex.app.SimpleX-NSE";
+				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat.notification-service;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
@@ -2382,16 +2381,15 @@
 				CLANG_TIDY_BUGPRONE_REDUNDANT_BRANCH_CONDITION = YES;
 				CLANG_TIDY_MISC_REDUNDANT_EXPRESSION = YES;
 				CODE_SIGN_ENTITLEMENTS = "SimpleX NSE/SimpleX NSE.entitlements";
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 351;
-				DEVELOPMENT_TEAM = 5NN7GUYB6T;
+				DEVELOPMENT_TEAM = "$(XAUXAT_DEVELOPMENT_TEAM)";
 				ENABLE_BITCODE = NO;
 				ENABLE_CODE_COVERAGE = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "SimpleX NSE/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "SimpleX NSE";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2022 SimpleX Chat. All rights reserved.";
+				INFOPLIST_KEY_CFBundleDisplayName = "XauXat Notifications";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Exsoria. All rights reserved.";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2400,7 +2398,7 @@
 				);
 				LLVM_LTO = YES;
 				MARKETING_VERSION = 7.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = "chat.simplex.app.SimpleX-NSE";
+				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat.notification-service;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
@@ -2423,14 +2421,14 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 351;
 				DEFINES_MODULE = YES;
-				DEVELOPMENT_TEAM = 5NN7GUYB6T;
+				DEVELOPMENT_TEAM = "$(XAUXAT_DEVELOPMENT_TEAM)";
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				ENABLE_BITCODE = NO;
 				GCC_OPTIMIZATION_LEVEL = s;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2022 SimpleX Chat. All rights reserved.";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Exsoria. All rights reserved.";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -2448,7 +2446,7 @@
 				);
 				LLVM_LTO = YES;
 				MARKETING_VERSION = 7.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.simplex.SimpleXChat;
+				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat.core;
 				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -2474,7 +2472,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 351;
 				DEFINES_MODULE = YES;
-				DEVELOPMENT_TEAM = 5NN7GUYB6T;
+				DEVELOPMENT_TEAM = "$(XAUXAT_DEVELOPMENT_TEAM)";
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
@@ -2482,7 +2480,7 @@
 				ENABLE_CODE_COVERAGE = NO;
 				EXPORTED_SYMBOLS_FILE = "$(PROJECT_DIR)/SimpleXChat/exported_symbols.txt";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2022 SimpleX Chat. All rights reserved.";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Exsoria. All rights reserved.";
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -2500,7 +2498,7 @@
 				);
 				LLVM_LTO = YES;
 				MARKETING_VERSION = 7.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.simplex.SimpleXChat;
+				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat.core;
 				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -2527,13 +2525,13 @@
 				CODE_SIGN_ENTITLEMENTS = "SimpleX SE/SimpleX SE.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 351;
-				DEVELOPMENT_TEAM = 5NN7GUYB6T;
+				DEVELOPMENT_TEAM = "$(XAUXAT_DEVELOPMENT_TEAM)";
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "SimpleX SE/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "SimpleX SE";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2024 SimpleX Chat. All rights reserved.";
+				INFOPLIST_KEY_CFBundleDisplayName = "XauXat Share";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Exsoria. All rights reserved.";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2542,7 +2540,7 @@
 				);
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MARKETING_VERSION = 7.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = "chat.simplex.app.SimpleX-SE";
+				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat.share;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -2561,13 +2559,13 @@
 				CODE_SIGN_ENTITLEMENTS = "SimpleX SE/SimpleX SE.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 351;
-				DEVELOPMENT_TEAM = 5NN7GUYB6T;
+				DEVELOPMENT_TEAM = "$(XAUXAT_DEVELOPMENT_TEAM)";
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "SimpleX SE/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "SimpleX SE";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2024 SimpleX Chat. All rights reserved.";
+				INFOPLIST_KEY_CFBundleDisplayName = "XauXat Share";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Exsoria. All rights reserved.";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2576,7 +2574,7 @@
 				);
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MARKETING_VERSION = 7.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = "chat.simplex.app.SimpleX-SE";
+				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat.share;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
