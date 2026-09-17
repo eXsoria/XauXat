@@ -103,6 +103,9 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
+      - name: Verify notification extension Tor policy
+        run: ./scripts/ios/verify-nse-tor-policy.sh
+
       - name: Download XauXat native core archive
         uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
         with:
@@ -169,6 +172,9 @@ jobs:
           test "$(uname -m)" = "arm64"
           xcodebuild -version
           xcrun --sdk iphonesimulator --show-sdk-version
+
+      - name: Verify notification extension Tor policy
+        run: ./scripts/ios/verify-nse-tor-policy.sh
 
       - name: Download XauXat native core archive
         uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317

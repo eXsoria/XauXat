@@ -27,6 +27,7 @@ final class NSEEmbeddedTorManager {
     private var thread: TorThread?
     private var controller: TorController?
     private var configuration: TorConfiguration?
+    private var authenticated = false
     private var circuitObserver: Any?
     private var statusObserver: Any?
     private var attempt: UUID?
@@ -38,18 +39,14 @@ final class NSEEmbeddedTorManager {
 
     func start(_ completion: @escaping (Result<UInt16, Error>) -> Void) {
         queue.async {
-            if case let .ready(port) = self.state,
-               let thread = self.thread,
-               !thread.isFinished {
-                completion(.success(port))
-                return
-            }
-
             self.callbacks.append(completion)
             switch self.state {
             case .starting:
                 return
             case .stopped, .ready, .failed:
+                // A live thread is not enough to prove the route survived an
+                // iOS suspension or network change. Re-check Tor's circuit and
+                // current listener before every notification retrieval.
                 self.begin()
             }
         }
@@ -75,6 +72,10 @@ final class NSEEmbeddedTorManager {
 
         do {
             try startThreadIfNeeded()
+            if authenticated, let controller, controller.isConnected {
+                observeCircuit(controller, id: id)
+                return
+            }
             pollForControlPort(id: id, attemptsRemaining: 90)
         } catch {
             finish(.failure(error), id: id)
@@ -83,6 +84,7 @@ final class NSEEmbeddedTorManager {
 
     private func startThreadIfNeeded() throws {
         if thread == nil || thread?.isFinished == true {
+            authenticated = false
             controller = nil
 
             let directory = getGroupContainerDirectory()
@@ -165,6 +167,7 @@ final class NSEEmbeddedTorManager {
                     self.finish(.failure(NSEEmbeddedTorError.authentication), id: id)
                     return
                 }
+                self.authenticated = true
                 self.observeCircuit(control, id: id)
             }
         }

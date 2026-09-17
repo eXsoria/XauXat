@@ -134,7 +134,7 @@ class NSEThreads {
             if allThreads.contains(t) {
                 activeThreads.append((t, service))
             } else {
-                logger.warning("NotificationService startThread: thread \(t) was removed before it started")
+                logger.warning("NotificationService: an extension instance expired before it started")
             }
         }
     }
@@ -189,7 +189,7 @@ class NSEThreads {
     @inline(__always)
     func processNotification(_ id: ChatId, _ ntf: NSENotificationData) async -> Void {
         if let (nse, ntfEntity, expectedMsg) = rcvEntityThread(id, ntf) {
-            logger.debug("NotificationService processNotification \(id): found nse thread expecting message")
+            logger.debug("NotificationService: found an extension instance expecting a message")
             if nse.processReceivedNtf(ntfEntity, expectedMsg, ntf) {
                 nse.finalizeEntity(id)
             }
@@ -233,8 +233,8 @@ class NSEThreads {
                     false
                 }
             })
-            if let (tNext, nseNext) = next {
-                if let t = nse.threadId { logger.debug("NotificationService thread \(t): signalNextThread: signal next thread \(tNext) for entity \(id)") }
+            if let (_, nseNext) = next {
+                if nse.threadId != nil { logger.debug("NotificationService: handing entity processing to the next instance") }
                 nseNext.notificationEntities[id]?.startedProcessingNewMsgs = true
                 nseNext.notificationEntities[id]?.semaphore.signal()
             }
@@ -391,6 +391,10 @@ class NotificationService: UNNotificationServiceExtension {
     /// Failure is intentionally closed: deliver the opaque best attempt rather
     /// than allowing the core to retry over the device's direct connection.
     private func receiveNtfMessagesViaTor(_ request: UNNotificationRequest) {
+        // Invalidate any endpoint left by a previous notification before the
+        // asynchronous health check. Concurrent instances all wait for the
+        // same manager result and cannot start the core with a stale listener.
+        networkConfig = xauXatManagedTorConfig(getNetCfg(), socksProxy: "127.0.0.1:1")
         NSEEmbeddedTorManager.shared.start { [weak self] result in
             guard let self, self.contentHandler != nil else { return }
             switch result {
@@ -401,6 +405,7 @@ class NotificationService: UNNotificationServiceExtension {
                 )
                 self.receiveNtfMessages(request)
             case let .failure(error):
+                networkConfig = xauXatManagedTorConfig(getNetCfg(), socksProxy: "127.0.0.1:1")
                 logger.error("NotificationService: Tor unavailable, failing closed: \(error.localizedDescription, privacy: .public)")
                 self.deliverBestAttemptNtf(urgent: true)
             }
@@ -493,11 +498,11 @@ class NotificationService: UNNotificationServiceExtension {
                             }
                         } else {
                             // wait for another instance processing the same connection entity
-                            logger.debug("NotificationService thread \(t, privacy: .private): receiveNtfMessages: entity \(id, privacy: .private) waiting on semaphore")
+                            logger.debug("NotificationService: waiting for earlier entity processing")
                             // this semaphore will be released by signalNextThread function, that looks up the instance
                             // waiting for the connection entity via activeThreads in NSEThreads
                             notificationEntities[id]?.semaphore.wait()
-                            logger.debug("NotificationService thread \(t, privacy: .private): receiveNtfMessages: entity \(id, privacy: .private) proceeding after semaphore")
+                            logger.debug("NotificationService: continuing entity processing")
                             Task {
                                 // process any notifications "postponed" by the previous instance
                                 let completed = processDroppedNotifications(ntfEntity, expectedMsg)
@@ -587,31 +592,31 @@ class NotificationService: UNNotificationServiceExtension {
         if case let .msgInfo(info) = ntf {
             if info.msgId == expectedMsg.msgId {
                 // The message for this instance is processed, no more expected, deliver.
-                logger.debug("NotificationService processNtf: msgInfo msgId = \(info.msgId, privacy: .private): expected")
+                logger.debug("NotificationService processNtf: expected message marker")
                 return true
             } else if let msgTs = info.msgTs_, msgTs > expectedMsg.msgTs {
                 // Otherwise check timestamp - if it is after the currently expected timestamp, preserve .msgInfo marker for the next instance.
-                logger.debug("NotificationService processNtf: msgInfo msgId = \(info.msgId, privacy: .private): unexpected msgInfo, let other instance to process it, stopping this one")
+                logger.debug("NotificationService processNtf: newer marker deferred to another instance")
                 NSEThreads.shared.addDroppedNtf(id, ntf)
                 return true
             } else if ntfEntity.allowedGetNextAttempts > 0, let connMsgReq = ntfEntity.connMsgReq {
                 // Otherwise this instance expects more messages, and still has allowed attempts -
                 // request more messages with getConnNtfMessage.
-                logger.debug("NotificationService processNtf: msgInfo msgId = \(info.msgId, privacy: .private): unexpected msgInfo, get next message")
+                logger.debug("NotificationService processNtf: requesting the next message")
                 notificationEntities[id]?.allowedGetNextAttempts -= 1
                 let receivedMsg = getConnNtfMessage(connMsgReq: connMsgReq)
-                if case let .info(msg) = receivedMsg, let msg {
+                if case .info(.some(_)) = receivedMsg {
                     // Server delivered message, it will be processed in the loop - see the comments in receiveNtfMessages.
-                    logger.debug("NotificationService processNtf, on getConnNtfMessage: msgInfo msgId = \(info.msgId, privacy: .private), receivedMsg msgId = \(msg.msgId, privacy: .private)")
+                    logger.debug("NotificationService processNtf: received another message marker")
                     return false
                 } else {
                     // Server reported no messages or error, deliver what we have.
-                    logger.debug("NotificationService processNtf, on getConnNtfMessage: msgInfo msgId = \(info.msgId, privacy: .private): no next message, deliver best attempt")
+                    logger.debug("NotificationService processNtf: no next message, delivering best attempt")
                     return true
                 }
             } else {
                 // Current instance needs more messages, but ran out of attempts - deliver what we have.
-                logger.debug("NotificationService processNtf: msgInfo msgId = \(info.msgId, privacy: .private): unknown message, let other instance to process it")
+                logger.debug("NotificationService processNtf: message attempts exhausted")
                 return true
             }
         } else if ntfEntity.ntfConn.user.showNotifications {
@@ -636,7 +641,7 @@ class NotificationService: UNNotificationServiceExtension {
     }
 
     func finalizeEntity(_ entityId: ChatId) {
-        if let t = threadId { logger.debug("NotificationService thread \(t): entityReady: entity \(entityId)") }
+        if threadId != nil { logger.debug("NotificationService: entity processing complete") }
         NSEThreads.shared.signalNextThread(self, entityId)
         deliverBestAttemptNtf()
     }
@@ -725,7 +730,7 @@ class NotificationService: UNNotificationServiceExtension {
                     removeHiddenEventFromBadge()
                 }
                 if useCallKit() {
-                    logger.debug("NotificationService reportNewIncomingVoIPPushPayload for \(callInv.contact.id)")
+                    logger.debug("NotificationService: reporting incoming audio call")
                     CXProvider.reportNewIncomingVoIPPushPayload([
                         "displayName": xauXatIsChatHidden(callInv.contact.id) || callInv.user.hidden || xauXatIsProfileProtected(callInv.user.userId) ? NSLocalizedString("XauXat call", comment: "protected profile callkit banner") : callInv.contact.displayName,
                         "contactId": callInv.contact.id,
@@ -733,7 +738,7 @@ class NotificationService: UNNotificationServiceExtension {
                         "media": CallMediaType.audio.rawValue,
                         "callTs": callInv.callTs.timeIntervalSince1970
                     ]) { error in
-                        logger.debug("reportNewIncomingVoIPPushPayload result: \(error)")
+                        logger.debug("NotificationService: incoming call report completed, success: \(error == nil)")
                         handler(error == nil ? UNMutableNotificationContent() : createCallInvitationNtf(callInv, self.badgeCount, mediaOverride: .audio))
                     }
                 } else {
@@ -935,7 +940,7 @@ func applyCurrentNSEConfig() -> Bool {
         try setNetworkConfig(networkConfig)
         return true
     } catch {
-        logger.error("NotificationService apply Tor network config error: \(responseError(error))")
+        logger.error("NotificationService: could not apply the Tor network configuration")
         return false
     }
 }
@@ -953,8 +958,8 @@ func doStartChat() -> DBMigrationResult? {
     }
     let state = NSEChatState.shared.value
     NSEChatState.shared.set(.starting)
-    if let user = apiGetActiveUser() {
-        logger.debug("NotificationService active user \(user.displayName)")
+    if apiGetActiveUser() != nil {
+        logger.debug("NotificationService: active user available")
         do {
             try setNetworkConfig(networkConfig)
             try apiSetAppFilePaths(filesFolder: getAppFilesDirectory().path, tempFolder: getTempFilesDirectory().path, assetsFolder: getWallpaperDirectory().deletingLastPathComponent().path)
@@ -978,7 +983,7 @@ func doStartChat() -> DBMigrationResult? {
                 return .ok
             }
         } catch {
-            logger.error("NotificationService startChat error: \(responseError(error))")
+            logger.error("NotificationService: chat core failed to start")
         }
     } else {
         logger.debug("NotificationService: no active user")
@@ -1055,10 +1060,10 @@ func receiveMessages() async {
                 logger.debug("NotificationService receiveMsg: notification")
                 await NSEThreads.shared.processNotification(id, ntf)
             }
-        case let .error(err):
-            logger.error("NotificationService receivedMsgNtf error: \(String(describing: err))")
-        case let .invalid(type, _):
-            logger.error("NotificationService receivedMsgNtf invalid: \(type)")
+        case .error:
+            logger.error("NotificationService: chat core returned an error event")
+        case .invalid:
+            logger.error("NotificationService: chat core returned an unsupported event type")
         case .none: ()
         }
     }
@@ -1150,7 +1155,7 @@ func updateNetCfg() {
             try setNetworkConfig(newNetConfig)
             networkConfig = newNetConfig
         } catch {
-            logger.error("NotificationService apply changed network config error: \(responseError(error))")
+            logger.error("NotificationService: could not refresh the Tor network configuration")
         }
     }
 }
@@ -1163,11 +1168,11 @@ func apiGetActiveUser() -> User? {
     case .error(.error(.noActiveUser)):
         logger.debug("apiGetActiveUser sendSimpleXCmd no active user")
         return nil
-    case let .error(err):
-        logger.debug("apiGetActiveUser sendSimpleXCmd error: \(String(describing: err))")
+    case .error:
+        logger.debug("NotificationService: active-user lookup returned an error")
         return nil
     default:
-        logger.error("NotificationService apiGetActiveUser unexpected response: \(String(describing: r))")
+        logger.error("NotificationService: active-user lookup returned an unexpected response")
         return nil
     }
 }
@@ -1185,14 +1190,14 @@ func apiActivateChat() -> Bool {
     chatReopenStore()
     let r: APIResult<NSEChatResponse> = sendSimpleXCmd(NSEChatCommand.apiActivateChat(restoreChat: false))
     if case .result(.cmdOk) = r { return true }
-    logger.error("NotificationService apiActivateChat error: \(String(describing: r))")
+    logger.error("NotificationService: chat activation failed")
     return false
 }
 
 func apiSuspendChat(timeoutMicroseconds: Int) -> Bool {
     let r: APIResult<NSEChatResponse> = sendSimpleXCmd(NSEChatCommand.apiSuspendChat(timeoutMicroseconds: timeoutMicroseconds))
     if case .result(.cmdOk) = r { return true }
-    logger.error("NotificationService apiSuspendChat error: \(String(describing: r))")
+    logger.error("NotificationService: chat suspension failed")
     return false
 }
 
@@ -1217,10 +1222,10 @@ func apiGetNtfConns(nonce: String, encNtfInfo: String) -> [NtfConn]? {
     if case let .result(.ntfConns(ntfConns)) = r {
         logger.debug("NotificationService apiGetNtfConns response ntfConns: \(ntfConns.count) conections")
         return ntfConns
-    } else if case let .error(error) = r {
-        logger.debug("NotificationService apiGetNtfMessage error response: \(String.init(describing: error))")
+    } else if case .error = r {
+        logger.debug("NotificationService: notification lookup returned an error")
     } else {
-        logger.debug("NotificationService apiGetNtfMessage ignored response: \(r.responseType) \(String.init(describing: r))")
+        logger.debug("NotificationService: notification lookup returned an unsupported response type")
     }
     return nil
 }
@@ -1238,7 +1243,7 @@ func apiGetConnNtfMessages(connMsgReqs: [ConnMsgReq]) -> [RcvNtfMsgInfo]? {
         logger.debug("NotificationService apiGetConnNtfMessages responses: total \(msgs.count), expecting messages \(msgs.count { !$0.noMsg }), errors \(msgs.count { $0.isError })")
         return msgs
     }
-    logger.debug("NotificationService apiGetConnNtfMessages error: \(responseError(r.unexpected))")
+    logger.debug("NotificationService: message lookup failed")
     return nil
 }
 
@@ -1251,7 +1256,7 @@ func apiReceiveFile(fileId: Int64, encrypted: Bool, inline: Bool? = nil) -> ACha
     let userApprovedRelays = !privacyAskToApproveRelaysGroupDefault.get()
     let r: APIResult<NSEChatResponse> = sendSimpleXCmd(NSEChatCommand.receiveFile(fileId: fileId, userApprovedRelays: userApprovedRelays, encrypted: encrypted, inline: inline))
     if case let .result(.rcvFileAccepted(_, chatItem)) = r { return chatItem }
-    logger.error("receiveFile error: \(responseError(r.unexpected))")
+    logger.error("NotificationService: automatic file receive failed")
     return nil
 }
 
@@ -1259,7 +1264,7 @@ func apiSetFileToReceive(fileId: Int64, encrypted: Bool) {
     let userApprovedRelays = !privacyAskToApproveRelaysGroupDefault.get()
     let r: APIResult<NSEChatResponse> = sendSimpleXCmd(NSEChatCommand.setFileToReceive(fileId: fileId, userApprovedRelays: userApprovedRelays, encrypted: encrypted))
     if case .result(.cmdOk) = r { return }
-    logger.error("setFileToReceive error: \(responseError(r.unexpected))")
+    logger.error("NotificationService: automatic file preparation failed")
 }
 
 func autoReceiveFile(_ file: CIFile) -> ChatItem? {
