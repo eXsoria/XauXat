@@ -39,6 +39,8 @@ struct GroupLinkView: View {
     @State private var oneTimeAccessLifetime: XauXatGroupAccessLifetime = .never
     @State private var customOneTimeAccessExpiry = Date.now.addingTimeInterval(24 * 60 * 60)
     @State private var groupAccessMaximumUses = 1
+    @State private var createIndividualGroupAccesses = false
+    @State private var individualGroupAccessCount = 2
 
     private enum GroupLinkAlert: Identifiable {
         case deleteLink
@@ -203,8 +205,8 @@ struct GroupLinkView: View {
                     )
                 case let .revokeOneTimeInvite(connectionId):
                     return Alert(
-                        title: Text("Revoke one-time invite?"),
-                        message: Text("The unused invite will stop working immediately."),
+                        title: Text("Revoke group access?"),
+                        message: Text("This unused access will stop working immediately. Other individual accesses are not affected."),
                         primaryButton: .destructive(Text("Revoke")) {
                             revokeOneTimeInvite(connectionId)
                         }, secondaryButton: .cancel()
@@ -352,19 +354,36 @@ struct GroupLinkView: View {
         if canUseOneTimeGroupInvites {
             if !oneTimeInvites.contains(where: { $0.state == .active || $0.state == .processing }) {
                 groupAccessExpiryPicker(lifetime: $oneTimeAccessLifetime, customExpiry: $customOneTimeAccessExpiry)
-                Stepper(
-                    "Maximum uses: \(groupAccessMaximumUses)",
-                    value: $groupAccessMaximumUses,
-                    in: 1...max(1, min(XAUXAT_PLUS_GROUP_MEMBER_LIMIT, groupCapacity?.remaining ?? XAUXAT_PLUS_GROUP_MEMBER_LIMIT))
-                )
+                Toggle("Generate individual accesses", isOn: $createIndividualGroupAccesses)
+                    .disabled((groupCapacity?.remaining ?? 0) < 2)
+                if createIndividualGroupAccesses {
+                    Stepper(
+                        "Number of accesses: \(individualGroupAccessCount)",
+                        value: $individualGroupAccessCount,
+                        in: 2...max(2, min(XAUXAT_PLUS_GROUP_MEMBER_LIMIT, groupCapacity?.remaining ?? XAUXAT_PLUS_GROUP_MEMBER_LIMIT))
+                    )
+                } else {
+                    Stepper(
+                        "Maximum uses: \(groupAccessMaximumUses)",
+                        value: $groupAccessMaximumUses,
+                        in: 1...max(1, min(XAUXAT_PLUS_GROUP_MEMBER_LIMIT, groupCapacity?.remaining ?? XAUXAT_PLUS_GROUP_MEMBER_LIMIT))
+                    )
+                }
                 Toggle("Protect with a one-time code", isOn: $protectOneTimeInviteWithCode)
-                Text(groupAccessMaximumUses == 1
+                Text(createIndividualGroupAccesses
+                     ? "Each access gets its own ID, link and optional code, and can be shared or revoked independently."
+                     : groupAccessMaximumUses == 1
                      ? "The code unlocks only this access and is erased locally as soon as the SimpleX invitation is used."
                      : "XauXat combines independent SimpleX one-time invitations, so simultaneous entries cannot exceed this limit.")
                     .font(.caption)
                     .foregroundColor(theme.colors.secondary)
             }
-            if let activeInvite = oneTimeInvites.first(where: { $0.state == .active }),
+            let activeIndividualInvites = oneTimeInvites.filter { $0.state == .active && $0.accessId != nil }
+            if !activeIndividualInvites.isEmpty {
+                ForEach(activeIndividualInvites) { invite in
+                    individualGroupAccessRow(invite)
+                }
+            } else if let activeInvite = oneTimeInvites.first(where: { $0.state == .active }),
                let shareLink = activeInvite.shareLink {
                 QRCode(uri: shareLink)
                     .id("xauxat-one-time-group-qr-\(activeInvite.connectionId)")
@@ -409,7 +428,12 @@ struct GroupLinkView: View {
                 Button {
                     createOneTimeGroupInvite()
                 } label: {
-                    Label(groupAccessMaximumUses > 1 ? "Create limited-use invite" : "Create one-time invite", systemImage: "link.badge.plus")
+                    Label(
+                        createIndividualGroupAccesses
+                            ? "Create individual accesses"
+                            : groupAccessMaximumUses > 1 ? "Create limited-use invite" : "Create one-time invite",
+                        systemImage: "link.badge.plus"
+                    )
                 }
                 .disabled(creatingOneTimeInvite || groupCapacity?.isFull != false)
             }
@@ -433,6 +457,55 @@ struct GroupLinkView: View {
         }
     }
 
+    @ViewBuilder
+    private func individualGroupAccessRow(_ invite: XauXatOneTimeGroupInvite) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Access \(individualAccessLabel(invite))")
+                Spacer()
+                Text(oneTimeInviteStateText(invite.state))
+                    .foregroundColor(theme.colors.secondary)
+            }
+            Text("Role: \(invite.memberRole.text(isChannel: false))")
+                .font(.caption)
+                .foregroundColor(theme.colors.secondary)
+            if let expiresAt = invite.expiresAt {
+                Text("Expires \(expiresAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption)
+                    .foregroundColor(theme.colors.secondary)
+            }
+        }
+        if let shareLink = invite.shareLink {
+            Button {
+                showShareSheet(items: [shareLink])
+            } label: {
+                Label("Share access \(individualAccessLabel(invite))", systemImage: "square.and.arrow.up")
+            }
+        }
+        if let code = invite.accessCode {
+            HStack {
+                Text(code)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                Spacer()
+                Button {
+                    UIPasteboard.general.string = code
+                } label: {
+                    Label("Copy code", systemImage: "doc.on.doc")
+                }
+            }
+        }
+        Button(role: .destructive) {
+            alert = .revokeOneTimeInvite(invite.connectionId)
+        } label: {
+            Label("Revoke access \(individualAccessLabel(invite))", systemImage: "xmark.circle")
+        }
+    }
+
+    private func individualAccessLabel(_ invite: XauXatOneTimeGroupInvite) -> String {
+        String((invite.accessId ?? String(invite.connectionId)).prefix(8)).uppercased()
+    }
+
     private func oneTimeInviteStatusRow(_ invite: XauXatOneTimeGroupInvite) -> some View {
         let bundle = xauXatOneTimeGroupInviteBundle(connectionId: invite.connectionId)
         let maximumUses = invite.maxUses ?? 1
@@ -440,7 +513,7 @@ struct GroupLinkView: View {
         let remaining = max(0, maximumUses - used)
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(maximumUses > 1 ? "Limited-use invite" : "One-time invite")
+                Text(invite.accessId != nil ? "Access \(individualAccessLabel(invite))" : maximumUses > 1 ? "Limited-use invite" : "One-time invite")
                 Spacer()
                 Text(oneTimeInviteStateText(groupInviteBundleState(bundle, fallback: invite.state)))
                     .foregroundColor(bundle.contains(where: { $0.state == .failed }) ? .red : theme.colors.secondary)
@@ -585,81 +658,105 @@ struct GroupLinkView: View {
               !oneTimeInvites.contains(where: { $0.state == .active || $0.state == .processing }) else { return }
         creatingOneTimeInvite = true
         Task {
+            var created: [(CreatedConnLink, PendingContactConnection)] = []
             do {
-                let maximumUses = groupAccessMaximumUses
+                let individualAccesses = createIndividualGroupAccesses
+                let requestedUses = individualAccesses ? individualGroupAccessCount : groupAccessMaximumUses
                 _ = try await apiRequireXauXatGroupCapacity(
                     groupId,
-                    adding: maximumUses,
+                    adding: requestedUses,
                     allowLargeGroup: canUseLargeGroups
                 )
-                var created: [(CreatedConnLink, PendingContactConnection)] = []
-                for _ in 0..<maximumUses {
+                for _ in 0..<requestedUses {
                     guard let invitation = await apiAddContact(incognito: false) else { break }
                     created.append(invitation)
                 }
-                guard created.count == maximumUses else {
-                    for (_, connection) in created {
-                        try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
-                    }
-                    throw XauXatGroupAccessSetupError.inviteCreationFailed
-                }
-                let rawLinks = created.map { $0.0.simplexChatUri(short: false) }
+                guard created.count == requestedUses else { throw XauXatGroupAccessSetupError.inviteCreationFailed }
                 let expiresAt = oneTimeAccessLifetime.expiresAt(custom: customOneTimeAccessExpiry)
-                let code = protectOneTimeInviteWithCode ? xauXatGenerateGroupAccessCode() : nil
-                guard !protectOneTimeInviteWithCode || code != nil else {
-                    for (_, connection) in created {
-                        try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
-                    }
-                    throw XauXatGroupAccessSetupError.encryptionFailed
-                }
-                guard let bundledLink = xauXatSignedContactInviteLink(links: rawLinks, expiresAt: expiresAt) else {
-                    for (_, connection) in created {
-                        try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
-                    }
-                    throw XauXatGroupAccessSetupError.encryptionFailed
-                }
-                let shareLink: String
-                if let code {
-                    guard let protectedLink = await Task.detached(operation: {
-                        xauXatProtectedGroupInviteLink(rawLink: bundledLink, accessCode: code, expiresAt: expiresAt)
-                    }).value else {
-                        for (_, connection) in created {
-                            try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
+                let invites: [XauXatOneTimeGroupInvite]
+                if individualAccesses {
+                    let batchId = UUID().uuidString
+                    var individualInvites: [XauXatOneTimeGroupInvite] = []
+                    for (createdLink, connection) in created {
+                        let rawLink = createdLink.simplexChatUri(short: false)
+                        guard let signedLink = xauXatSignedContactInviteLink(link: rawLink, expiresAt: expiresAt) else {
+                            throw XauXatGroupAccessSetupError.encryptionFailed
                         }
+                        let code = protectOneTimeInviteWithCode ? xauXatGenerateGroupAccessCode() : nil
+                        guard !protectOneTimeInviteWithCode || code != nil else {
+                            throw XauXatGroupAccessSetupError.encryptionFailed
+                        }
+                        let shareLink: String
+                        if let code {
+                            guard let protectedLink = await Task.detached(operation: {
+                                xauXatProtectedGroupInviteLink(rawLink: signedLink, accessCode: code, expiresAt: expiresAt)
+                            }).value else { throw XauXatGroupAccessSetupError.encryptionFailed }
+                            shareLink = protectedLink
+                        } else {
+                            shareLink = signedLink
+                        }
+                        individualInvites.append(XauXatOneTimeGroupInvite(
+                            connectionId: connection.pccConnId,
+                            groupId: groupId,
+                            groupDisplayName: groupInfo?.displayName ?? "Group",
+                            memberRole: groupLinkMemberRole,
+                            shareLink: shareLink,
+                            accessCode: code,
+                            accessCodeIsOneTime: code != nil,
+                            expiresAt: expiresAt,
+                            maxUses: 1,
+                            batchId: batchId,
+                            accessId: UUID().uuidString
+                        ))
+                    }
+                    invites = individualInvites
+                } else {
+                    let rawLinks = created.map { $0.0.simplexChatUri(short: false) }
+                    let code = protectOneTimeInviteWithCode ? xauXatGenerateGroupAccessCode() : nil
+                    guard !protectOneTimeInviteWithCode || code != nil,
+                          let bundledLink = xauXatSignedContactInviteLink(links: rawLinks, expiresAt: expiresAt) else {
                         throw XauXatGroupAccessSetupError.encryptionFailed
                     }
-                    shareLink = protectedLink
-                } else {
-                    shareLink = bundledLink
-                }
-                let bundleId = maximumUses > 1 ? UUID().uuidString : nil
-                let invites = created.map { _, connection in
-                    XauXatOneTimeGroupInvite(
-                        connectionId: connection.pccConnId,
-                        groupId: groupId,
-                        groupDisplayName: groupInfo?.displayName ?? "Group",
-                        memberRole: groupLinkMemberRole,
-                        shareLink: shareLink,
-                        accessCode: code,
-                        accessCodeIsOneTime: code != nil,
-                        expiresAt: expiresAt,
-                        bundleId: bundleId,
-                        maxUses: maximumUses
-                    )
+                    let shareLink: String
+                    if let code {
+                        guard let protectedLink = await Task.detached(operation: {
+                            xauXatProtectedGroupInviteLink(rawLink: bundledLink, accessCode: code, expiresAt: expiresAt)
+                        }).value else { throw XauXatGroupAccessSetupError.encryptionFailed }
+                        shareLink = protectedLink
+                    } else {
+                        shareLink = bundledLink
+                    }
+                    let bundleId = requestedUses > 1 ? UUID().uuidString : nil
+                    invites = created.map { _, connection in
+                        XauXatOneTimeGroupInvite(
+                            connectionId: connection.pccConnId,
+                            groupId: groupId,
+                            groupDisplayName: groupInfo?.displayName ?? "Group",
+                            memberRole: groupLinkMemberRole,
+                            shareLink: shareLink,
+                            accessCode: code,
+                            accessCodeIsOneTime: code != nil,
+                            expiresAt: expiresAt,
+                            bundleId: bundleId,
+                            maxUses: requestedUses
+                        )
+                    }
                 }
                 guard xauXatSaveOneTimeGroupInvites(invites) else {
-                    for (_, connection) in created {
-                        try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
-                    }
                     throw XauXatGroupAccessSetupError.inviteCreationFailed
                 }
                 await MainActor.run {
                     created.forEach { ChatModel.shared.updateContactConnection($0.1) }
                     creatingOneTimeInvite = false
                     refreshOneTimeInvites()
-                    showShareSheet(items: [shareLink])
+                    if !individualAccesses, let shareLink = invites.first?.shareLink {
+                        showShareSheet(items: [shareLink])
+                    }
                 }
             } catch {
+                for (_, connection) in created {
+                    try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
+                }
                 await MainActor.run {
                     creatingOneTimeInvite = false
                     showAlert(
@@ -692,7 +789,7 @@ struct GroupLinkView: View {
                 }
             } catch {
                 await MainActor.run {
-                    showErrorAlert(error, NSLocalizedString("Couldn't revoke one-time invite", comment: ""))
+                    showErrorAlert(error, NSLocalizedString("Couldn't revoke group access", comment: ""))
                 }
             }
         }
