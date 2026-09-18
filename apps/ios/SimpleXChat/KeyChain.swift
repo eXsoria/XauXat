@@ -578,6 +578,8 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
     public let expiresAt: Date?
     public let bundleId: String?
     public let maxUses: Int?
+    public let batchId: String?
+    public let accessId: String?
     public var state: XauXatOneTimeGroupInviteState
     public var contactId: Int64?
     public var consumedAt: Date?
@@ -601,6 +603,8 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
         expiresAt: Date? = nil,
         bundleId: String? = nil,
         maxUses: Int? = nil,
+        batchId: String? = nil,
+        accessId: String? = nil,
         state: XauXatOneTimeGroupInviteState = .active,
         contactId: Int64? = nil,
         consumedAt: Date? = nil,
@@ -619,6 +623,8 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
         self.expiresAt = expiresAt
         self.bundleId = bundleId
         self.maxUses = maxUses
+        self.batchId = batchId
+        self.accessId = accessId
         self.state = state
         self.contactId = contactId
         self.consumedAt = consumedAt
