@@ -503,6 +503,20 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
         }
         guard chatModel.chatRunning == true, !Task.isCancelled, !status.hasAccess else { return }
 
+        // Protected group invites must not survive a Plus downgrade. Deleting
+        // the underlying SimpleX link invalidates every encrypted copy without
+        // removing the group or any existing member.
+        for policy in xauXatGroupAccessPolicies() {
+            guard !Task.isCancelled, !status.hasAccess else { return }
+            do {
+                try await apiDeleteGroupLink(policy.groupId)
+            } catch {
+                logger.warning("Unable to revoke protected group invite for Free downgrade: \(error.localizedDescription)")
+            }
+        }
+        _ = xauXatRemoveGroupAccessPolicies(.primary)
+        _ = xauXatRemoveGroupAccessPolicies(.decoy)
+
         for userInfo in chatModel.users where userInfo.user.hidden {
             guard let password = xauXatProtectedProfilePassword(userInfo.user.userId) else { continue }
             do {

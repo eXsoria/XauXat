@@ -462,6 +462,8 @@ struct ContentView: View {
                     NSLocalizedString("Relay address", comment: "alert title"),
                     message: NSLocalizedString("This is a chat relay address, it cannot be used to connect.", comment: "alert message")
                 )
+            } else if xauXatIsProtectedGroupInviteLink(url.absoluteString) {
+                planAndConnect(url.absoluteString, theme: theme, dismiss: false)
             } else if (path == "/contact" || path == "/invitation" || path == "/a" || path == "/c" || path == "/g" || path == "/i") {
                 path.removeFirst()
                 let link = url.absoluteString.replacingOccurrences(of: "///\(path)", with: "/\(path)")

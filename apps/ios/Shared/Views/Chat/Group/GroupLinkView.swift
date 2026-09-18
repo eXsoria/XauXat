@@ -29,6 +29,8 @@ struct GroupLinkView: View {
     @State private var shouldCreate = true
     @State private var groupCapacity: XauXatGroupCapacity?
     @State private var loadingGroupCapacity = false
+    @State private var groupAccessPolicy: XauXatGroupAccessPolicy?
+    @State private var preparingProtectedAccess = false
 
     private enum GroupLinkAlert: Identifiable {
         case deleteLink
@@ -40,6 +42,11 @@ struct GroupLinkView: View {
             case let .error(title, _): return "error \(title)"
             }
         }
+    }
+
+    private enum XauXatGroupAccessSetupError: Error {
+        case linkCreationFailed
+        case encryptionFailed
     }
 
     var body: some View {
@@ -55,7 +62,7 @@ struct GroupLinkView: View {
             } else {
                 groupLinkView()
             }
-            if creatingLink {
+            if creatingLink || preparingProtectedAccess {
                 ProgressView()
                     .scaleEffect(2)
                     .frame(maxWidth: .infinity)
@@ -110,8 +117,13 @@ struct GroupLinkView: View {
                         .frame(height: 36)
                     }
                     if canOfferGroupAccess {
-                        SimpleXCreatedLinkQRCode(link: groupLink.connLinkContact, short: $showShortLink)
-                            .id("simplex-qrcode-view-for-\(groupLink.connLinkContact.simplexChatUri(short: showShortLink))")
+                        if let groupAccessPolicy {
+                            QRCode(uri: groupAccessPolicy.protectedLink)
+                                .id("xauxat-protected-group-qr-\(groupAccessPolicy.rawLinkFingerprint)")
+                        } else {
+                            SimpleXCreatedLinkQRCode(link: groupLink.connLinkContact, short: $showShortLink)
+                                .id("simplex-qrcode-view-for-\(groupLink.connLinkContact.simplexChatUri(short: showShortLink))")
+                        }
                         if !isChannel && groupLink.shouldBeUpgraded {
                             Button {
                                 upgradeAndShareLinkAlert()
@@ -128,11 +140,15 @@ struct GroupLinkView: View {
                         } label: {
                             Label("Share link", systemImage: "square.and.arrow.up")
                         }
-                        if groupInfo?.groupProfile.publicGroup != nil {
+                        if groupInfo?.groupProfile.publicGroup != nil && groupAccessPolicy == nil {
                             Button { shareGroupLinkViaChat() } label: {
                                 Label("Share via chat", systemImage: "arrowshape.turn.up.forward")
                             }
                         }
+                    }
+
+                    if !isChannel {
+                        secureGroupAccessRows(groupLink)
                     }
 
                     if !creatingGroup && !isChannel {
@@ -155,13 +171,17 @@ struct GroupLinkView: View {
                 switch alert {
                 case .deleteLink:
                     return Alert(
-                        title: Text("Delete link?"),
-                        message: Text("All group members will remain connected."),
+                        title: Text(groupAccessPolicy == nil ? "Delete link?" : "Revoke link and access code?"),
+                        message: Text("The invite will stop working. All existing group members remain connected."),
                         primaryButton: .destructive(Text("Delete")) {
                             Task {
                                 do {
                                     try await apiDeleteGroupLink(groupId)
-                                    await MainActor.run { groupLink = nil }
+                                    _ = xauXatRemoveGroupAccessPolicy(groupId: groupId)
+                                    await MainActor.run {
+                                        groupAccessPolicy = nil
+                                        groupLink = nil
+                                    }
                                 } catch let error {
                                     logger.error("GroupLinkView apiDeleteGroupLink: \(responseError(error))")
                                 }
@@ -183,8 +203,13 @@ struct GroupLinkView: View {
                     }
                 }
             }
+            .onChange(of: showShortLink) { _ in
+                refreshProtectedAccessLinkIfNeeded()
+            }
             .task {
+                groupAccessPolicy = xauXatGroupAccessPolicy(groupId: groupId)
                 await prepareGroupLinkView()
+                refreshProtectedAccessLinkIfNeeded()
             }
         }
         .modifier(ThemedBackground(grouped: true))
@@ -203,8 +228,128 @@ struct GroupLinkView: View {
         plusEntitlements.isAuthorized(for: .largeGroups)
     }
 
+    private var canUseSecureGroupAccess: Bool {
+        plusEntitlements.isAuthorized(for: .secureGroupAccess)
+    }
+
     private var currentGroupMemberLimit: Int {
         canUseLargeGroups ? XAUXAT_PLUS_GROUP_MEMBER_LIMIT : XAUXAT_FREE_GROUP_MEMBER_LIMIT
+    }
+
+    @ViewBuilder
+    private func secureGroupAccessRows(_ link: GroupLink) -> some View {
+        if let groupAccessPolicy {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Access code")
+                    .foregroundColor(theme.colors.secondary)
+                Text(groupAccessPolicy.accessCode)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                Text("Share this code separately. It is never included in the protected link.")
+                    .font(.caption)
+                    .foregroundColor(theme.colors.secondary)
+            }
+            Button {
+                UIPasteboard.general.string = groupAccessPolicy.accessCode
+            } label: {
+                Label("Copy access code", systemImage: "doc.on.doc")
+            }
+            Button(role: .destructive) { alert = .deleteLink } label: {
+                Label("Revoke link and code", systemImage: "xmark.circle")
+            }
+        } else if canUseSecureGroupAccess {
+            Button {
+                enableProtectedGroupAccess(link)
+            } label: {
+                Label("Require access code", systemImage: "lock")
+            }
+            Text("XauXat generates a strong code. The protected link cannot reveal the SimpleX group link without it.")
+                .font(.caption)
+                .foregroundColor(theme.colors.secondary)
+        } else {
+            NavigationLink {
+                XauXatPlusView()
+            } label: {
+                Label("Require access code · Plus", systemImage: "lock.fill")
+            }
+        }
+    }
+
+    private func enableProtectedGroupAccess(_: GroupLink) {
+        guard canUseSecureGroupAccess else { return }
+        preparingProtectedAccess = true
+        Task {
+            do {
+                // Rotate first so any previously shared unprotected copy stops
+                // working as soon as protection is enabled.
+                try await apiDeleteGroupLink(groupId)
+                guard let freshLink = try await apiCreateGroupLink(
+                    groupId,
+                    memberRole: groupLinkMemberRole,
+                    enforceGroupLimit: true,
+                    allowLargeGroup: canUseLargeGroups
+                ) else {
+                    throw XauXatGroupAccessSetupError.linkCreationFailed
+                }
+                let rawLink = freshLink.connLinkContact.simplexChatUri(short: showShortLink)
+                let policy = await Task.detached {
+                    xauXatCreateGroupAccessPolicy(groupId: groupId, rawLink: rawLink)
+                }.value
+                guard let policy, xauXatSaveGroupAccessPolicy(policy) else {
+                    try? await apiDeleteGroupLink(groupId)
+                    throw XauXatGroupAccessSetupError.encryptionFailed
+                }
+                await MainActor.run {
+                    preparingProtectedAccess = false
+                    groupLink = freshLink
+                    groupAccessPolicy = policy
+                }
+            } catch {
+                await MainActor.run {
+                    preparingProtectedAccess = false
+                    groupLink = nil
+                    showAlert(
+                        NSLocalizedString("Couldn't protect group link", comment: "alert title"),
+                        message: NSLocalizedString("The previous link was revoked, but XauXat could not create the protected replacement. Create a new link and try again.", comment: "alert message")
+                    )
+                }
+            }
+        }
+    }
+
+    private func refreshProtectedAccessLinkIfNeeded() {
+        guard let link = groupLink, let policy = groupAccessPolicy else { return }
+        let rawLink = link.connLinkContact.simplexChatUri(short: showShortLink)
+        guard !xauXatGroupAccessPolicyMatches(policy, rawLink: rawLink) else { return }
+        preparingProtectedAccess = true
+        Task {
+            let refreshed = await Task.detached {
+                xauXatRefreshGroupAccessPolicy(policy, rawLink: rawLink)
+            }.value
+            await MainActor.run {
+                preparingProtectedAccess = false
+                guard let refreshed, xauXatSaveGroupAccessPolicy(refreshed) else {
+                    showAlert(
+                        NSLocalizedString("Couldn't refresh protected link", comment: "alert title"),
+                        message: NSLocalizedString("Try again before sharing this group invite.", comment: "alert message")
+                    )
+                    return
+                }
+                groupAccessPolicy = refreshed
+            }
+        }
+    }
+
+    private func protectedPolicyForSharing(_ link: GroupLink) async -> XauXatGroupAccessPolicy? {
+        guard let policy = groupAccessPolicy else { return nil }
+        let rawLink = link.connLinkContact.simplexChatUri(short: showShortLink)
+        if xauXatGroupAccessPolicyMatches(policy, rawLink: rawLink) { return policy }
+        let refreshed = await Task.detached {
+            xauXatRefreshGroupAccessPolicy(policy, rawLink: rawLink)
+        }.value
+        guard let refreshed, xauXatSaveGroupAccessPolicy(refreshed) else { return nil }
+        await MainActor.run { groupAccessPolicy = refreshed }
+        return refreshed
     }
 
     private func prepareGroupLinkView() async {
@@ -313,7 +458,20 @@ struct GroupLinkView: View {
                 if !isChannel {
                     groupCapacity = try await apiRequireXauXatGroupCapacity(groupId, allowLargeGroup: canUseLargeGroups)
                 }
-                await MainActor.run { link.shareAddress(short: showShortLink) }
+                if groupAccessPolicy != nil {
+                    guard let policy = await protectedPolicyForSharing(link) else {
+                        await MainActor.run {
+                            showAlert(
+                                NSLocalizedString("Protected link unavailable", comment: "alert title"),
+                                message: NSLocalizedString("XauXat could not refresh the protected link. Try again.", comment: "alert message")
+                            )
+                        }
+                        return
+                    }
+                    await MainActor.run { showShareSheet(items: [policy.protectedLink]) }
+                } else {
+                    await MainActor.run { link.shareAddress(short: showShortLink) }
+                }
             } catch {
                 await MainActor.run {
                     showErrorAlert(error, NSLocalizedString("Group link unavailable", comment: ""))

@@ -9,6 +9,7 @@
 import Foundation
 import Security
 import CryptoKit
+import CommonCrypto
 
 private let ACCESS_POLICY: CFString = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 private let ACCESS_GROUP: String = "5NN7GUYB6T.chat.simplex.app"
@@ -31,6 +32,9 @@ private let DECOY_CONTACT_INVITE_POLICIES_ITEM: String = "contactInvitePolicies.
 private let CONTACT_INVITE_ENVELOPE_QUERY_ITEM: String = "xau_invite"
 private let PRIMARY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM: String = "expiredContactInviteEnvelopes"
 private let DECOY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM: String = "expiredContactInviteEnvelopes.localProfile"
+private let PRIMARY_GROUP_ACCESS_POLICIES_ITEM: String = "groupAccessPolicies"
+private let DECOY_GROUP_ACCESS_POLICIES_ITEM: String = "groupAccessPolicies.localProfile"
+private let GROUP_ACCESS_ATTEMPTS_PREFIX: String = "groupAccessAttempts"
 
 public enum XauXatStorageScope: Sendable {
     case primary
@@ -76,8 +80,11 @@ private let kcPrimaryProtectedProfilePasswords = KeyChainItem(forKey: PRIMARY_PR
 private let kcDecoyProtectedProfilePasswords = KeyChainItem(forKey: DECOY_PROTECTED_PROFILE_PASSWORDS_ITEM)
 private let kcPrimaryContactInvitePolicies = KeyChainItem(forKey: PRIMARY_CONTACT_INVITE_POLICIES_ITEM)
 private let kcDecoyContactInvitePolicies = KeyChainItem(forKey: DECOY_CONTACT_INVITE_POLICIES_ITEM)
+private let kcPrimaryGroupAccessPolicies = KeyChainItem(forKey: PRIMARY_GROUP_ACCESS_POLICIES_ITEM)
+private let kcDecoyGroupAccessPolicies = KeyChainItem(forKey: DECOY_GROUP_ACCESS_POLICIES_ITEM)
 private let xauXatContactInvitePoliciesLock = NSLock()
 private let xauXatExpiredContactInviteEnvelopesLock = NSLock()
+private let xauXatGroupAccessPoliciesLock = NSLock()
 private let kcPrimaryExpiredContactInviteEnvelopes = KeyChainItem(forKey: PRIMARY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM)
 private let kcDecoyExpiredContactInviteEnvelopes = KeyChainItem(forKey: DECOY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM)
 
@@ -542,6 +549,286 @@ public func xauXatContactInvitePermissions(connectionId: Int64) -> XauXatContact
 public func xauXatContactInvitePermissions(_ contact: Contact) -> XauXatContactInvitePermissions {
     guard let connectionId = contact.activeConn?.connId else { return .init() }
     return xauXatContactInvitePermissions(connectionId: connectionId)
+}
+
+public struct XauXatGroupAccessPolicy: Codable, Hashable, Sendable {
+    public let groupId: Int64
+    public let accessCode: String
+    public let protectedLink: String
+    public let rawLinkFingerprint: String
+    public let createdAt: Date
+
+    public init(groupId: Int64, accessCode: String, protectedLink: String, rawLinkFingerprint: String, createdAt: Date) {
+        self.groupId = groupId
+        self.accessCode = accessCode
+        self.protectedLink = protectedLink
+        self.rawLinkFingerprint = rawLinkFingerprint
+        self.createdAt = createdAt
+    }
+}
+
+public enum XauXatGroupAccessUnlockResult: Sendable {
+    case notProtected
+    case unlocked(link: String)
+    case incorrectCode(retryAfter: Int)
+    case rateLimited(retryAfter: Int)
+    case invalid
+}
+
+private struct XauXatGroupAccessEnvelope: Codable {
+    let version: Int
+    let kdf: String
+    let iterations: Int
+    let salt: Data
+    let sealedLink: Data
+}
+
+private struct XauXatGroupAccessAttemptState: Codable {
+    var failures: Int
+    var blockedUntil: Date
+}
+
+private let XAUXAT_GROUP_ACCESS_VERSION = 1
+private let XAUXAT_GROUP_ACCESS_KDF = "pbkdf2-sha256"
+private let XAUXAT_GROUP_ACCESS_ITERATIONS = 310_000
+private let XAUXAT_GROUP_ACCESS_SALT_BYTES = 16
+private let XAUXAT_GROUP_ACCESS_KEY_BYTES = 32
+private let XAUXAT_GROUP_ACCESS_QUERY_ITEM = "xau_group"
+private let XAUXAT_GROUP_ACCESS_HOST = "xauxat.app"
+private let XAUXAT_GROUP_ACCESS_PATH = "/group-access"
+private let XAUXAT_GROUP_ACCESS_CODE_ALPHABET = Array("23456789ABCDEFGHJKLMNPQRSTUVWXYZ")
+
+private var kcGroupAccessPolicies: KeyChainItem {
+    xauXatStorageScope() == .decoy ? kcDecoyGroupAccessPolicies : kcPrimaryGroupAccessPolicies
+}
+
+private func xauXatGroupAccessRawLinkFingerprint(_ link: String) -> String {
+    xauXatBase64URL(Data(SHA256.hash(data: Data(link.utf8))))
+}
+
+private func xauXatGroupAccessAttemptKey(_ link: String) -> String {
+    let scope = xauXatStorageScope() == .decoy ? "localProfile" : "primary"
+    let fingerprint = xauXatBase64URL(Data(SHA256.hash(data: Data(link.utf8))))
+    return "\(GROUP_ACCESS_ATTEMPTS_PREFIX).\(scope).\(fingerprint)"
+}
+
+private func xauXatReadGroupAccessPolicies() -> [Int64: XauXatGroupAccessPolicy] {
+    guard let value = kcGroupAccessPolicies.get(),
+          let data = value.data(using: .utf8),
+          let policies = try? JSONDecoder().decode([String: XauXatGroupAccessPolicy].self, from: data) else { return [:] }
+    return Dictionary(uniqueKeysWithValues: policies.compactMap { key, value in
+        Int64(key).map { ($0, value) }
+    })
+}
+
+@discardableResult
+private func xauXatWriteGroupAccessPolicies(_ policies: [Int64: XauXatGroupAccessPolicy]) -> Bool {
+    guard !policies.isEmpty else { return kcGroupAccessPolicies.remove() }
+    let encoded = Dictionary(uniqueKeysWithValues: policies.map { (String($0.key), $0.value) })
+    guard let data = try? JSONEncoder().encode(encoded),
+          let value = String(data: data, encoding: .utf8) else { return false }
+    return kcGroupAccessPolicies.set(value)
+}
+
+public func xauXatGroupAccessPolicy(groupId: Int64) -> XauXatGroupAccessPolicy? {
+    xauXatGroupAccessPoliciesLock.lock()
+    defer { xauXatGroupAccessPoliciesLock.unlock() }
+    return xauXatReadGroupAccessPolicies()[groupId]
+}
+
+public func xauXatGroupAccessPolicies() -> [XauXatGroupAccessPolicy] {
+    xauXatGroupAccessPoliciesLock.lock()
+    defer { xauXatGroupAccessPoliciesLock.unlock() }
+    return Array(xauXatReadGroupAccessPolicies().values)
+}
+
+@discardableResult
+public func xauXatSaveGroupAccessPolicy(_ policy: XauXatGroupAccessPolicy) -> Bool {
+    xauXatGroupAccessPoliciesLock.lock()
+    defer { xauXatGroupAccessPoliciesLock.unlock() }
+    var policies = xauXatReadGroupAccessPolicies()
+    policies[policy.groupId] = policy
+    return xauXatWriteGroupAccessPolicies(policies)
+}
+
+@discardableResult
+public func xauXatRemoveGroupAccessPolicy(groupId: Int64) -> Bool {
+    xauXatGroupAccessPoliciesLock.lock()
+    defer { xauXatGroupAccessPoliciesLock.unlock() }
+    var policies = xauXatReadGroupAccessPolicies()
+    policies.removeValue(forKey: groupId)
+    return xauXatWriteGroupAccessPolicies(policies)
+}
+
+@discardableResult
+public func xauXatRemoveGroupAccessPolicies(_ scope: XauXatStorageScope) -> Bool {
+    xauXatGroupAccessPoliciesLock.lock()
+    defer { xauXatGroupAccessPoliciesLock.unlock() }
+    switch scope {
+    case .primary: return kcPrimaryGroupAccessPolicies.remove()
+    case .decoy: return kcDecoyGroupAccessPolicies.remove()
+    }
+}
+
+public func xauXatGenerateGroupAccessCode() -> String? {
+    var characters: [Character] = []
+    while characters.count < 12 {
+        var byte: UInt8 = 0
+        guard SecRandomCopyBytes(kSecRandomDefault, 1, &byte) == errSecSuccess else { return nil }
+        // Rejection sampling avoids modulo bias for the 32-character alphabet.
+        guard Int(byte) < 224 else { continue }
+        characters.append(XAUXAT_GROUP_ACCESS_CODE_ALPHABET[Int(byte) % XAUXAT_GROUP_ACCESS_CODE_ALPHABET.count])
+    }
+    let raw = String(characters)
+    return stride(from: 0, to: raw.count, by: 4).map { offset in
+        let start = raw.index(raw.startIndex, offsetBy: offset)
+        let end = raw.index(start, offsetBy: min(4, raw.distance(from: start, to: raw.endIndex)))
+        return String(raw[start..<end])
+    }.joined(separator: "-")
+}
+
+public func xauXatCreateGroupAccessPolicy(groupId: Int64, rawLink: String) -> XauXatGroupAccessPolicy? {
+    guard let code = xauXatGenerateGroupAccessCode(),
+          let protectedLink = xauXatProtectedGroupInviteLink(rawLink: rawLink, accessCode: code) else { return nil }
+    return XauXatGroupAccessPolicy(
+        groupId: groupId,
+        accessCode: code,
+        protectedLink: protectedLink,
+        rawLinkFingerprint: xauXatGroupAccessRawLinkFingerprint(rawLink),
+        createdAt: .now
+    )
+}
+
+public func xauXatRefreshGroupAccessPolicy(_ policy: XauXatGroupAccessPolicy, rawLink: String) -> XauXatGroupAccessPolicy? {
+    guard let protectedLink = xauXatProtectedGroupInviteLink(rawLink: rawLink, accessCode: policy.accessCode) else { return nil }
+    return XauXatGroupAccessPolicy(
+        groupId: policy.groupId,
+        accessCode: policy.accessCode,
+        protectedLink: protectedLink,
+        rawLinkFingerprint: xauXatGroupAccessRawLinkFingerprint(rawLink),
+        createdAt: policy.createdAt
+    )
+}
+
+public func xauXatGroupAccessPolicyMatches(_ policy: XauXatGroupAccessPolicy, rawLink: String) -> Bool {
+    policy.rawLinkFingerprint == xauXatGroupAccessRawLinkFingerprint(rawLink)
+}
+
+public func xauXatIsProtectedGroupInviteLink(_ value: String) -> Bool {
+    guard let components = URLComponents(string: value) else { return false }
+    return components.host == XAUXAT_GROUP_ACCESS_HOST
+        && components.path == XAUXAT_GROUP_ACCESS_PATH
+        && components.queryItems?.contains(where: { $0.name == XAUXAT_GROUP_ACCESS_QUERY_ITEM }) == true
+}
+
+public func xauXatProtectedGroupInviteLink(rawLink: String, accessCode: String) -> String? {
+    guard !rawLink.isEmpty,
+          let normalizedCode = xauXatNormalizedGroupAccessCode(accessCode),
+          let salt = xauXatRandomData(count: XAUXAT_GROUP_ACCESS_SALT_BYTES),
+          let key = xauXatGroupAccessKey(code: normalizedCode, salt: salt, iterations: XAUXAT_GROUP_ACCESS_ITERATIONS) else { return nil }
+    let header = xauXatGroupAccessHeader()
+    guard let box = try? ChaChaPoly.seal(Data(rawLink.utf8), using: key, authenticating: header) else { return nil }
+    let envelope = XauXatGroupAccessEnvelope(
+        version: XAUXAT_GROUP_ACCESS_VERSION,
+        kdf: XAUXAT_GROUP_ACCESS_KDF,
+        iterations: XAUXAT_GROUP_ACCESS_ITERATIONS,
+        salt: salt,
+        sealedLink: box.combined
+    )
+    guard let data = try? JSONEncoder().encode(envelope) else { return nil }
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = XAUXAT_GROUP_ACCESS_HOST
+    components.path = XAUXAT_GROUP_ACCESS_PATH
+    components.queryItems = [URLQueryItem(name: XAUXAT_GROUP_ACCESS_QUERY_ITEM, value: xauXatBase64URL(data))]
+    return components.string
+}
+
+public func xauXatUnlockProtectedGroupInvite(
+    _ value: String,
+    accessCode: String,
+    at now: Date = .now
+) -> XauXatGroupAccessUnlockResult {
+    guard xauXatIsProtectedGroupInviteLink(value) else { return .notProtected }
+    let attemptItem = KeyChainItem(forKey: xauXatGroupAccessAttemptKey(value))
+    if let stored = attemptItem.get(),
+       let data = stored.data(using: .utf8),
+       let state = try? JSONDecoder().decode(XauXatGroupAccessAttemptState.self, from: data),
+       state.blockedUntil > now {
+        return .rateLimited(retryAfter: max(1, Int(ceil(state.blockedUntil.timeIntervalSince(now)))))
+    }
+    guard let components = URLComponents(string: value),
+          let encoded = components.queryItems?.first(where: { $0.name == XAUXAT_GROUP_ACCESS_QUERY_ITEM })?.value,
+          let data = xauXatBase64URLData(encoded),
+          let envelope = try? JSONDecoder().decode(XauXatGroupAccessEnvelope.self, from: data),
+          envelope.version == XAUXAT_GROUP_ACCESS_VERSION,
+          envelope.kdf == XAUXAT_GROUP_ACCESS_KDF,
+          envelope.iterations == XAUXAT_GROUP_ACCESS_ITERATIONS,
+          envelope.salt.count == XAUXAT_GROUP_ACCESS_SALT_BYTES,
+          let box = try? ChaChaPoly.SealedBox(combined: envelope.sealedLink) else { return .invalid }
+    guard let normalizedCode = xauXatNormalizedGroupAccessCode(accessCode),
+          let key = xauXatGroupAccessKey(code: normalizedCode, salt: envelope.salt, iterations: envelope.iterations) else {
+        return xauXatRecordGroupAccessFailure(attemptItem: attemptItem, now: now)
+    }
+    do {
+        let cleartext = try ChaChaPoly.open(box, using: key, authenticating: xauXatGroupAccessHeader())
+        guard let link = String(data: cleartext, encoding: .utf8), !link.isEmpty else { return .invalid }
+        _ = attemptItem.remove()
+        return .unlocked(link: link)
+    } catch {
+        return xauXatRecordGroupAccessFailure(attemptItem: attemptItem, now: now)
+    }
+}
+
+private func xauXatRecordGroupAccessFailure(attemptItem: KeyChainItem, now: Date) -> XauXatGroupAccessUnlockResult {
+    let previous: XauXatGroupAccessAttemptState? = attemptItem.get()
+        .flatMap { $0.data(using: .utf8) }
+        .flatMap { try? JSONDecoder().decode(XauXatGroupAccessAttemptState.self, from: $0) }
+    let failures = (previous?.failures ?? 0) + 1
+    let delay = min(60, 1 << min(max(0, failures - 1), 6))
+    let state = XauXatGroupAccessAttemptState(failures: failures, blockedUntil: now.addingTimeInterval(TimeInterval(delay)))
+    if let stateData = try? JSONEncoder().encode(state), let stateValue = String(data: stateData, encoding: .utf8) {
+        _ = attemptItem.set(stateValue)
+    }
+    return .incorrectCode(retryAfter: delay)
+}
+
+private func xauXatNormalizedGroupAccessCode(_ code: String) -> String? {
+    let normalized = code.uppercased().filter { $0.isLetter || $0.isNumber }
+    return normalized.count == 12 ? normalized : nil
+}
+
+private func xauXatGroupAccessHeader() -> Data {
+    Data("xauxat.group-access|v1|pbkdf2-sha256|310000|chacha20-poly1305".utf8)
+}
+
+private func xauXatRandomData(count: Int) -> Data? {
+    var data = Data(count: count)
+    let status = data.withUnsafeMutableBytes { bytes in
+        SecRandomCopyBytes(kSecRandomDefault, count, bytes.baseAddress!)
+    }
+    return status == errSecSuccess ? data : nil
+}
+
+private func xauXatGroupAccessKey(code: String, salt: Data, iterations: Int) -> SymmetricKey? {
+    let password = Array(code.utf8)
+    var key = [UInt8](repeating: 0, count: XAUXAT_GROUP_ACCESS_KEY_BYTES)
+    let result = password.withUnsafeBytes { passwordBytes in
+        salt.withUnsafeBytes { saltBytes in
+            CCKeyDerivationPBKDF(
+                CCPBKDFAlgorithm(kCCPBKDF2),
+                passwordBytes.baseAddress?.assumingMemoryBound(to: Int8.self),
+                passwordBytes.count,
+                saltBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                saltBytes.count,
+                CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
+                UInt32(iterations),
+                &key,
+                key.count
+            )
+        }
+    }
+    return result == kCCSuccess ? SymmetricKey(data: key) : nil
 }
 
 public struct KeyChainItem {
