@@ -34,6 +34,10 @@ struct GroupLinkView: View {
     @State private var oneTimeInvites: [XauXatOneTimeGroupInvite] = []
     @State private var creatingOneTimeInvite = false
     @State private var protectOneTimeInviteWithCode = false
+    @State private var groupAccessLifetime: XauXatGroupAccessLifetime = .never
+    @State private var customGroupAccessExpiry = Date.now.addingTimeInterval(24 * 60 * 60)
+    @State private var oneTimeAccessLifetime: XauXatGroupAccessLifetime = .never
+    @State private var customOneTimeAccessExpiry = Date.now.addingTimeInterval(24 * 60 * 60)
 
     private enum GroupLinkAlert: Identifiable {
         case deleteLink
@@ -123,10 +127,10 @@ struct GroupLinkView: View {
                         .frame(height: 36)
                     }
                     if canOfferGroupAccess {
-                        if let groupAccessPolicy {
+                        if let groupAccessPolicy, !groupAccessPolicy.isExpired() {
                             QRCode(uri: groupAccessPolicy.protectedLink)
                                 .id("xauxat-protected-group-qr-\(groupAccessPolicy.rawLinkFingerprint)")
-                        } else {
+                        } else if groupAccessPolicy == nil {
                             SimpleXCreatedLinkQRCode(link: groupLink.connLinkContact, short: $showShortLink)
                                 .id("simplex-qrcode-view-for-\(groupLink.connLinkContact.simplexChatUri(short: showShortLink))")
                         }
@@ -137,14 +141,16 @@ struct GroupLinkView: View {
                                 Label("Upgrade link", systemImage: "arrow.up")
                             }
                         }
-                        Button {
-                            if !isChannel && groupLink.shouldBeUpgraded {
-                                upgradeAndShareLinkAlert(groupLink: groupLink)
-                            } else {
-                                shareGroupLink(groupLink)
+                        if groupAccessPolicy?.isExpired() != true {
+                            Button {
+                                if !isChannel && groupLink.shouldBeUpgraded {
+                                    upgradeAndShareLinkAlert(groupLink: groupLink)
+                                } else {
+                                    shareGroupLink(groupLink)
+                                }
+                            } label: {
+                                Label("Share link", systemImage: "square.and.arrow.up")
                             }
-                        } label: {
-                            Label("Share link", systemImage: "square.and.arrow.up")
                         }
                         if groupInfo?.groupProfile.publicGroup != nil && groupAccessPolicy == nil {
                             Button { shareGroupLinkViaChat() } label: {
@@ -242,6 +248,12 @@ struct GroupLinkView: View {
         .onReceive(NotificationCenter.default.publisher(for: .xauXatOneTimeGroupInvitesChanged)) { _ in
             refreshOneTimeInvites()
         }
+        .task(id: groupAccessPolicy?.expiresAt) {
+            await waitForProtectedGroupAccessExpiry()
+        }
+        .task(id: oneTimeInvites.compactMap(\.expiresAt).min()) {
+            await waitForOneTimeGroupAccessExpiry()
+        }
         .sheet(isPresented: $showSharePicker) {
             if let gInfo = groupInfo {
                 shareChannelPicker(groupInfo: gInfo, composeState: composeState)
@@ -271,7 +283,24 @@ struct GroupLinkView: View {
 
     @ViewBuilder
     private func secureGroupAccessRows(_ link: GroupLink) -> some View {
-        if let groupAccessPolicy {
+        if let groupAccessPolicy, groupAccessPolicy.isExpired() {
+            HStack {
+                Text("Protected access")
+                Spacer()
+                Text("Expired")
+                    .foregroundColor(theme.colors.secondary)
+            }
+            if let expiresAt = groupAccessPolicy.expiresAt {
+                Text(expiresAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundColor(theme.colors.secondary)
+            }
+            Button(role: .destructive) {
+                Task { await expireProtectedGroupAccess(groupAccessPolicy) }
+            } label: {
+                Label("Remove expired access", systemImage: "trash")
+            }
+        } else if let groupAccessPolicy {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Access code")
                     .foregroundColor(theme.colors.secondary)
@@ -282,6 +311,14 @@ struct GroupLinkView: View {
                     .font(.caption)
                     .foregroundColor(theme.colors.secondary)
             }
+            if let expiresAt = groupAccessPolicy.expiresAt {
+                HStack {
+                    Text("Expires")
+                    Spacer()
+                    Text(expiresAt.formatted(date: .abbreviated, time: .shortened))
+                        .foregroundColor(theme.colors.secondary)
+                }
+            }
             Button {
                 UIPasteboard.general.string = groupAccessPolicy.accessCode
             } label: {
@@ -291,6 +328,7 @@ struct GroupLinkView: View {
                 Label("Revoke link and code", systemImage: "xmark.circle")
             }
         } else if canUseSecureGroupAccess {
+            groupAccessExpiryPicker(lifetime: $groupAccessLifetime, customExpiry: $customGroupAccessExpiry)
             Button {
                 enableProtectedGroupAccess(link)
             } label: {
@@ -312,6 +350,7 @@ struct GroupLinkView: View {
     private func oneTimeGroupInviteRows() -> some View {
         if canUseOneTimeGroupInvites {
             if !oneTimeInvites.contains(where: { $0.state == .active || $0.state == .processing }) {
+                groupAccessExpiryPicker(lifetime: $oneTimeAccessLifetime, customExpiry: $customOneTimeAccessExpiry)
                 Toggle("Protect with a one-time code", isOn: $protectOneTimeInviteWithCode)
                 Text("The code unlocks only this access and is erased locally as soon as the SimpleX invitation is used.")
                     .font(.caption)
@@ -393,6 +432,11 @@ struct GroupLinkView: View {
                     .font(.caption)
                     .foregroundColor(theme.colors.secondary)
             }
+            if let expiresAt = invite.expiresAt {
+                Text("Expires \(expiresAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption)
+                    .foregroundColor(theme.colors.secondary)
+            }
             if invite.state == .consumed {
                 Text("Link and code invalidated")
                     .font(.caption)
@@ -403,6 +447,26 @@ struct GroupLinkView: View {
                     .font(.caption)
                     .foregroundColor(.red)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func groupAccessExpiryPicker(
+        lifetime: Binding<XauXatGroupAccessLifetime>,
+        customExpiry: Binding<Date>
+    ) -> some View {
+        Picker("Expires", selection: lifetime) {
+            ForEach(XauXatGroupAccessLifetime.allCases) { value in
+                Text(value.label).tag(value)
+            }
+        }
+        if lifetime.wrappedValue == .custom {
+            DatePicker(
+                "Expiry date",
+                selection: customExpiry,
+                in: Date.now...,
+                displayedComponents: [.date, .hourAndMinute]
+            )
         }
     }
 
@@ -434,8 +498,9 @@ struct GroupLinkView: View {
                     throw XauXatGroupAccessSetupError.linkCreationFailed
                 }
                 let rawLink = freshLink.connLinkContact.simplexChatUri(short: showShortLink)
+                let expiresAt = groupAccessLifetime.expiresAt(custom: customGroupAccessExpiry)
                 let policy = await Task.detached {
-                    xauXatCreateGroupAccessPolicy(groupId: groupId, rawLink: rawLink)
+                    xauXatCreateGroupAccessPolicy(groupId: groupId, rawLink: rawLink, expiresAt: expiresAt)
                 }.value
                 guard let policy, xauXatSaveGroupAccessPolicy(policy) else {
                     try? await apiDeleteGroupLink(groupId)
@@ -474,6 +539,7 @@ struct GroupLinkView: View {
                     throw XauXatGroupAccessSetupError.inviteCreationFailed
                 }
                 let rawLink = createdLink.simplexChatUri(short: false)
+                let expiresAt = oneTimeAccessLifetime.expiresAt(custom: customOneTimeAccessExpiry)
                 let code = protectOneTimeInviteWithCode ? xauXatGenerateGroupAccessCode() : nil
                 guard !protectOneTimeInviteWithCode || code != nil else {
                     try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
@@ -482,14 +548,16 @@ struct GroupLinkView: View {
                 let shareLink: String
                 if let code {
                     guard let protectedLink = await Task.detached(operation: {
-                        xauXatProtectedGroupInviteLink(rawLink: rawLink, accessCode: code)
+                        xauXatProtectedGroupInviteLink(rawLink: rawLink, accessCode: code, expiresAt: expiresAt)
                     }).value else {
                         try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
                         throw XauXatGroupAccessSetupError.encryptionFailed
                     }
                     shareLink = protectedLink
                 } else {
-                    shareLink = rawLink
+                    shareLink = expiresAt.flatMap {
+                        xauXatSignedContactInviteLink(link: rawLink, expiresAt: $0)
+                    } ?? rawLink
                 }
                 let invite = XauXatOneTimeGroupInvite(
                     connectionId: connection.pccConnId,
@@ -498,7 +566,8 @@ struct GroupLinkView: View {
                     memberRole: groupLinkMemberRole,
                     shareLink: shareLink,
                     accessCode: code,
-                    accessCodeIsOneTime: code != nil
+                    accessCodeIsOneTime: code != nil,
+                    expiresAt: expiresAt
                 )
                 guard xauXatSaveOneTimeGroupInvite(invite) else {
                     try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
@@ -539,8 +608,47 @@ struct GroupLinkView: View {
         }
     }
 
+    private func waitForProtectedGroupAccessExpiry() async {
+        guard let policy = groupAccessPolicy, let expiresAt = policy.expiresAt else { return }
+        let delay = expiresAt.timeIntervalSinceNow
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+        guard !Task.isCancelled, policy.isExpired() else { return }
+        await expireProtectedGroupAccess(policy)
+    }
+
+    private func expireProtectedGroupAccess(_ policy: XauXatGroupAccessPolicy) async {
+        guard policy.isExpired() else { return }
+        do {
+            try await apiDeleteGroupLink(policy.groupId)
+            _ = xauXatRemoveGroupAccessPolicy(groupId: policy.groupId)
+            await MainActor.run {
+                groupAccessPolicy = nil
+                groupLink = nil
+            }
+        } catch {
+            logger.warning("Unable to remove expired protected group access: \(responseError(error))")
+            await MainActor.run { refreshOneTimeInvites() }
+        }
+    }
+
+    private func waitForOneTimeGroupAccessExpiry() async {
+        guard let expiresAt = oneTimeInvites
+            .filter({ $0.state == .active })
+            .compactMap(\.expiresAt)
+            .min() else { return }
+        let delay = expiresAt.timeIntervalSinceNow
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+        guard !Task.isCancelled else { return }
+        await expirePendingXauXatGroupAccesses()
+        await MainActor.run { refreshOneTimeInvites() }
+    }
+
     private func refreshProtectedAccessLinkIfNeeded() {
-        guard let link = groupLink, let policy = groupAccessPolicy else { return }
+        guard let link = groupLink, let policy = groupAccessPolicy, !policy.isExpired() else { return }
         let rawLink = link.connLinkContact.simplexChatUri(short: showShortLink)
         guard !xauXatGroupAccessPolicyMatches(policy, rawLink: rawLink) else { return }
         preparingProtectedAccess = true
@@ -563,7 +671,7 @@ struct GroupLinkView: View {
     }
 
     private func protectedPolicyForSharing(_ link: GroupLink) async -> XauXatGroupAccessPolicy? {
-        guard let policy = groupAccessPolicy else { return nil }
+        guard let policy = groupAccessPolicy, !policy.isExpired() else { return nil }
         let rawLink = link.connLinkContact.simplexChatUri(short: showShortLink)
         if xauXatGroupAccessPolicyMatches(policy, rawLink: rawLink) { return policy }
         let refreshed = await Task.detached {
@@ -680,7 +788,14 @@ struct GroupLinkView: View {
                 if !isChannel {
                     groupCapacity = try await apiRequireXauXatGroupCapacity(groupId, allowLargeGroup: canUseLargeGroups)
                 }
-                if groupAccessPolicy != nil {
+                if let groupAccessPolicy, groupAccessPolicy.isExpired() {
+                    await MainActor.run {
+                        showAlert(
+                            NSLocalizedString("Group access expired", comment: "alert title"),
+                            message: NSLocalizedString("Create a new protected access before sharing.", comment: "alert message")
+                        )
+                    }
+                } else if groupAccessPolicy != nil {
                     guard let policy = await protectedPolicyForSharing(link) else {
                         await MainActor.run {
                             showAlert(
@@ -714,6 +829,39 @@ struct GroupLinkView: View {
                     showErrorAlert(error, NSLocalizedString("Group link unavailable", comment: ""))
                 }
             }
+        }
+    }
+}
+
+private enum XauXatGroupAccessLifetime: Int, CaseIterable, Identifiable {
+    case never
+    case fifteenMinutes
+    case oneHour
+    case oneDay
+    case sevenDays
+    case custom
+
+    var id: Self { self }
+
+    var label: LocalizedStringKey {
+        switch self {
+        case .never: "Never"
+        case .fifteenMinutes: "15 minutes"
+        case .oneHour: "1 hour"
+        case .oneDay: "24 hours"
+        case .sevenDays: "7 days"
+        case .custom: "Custom date"
+        }
+    }
+
+    func expiresAt(custom: Date) -> Date? {
+        switch self {
+        case .never: nil
+        case .fifteenMinutes: Date.now.addingTimeInterval(15 * 60)
+        case .oneHour: Date.now.addingTimeInterval(60 * 60)
+        case .oneDay: Date.now.addingTimeInterval(24 * 60 * 60)
+        case .sevenDays: Date.now.addingTimeInterval(7 * 24 * 60 * 60)
+        case .custom: custom
         }
     }
 }

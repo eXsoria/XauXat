@@ -37,6 +37,7 @@ private let DECOY_GROUP_ACCESS_POLICIES_ITEM: String = "groupAccessPolicies.loca
 private let PRIMARY_ONE_TIME_GROUP_INVITES_ITEM: String = "oneTimeGroupInvites"
 private let DECOY_ONE_TIME_GROUP_INVITES_ITEM: String = "oneTimeGroupInvites.localProfile"
 private let GROUP_ACCESS_ATTEMPTS_PREFIX: String = "groupAccessAttempts"
+private let GROUP_ACCESS_EXPIRED_PREFIX: String = "groupAccessExpired"
 
 public enum XauXatStorageScope: Sendable {
     case primary
@@ -579,6 +580,7 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
     public var contactId: Int64?
     public var consumedAt: Date?
     public var groupInvitationSentAt: Date?
+    public var coreAccessDeletedAt: Date?
     public var lastError: String?
 
     public var id: Int64 { connectionId }
@@ -599,6 +601,7 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
         contactId: Int64? = nil,
         consumedAt: Date? = nil,
         groupInvitationSentAt: Date? = nil,
+        coreAccessDeletedAt: Date? = nil,
         lastError: String? = nil
     ) {
         self.connectionId = connectionId
@@ -614,6 +617,7 @@ public struct XauXatOneTimeGroupInvite: Codable, Hashable, Identifiable {
         self.contactId = contactId
         self.consumedAt = consumedAt
         self.groupInvitationSentAt = groupInvitationSentAt
+        self.coreAccessDeletedAt = coreAccessDeletedAt
         self.lastError = lastError
     }
 }
@@ -752,8 +756,20 @@ public func xauXatRevokeOneTimeGroupInvite(connectionId: Int64) -> Bool {
     var invites = xauXatReadOneTimeGroupInvites()
     guard var invite = invites[connectionId], invite.state == .active || invite.state == .failed else { return false }
     invite.state = .revoked
+    invite.coreAccessDeletedAt = .now
     invite.shareLink = nil
     if invite.usesOneTimeAccessCode { invite.accessCode = nil }
+    invites[connectionId] = invite
+    return xauXatWriteOneTimeGroupInvites(invites)
+}
+
+@discardableResult
+public func xauXatMarkOneTimeGroupInviteCoreDeleted(connectionId: Int64, at now: Date = .now) -> Bool {
+    xauXatOneTimeGroupInvitesLock.lock()
+    defer { xauXatOneTimeGroupInvitesLock.unlock() }
+    var invites = xauXatReadOneTimeGroupInvites()
+    guard var invite = invites[connectionId] else { return false }
+    invite.coreAccessDeletedAt = now
     invites[connectionId] = invite
     return xauXatWriteOneTimeGroupInvites(invites)
 }
@@ -774,13 +790,19 @@ public struct XauXatGroupAccessPolicy: Codable, Hashable, Sendable {
     public let protectedLink: String
     public let rawLinkFingerprint: String
     public let createdAt: Date
+    public let expiresAt: Date?
 
-    public init(groupId: Int64, accessCode: String, protectedLink: String, rawLinkFingerprint: String, createdAt: Date) {
+    public init(groupId: Int64, accessCode: String, protectedLink: String, rawLinkFingerprint: String, createdAt: Date, expiresAt: Date? = nil) {
         self.groupId = groupId
         self.accessCode = accessCode
         self.protectedLink = protectedLink
         self.rawLinkFingerprint = rawLinkFingerprint
         self.createdAt = createdAt
+        self.expiresAt = expiresAt
+    }
+
+    public func isExpired(at date: Date = .now) -> Bool {
+        expiresAt.map { $0 <= date } ?? false
     }
 }
 
@@ -789,6 +811,7 @@ public enum XauXatGroupAccessUnlockResult: Sendable {
     case unlocked(link: String)
     case incorrectCode(retryAfter: Int)
     case rateLimited(retryAfter: Int)
+    case expired
     case invalid
 }
 
@@ -800,12 +823,17 @@ private struct XauXatGroupAccessEnvelope: Codable {
     let sealedLink: Data
 }
 
+private struct XauXatGroupAccessPayload: Codable {
+    let link: String
+    let expiresAt: Int64?
+}
+
 private struct XauXatGroupAccessAttemptState: Codable {
     var failures: Int
     var blockedUntil: Date
 }
 
-private let XAUXAT_GROUP_ACCESS_VERSION = 1
+private let XAUXAT_GROUP_ACCESS_VERSION = 2
 private let XAUXAT_GROUP_ACCESS_KDF = "pbkdf2-sha256"
 private let XAUXAT_GROUP_ACCESS_ITERATIONS = 310_000
 private let XAUXAT_GROUP_ACCESS_SALT_BYTES = 16
@@ -827,6 +855,12 @@ private func xauXatGroupAccessAttemptKey(_ link: String) -> String {
     let scope = xauXatStorageScope() == .decoy ? "localProfile" : "primary"
     let fingerprint = xauXatBase64URL(Data(SHA256.hash(data: Data(link.utf8))))
     return "\(GROUP_ACCESS_ATTEMPTS_PREFIX).\(scope).\(fingerprint)"
+}
+
+private func xauXatGroupAccessExpiredKey(_ link: String) -> String {
+    let scope = xauXatStorageScope() == .decoy ? "localProfile" : "primary"
+    let fingerprint = xauXatBase64URL(Data(SHA256.hash(data: Data(link.utf8))))
+    return "\(GROUP_ACCESS_EXPIRED_PREFIX).\(scope).\(fingerprint)"
 }
 
 private func xauXatReadGroupAccessPolicies() -> [Int64: XauXatGroupAccessPolicy] {
@@ -904,26 +938,28 @@ public func xauXatGenerateGroupAccessCode() -> String? {
     }.joined(separator: "-")
 }
 
-public func xauXatCreateGroupAccessPolicy(groupId: Int64, rawLink: String) -> XauXatGroupAccessPolicy? {
+public func xauXatCreateGroupAccessPolicy(groupId: Int64, rawLink: String, expiresAt: Date? = nil) -> XauXatGroupAccessPolicy? {
     guard let code = xauXatGenerateGroupAccessCode(),
-          let protectedLink = xauXatProtectedGroupInviteLink(rawLink: rawLink, accessCode: code) else { return nil }
+          let protectedLink = xauXatProtectedGroupInviteLink(rawLink: rawLink, accessCode: code, expiresAt: expiresAt) else { return nil }
     return XauXatGroupAccessPolicy(
         groupId: groupId,
         accessCode: code,
         protectedLink: protectedLink,
         rawLinkFingerprint: xauXatGroupAccessRawLinkFingerprint(rawLink),
-        createdAt: .now
+        createdAt: .now,
+        expiresAt: expiresAt
     )
 }
 
 public func xauXatRefreshGroupAccessPolicy(_ policy: XauXatGroupAccessPolicy, rawLink: String) -> XauXatGroupAccessPolicy? {
-    guard let protectedLink = xauXatProtectedGroupInviteLink(rawLink: rawLink, accessCode: policy.accessCode) else { return nil }
+    guard let protectedLink = xauXatProtectedGroupInviteLink(rawLink: rawLink, accessCode: policy.accessCode, expiresAt: policy.expiresAt) else { return nil }
     return XauXatGroupAccessPolicy(
         groupId: policy.groupId,
         accessCode: policy.accessCode,
         protectedLink: protectedLink,
         rawLinkFingerprint: xauXatGroupAccessRawLinkFingerprint(rawLink),
-        createdAt: policy.createdAt
+        createdAt: policy.createdAt,
+        expiresAt: policy.expiresAt
     )
 }
 
@@ -938,13 +974,18 @@ public func xauXatIsProtectedGroupInviteLink(_ value: String) -> Bool {
         && components.queryItems?.contains(where: { $0.name == XAUXAT_GROUP_ACCESS_QUERY_ITEM }) == true
 }
 
-public func xauXatProtectedGroupInviteLink(rawLink: String, accessCode: String) -> String? {
+public func xauXatProtectedGroupInviteLink(rawLink: String, accessCode: String, expiresAt: Date? = nil) -> String? {
     guard !rawLink.isEmpty,
           let normalizedCode = xauXatNormalizedGroupAccessCode(accessCode),
           let salt = xauXatRandomData(count: XAUXAT_GROUP_ACCESS_SALT_BYTES),
           let key = xauXatGroupAccessKey(code: normalizedCode, salt: salt, iterations: XAUXAT_GROUP_ACCESS_ITERATIONS) else { return nil }
-    let header = xauXatGroupAccessHeader()
-    guard let box = try? ChaChaPoly.seal(Data(rawLink.utf8), using: key, authenticating: header) else { return nil }
+    let header = xauXatGroupAccessHeader(version: XAUXAT_GROUP_ACCESS_VERSION)
+    let payload = XauXatGroupAccessPayload(
+        link: rawLink,
+        expiresAt: expiresAt.map { Int64($0.timeIntervalSince1970.rounded(.down)) }
+    )
+    guard let payloadData = try? JSONEncoder().encode(payload),
+          let box = try? ChaChaPoly.seal(payloadData, using: key, authenticating: header) else { return nil }
     let envelope = XauXatGroupAccessEnvelope(
         version: XAUXAT_GROUP_ACCESS_VERSION,
         kdf: XAUXAT_GROUP_ACCESS_KDF,
@@ -968,6 +1009,8 @@ public func xauXatUnlockProtectedGroupInvite(
 ) -> XauXatGroupAccessUnlockResult {
     guard xauXatIsProtectedGroupInviteLink(value) else { return .notProtected }
     let attemptItem = KeyChainItem(forKey: xauXatGroupAccessAttemptKey(value))
+    let expiredItem = KeyChainItem(forKey: xauXatGroupAccessExpiredKey(value))
+    if expiredItem.get() != nil { return .expired }
     if let stored = attemptItem.get(),
        let data = stored.data(using: .utf8),
        let state = try? JSONDecoder().decode(XauXatGroupAccessAttemptState.self, from: data),
@@ -978,7 +1021,7 @@ public func xauXatUnlockProtectedGroupInvite(
           let encoded = components.queryItems?.first(where: { $0.name == XAUXAT_GROUP_ACCESS_QUERY_ITEM })?.value,
           let data = xauXatBase64URLData(encoded),
           let envelope = try? JSONDecoder().decode(XauXatGroupAccessEnvelope.self, from: data),
-          envelope.version == XAUXAT_GROUP_ACCESS_VERSION,
+          (1...XAUXAT_GROUP_ACCESS_VERSION).contains(envelope.version),
           envelope.kdf == XAUXAT_GROUP_ACCESS_KDF,
           envelope.iterations == XAUXAT_GROUP_ACCESS_ITERATIONS,
           envelope.salt.count == XAUXAT_GROUP_ACCESS_SALT_BYTES,
@@ -988,8 +1031,22 @@ public func xauXatUnlockProtectedGroupInvite(
         return xauXatRecordGroupAccessFailure(attemptItem: attemptItem, now: now)
     }
     do {
-        let cleartext = try ChaChaPoly.open(box, using: key, authenticating: xauXatGroupAccessHeader())
-        guard let link = String(data: cleartext, encoding: .utf8), !link.isEmpty else { return .invalid }
+        let cleartext = try ChaChaPoly.open(box, using: key, authenticating: xauXatGroupAccessHeader(version: envelope.version))
+        let link: String
+        if envelope.version == 1 {
+            guard let legacyLink = String(data: cleartext, encoding: .utf8), !legacyLink.isEmpty else { return .invalid }
+            link = legacyLink
+        } else {
+            guard let payload = try? JSONDecoder().decode(XauXatGroupAccessPayload.self, from: cleartext),
+                  !payload.link.isEmpty else { return .invalid }
+            if let expiresAt = payload.expiresAt,
+               now >= Date(timeIntervalSince1970: TimeInterval(expiresAt)) {
+                _ = attemptItem.remove()
+                _ = expiredItem.set("expired")
+                return .expired
+            }
+            link = payload.link
+        }
         _ = attemptItem.remove()
         return .unlocked(link: link)
     } catch {
@@ -1015,8 +1072,8 @@ private func xauXatNormalizedGroupAccessCode(_ code: String) -> String? {
     return normalized.count == 12 ? normalized : nil
 }
 
-private func xauXatGroupAccessHeader() -> Data {
-    Data("xauxat.group-access|v1|pbkdf2-sha256|310000|chacha20-poly1305".utf8)
+private func xauXatGroupAccessHeader(version: Int) -> Data {
+    Data("xauxat.group-access|v\(version)|pbkdf2-sha256|310000|chacha20-poly1305".utf8)
 }
 
 private func xauXatRandomData(count: Int) -> Data? {
