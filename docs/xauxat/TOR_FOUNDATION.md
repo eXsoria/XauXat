@@ -88,6 +88,10 @@ on the current arm64 iOS simulator. Background timing, memory limits and direct
 socket absence still require the physical-iPhone matrix before this behaviour
 can be described as production-verified.
 
+The exact privacy boundary, fail-closed invariants and physical packet-capture
+procedure are documented in
+[`NSE_TOR_VERIFICATION.md`](NSE_TOR_VERIFICATION.md).
+
 ### Android
 
 Use a pinned `tor-android` library behind the same lifecycle contract. Run Tor
