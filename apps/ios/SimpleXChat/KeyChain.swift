@@ -8,6 +8,7 @@
 
 import Foundation
 import Security
+import CryptoKit
 
 private let ACCESS_POLICY: CFString = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 private let ACCESS_GROUP: String = "5NN7GUYB6T.chat.simplex.app"
@@ -25,6 +26,11 @@ private let DECOY_PROTECTED_PROFILES_ITEM: String = "protectedProfiles.localProf
 private let PRIMARY_PROTECTED_PROFILE_PASSWORDS_ITEM: String = "protectedProfilePasswords"
 private let DECOY_PROTECTED_PROFILE_PASSWORDS_ITEM: String = "protectedProfilePasswords.localProfile"
 private let CODE_LOCKED_ATTEMPTS_PREFIX: String = "codeLockedAttempts"
+private let PRIMARY_CONTACT_INVITE_POLICIES_ITEM: String = "contactInvitePolicies"
+private let DECOY_CONTACT_INVITE_POLICIES_ITEM: String = "contactInvitePolicies.localProfile"
+private let CONTACT_INVITE_ENVELOPE_QUERY_ITEM: String = "xau_invite"
+private let PRIMARY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM: String = "expiredContactInviteEnvelopes"
+private let DECOY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM: String = "expiredContactInviteEnvelopes.localProfile"
 
 public enum XauXatStorageScope: Sendable {
     case primary
@@ -68,6 +74,12 @@ private let kcPrimaryProtectedProfiles = KeyChainItem(forKey: PRIMARY_PROTECTED_
 private let kcDecoyProtectedProfiles = KeyChainItem(forKey: DECOY_PROTECTED_PROFILES_ITEM)
 private let kcPrimaryProtectedProfilePasswords = KeyChainItem(forKey: PRIMARY_PROTECTED_PROFILE_PASSWORDS_ITEM)
 private let kcDecoyProtectedProfilePasswords = KeyChainItem(forKey: DECOY_PROTECTED_PROFILE_PASSWORDS_ITEM)
+private let kcPrimaryContactInvitePolicies = KeyChainItem(forKey: PRIMARY_CONTACT_INVITE_POLICIES_ITEM)
+private let kcDecoyContactInvitePolicies = KeyChainItem(forKey: DECOY_CONTACT_INVITE_POLICIES_ITEM)
+private let xauXatContactInvitePoliciesLock = NSLock()
+private let xauXatExpiredContactInviteEnvelopesLock = NSLock()
+private let kcPrimaryExpiredContactInviteEnvelopes = KeyChainItem(forKey: PRIMARY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM)
+private let kcDecoyExpiredContactInviteEnvelopes = KeyChainItem(forKey: DECOY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM)
 
 private var kcConversationLocks: KeyChainItem {
     xauXatStorageScope() == .decoy ? kcDecoyConversationLocks : kcPrimaryConversationLocks
@@ -205,6 +217,240 @@ public func xauXatRemoveProtectedProfilePasswords(_ scope: XauXatStorageScope) -
     case .primary: kcPrimaryProtectedProfilePasswords.remove()
     case .decoy: kcDecoyProtectedProfilePasswords.remove()
     }
+}
+
+public enum XauXatContactInviteState: String, Codable, Sendable {
+    case active
+    case used
+    case expired
+    case revoked
+}
+
+public struct XauXatContactInvitePolicy: Codable, Hashable, Sendable {
+    public var connectionId: Int64
+    public var createdAt: Date
+    public var expiresAt: Date
+    public var maxObservedAt: Date
+    public var state: XauXatContactInviteState
+
+    public init(connectionId: Int64, createdAt: Date, expiresAt: Date) {
+        self.connectionId = connectionId
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.maxObservedAt = createdAt
+        self.state = .active
+    }
+
+    public var isExpired: Bool { state == .expired }
+}
+
+private var kcContactInvitePolicies: KeyChainItem {
+    xauXatStorageScope() == .decoy ? kcDecoyContactInvitePolicies : kcPrimaryContactInvitePolicies
+}
+
+private func readXauXatContactInvitePolicies() -> [Int64: XauXatContactInvitePolicy] {
+    guard let value = kcContactInvitePolicies.get(),
+          let data = value.data(using: .utf8),
+          let policies = try? JSONDecoder().decode([String: XauXatContactInvitePolicy].self, from: data) else { return [:] }
+    return Dictionary(uniqueKeysWithValues: policies.compactMap { key, value in
+        Int64(key).map { ($0, value) }
+    })
+}
+
+@discardableResult
+private func writeXauXatContactInvitePolicies(_ policies: [Int64: XauXatContactInvitePolicy]) -> Bool {
+    guard !policies.isEmpty else { return kcContactInvitePolicies.remove() }
+    let encoded = Dictionary(uniqueKeysWithValues: policies.map { (String($0.key), $0.value) })
+    guard let data = try? JSONEncoder().encode(encoded),
+          let value = String(data: data, encoding: .utf8) else { return false }
+    return kcContactInvitePolicies.set(value)
+}
+
+@discardableResult
+public func xauXatSaveContactInvitePolicy(_ policy: XauXatContactInvitePolicy) -> Bool {
+    xauXatContactInvitePoliciesLock.lock()
+    defer { xauXatContactInvitePoliciesLock.unlock() }
+    var policies = readXauXatContactInvitePolicies()
+    policies[policy.connectionId] = policy
+    return writeXauXatContactInvitePolicies(policies)
+}
+
+/// Observing a policy advances its trusted local clock. Once the expiry instant
+/// has ever been observed, the stored tombstone prevents a manual clock rollback
+/// from reactivating the invite.
+public func xauXatObserveContactInvitePolicy(
+    connectionId: Int64,
+    at observedAt: Date = .now
+) -> XauXatContactInvitePolicy? {
+    xauXatContactInvitePoliciesLock.lock()
+    defer { xauXatContactInvitePoliciesLock.unlock() }
+    var policies = readXauXatContactInvitePolicies()
+    guard var policy = policies[connectionId] else { return nil }
+    guard policy.state == .active else { return policy }
+    let trustedObservedAt = max(observedAt, policy.maxObservedAt)
+    if trustedObservedAt >= policy.expiresAt {
+        policy.maxObservedAt = trustedObservedAt
+    } else if observedAt.timeIntervalSince(policy.maxObservedAt) >= 60 {
+        policy.maxObservedAt = observedAt
+    }
+    if policy.state == .active && policy.maxObservedAt >= policy.expiresAt {
+        policy.state = .expired
+    }
+    policies[connectionId] = policy
+    _ = writeXauXatContactInvitePolicies(policies)
+    return policy
+}
+
+@discardableResult
+public func xauXatSetContactInviteState(
+    connectionId: Int64,
+    state: XauXatContactInviteState,
+    at observedAt: Date = .now
+) -> XauXatContactInvitePolicy? {
+    xauXatContactInvitePoliciesLock.lock()
+    defer { xauXatContactInvitePoliciesLock.unlock() }
+    var policies = readXauXatContactInvitePolicies()
+    guard var policy = policies[connectionId] else { return nil }
+    policy.maxObservedAt = max(policy.maxObservedAt, observedAt)
+    // Expiry is irreversible. Used and revoked invites are terminal as well.
+    if policy.state == .active || policy.state == state {
+        policy.state = state
+    }
+    policies[connectionId] = policy
+    _ = writeXauXatContactInvitePolicies(policies)
+    return policy
+}
+
+public func xauXatContactInvitePolicies(at observedAt: Date = .now) -> [XauXatContactInvitePolicy] {
+    xauXatContactInvitePoliciesLock.lock()
+    defer { xauXatContactInvitePoliciesLock.unlock() }
+    var policies = readXauXatContactInvitePolicies()
+    var changed = false
+    for (connectionId, var policy) in policies {
+        guard policy.state == .active else { continue }
+        let trustedObservedAt = max(observedAt, policy.maxObservedAt)
+        if trustedObservedAt >= policy.expiresAt {
+            policy.maxObservedAt = trustedObservedAt
+            changed = true
+        } else if observedAt.timeIntervalSince(policy.maxObservedAt) >= 60 {
+            policy.maxObservedAt = observedAt
+            changed = true
+        }
+        if policy.state == .active && policy.maxObservedAt >= policy.expiresAt {
+            policy.state = .expired
+            changed = true
+        }
+        policies[connectionId] = policy
+    }
+    if changed { _ = writeXauXatContactInvitePolicies(policies) }
+    return Array(policies.values)
+}
+
+public enum XauXatContactInviteEnvelopeResult: Sendable {
+    case notEnvelope
+    case valid(link: String, expiresAt: Date)
+    case expired(link: String, expiresAt: Date)
+    case invalid
+}
+
+private struct XauXatContactInviteEnvelope: Codable {
+    var version: Int
+    var link: String
+    var expiresAt: Int64
+    var publicKey: String
+    var signature: String
+}
+
+private func xauXatBase64URL(_ data: Data) -> String {
+    data.base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
+}
+
+private func xauXatBase64URLData(_ value: String) -> Data? {
+    var base64 = value.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+    base64.append(String(repeating: "=", count: (4 - base64.count % 4) % 4))
+    return Data(base64Encoded: base64)
+}
+
+private func xauXatContactInviteCanonicalData(link: String, expiresAt: Int64) -> Data {
+    Data("xauxat-contact-invite-v1\n\(expiresAt)\n\(link)".utf8)
+}
+
+private var kcExpiredContactInviteEnvelopes: KeyChainItem {
+    xauXatStorageScope() == .decoy ? kcDecoyExpiredContactInviteEnvelopes : kcPrimaryExpiredContactInviteEnvelopes
+}
+
+private func xauXatContactInviteEnvelopeFingerprint(_ encodedEnvelope: String) -> String {
+    xauXatBase64URL(Data(SHA256.hash(data: Data(encodedEnvelope.utf8))))
+}
+
+private func xauXatExpiredContactInviteEnvelopeFingerprints() -> Set<String> {
+    guard let value = kcExpiredContactInviteEnvelopes.get(),
+          let data = value.data(using: .utf8),
+          let fingerprints = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+    return Set(fingerprints)
+}
+
+private func xauXatMarkContactInviteEnvelopeExpired(_ encodedEnvelope: String) {
+    var fingerprints = xauXatExpiredContactInviteEnvelopeFingerprints()
+    fingerprints.insert(xauXatContactInviteEnvelopeFingerprint(encodedEnvelope))
+    guard let data = try? JSONEncoder().encode(fingerprints.sorted()),
+          let value = String(data: data, encoding: .utf8) else { return }
+    _ = kcExpiredContactInviteEnvelopes.set(value)
+}
+
+public func xauXatSignedContactInviteLink(link: String, expiresAt: Date) -> String? {
+    guard var components = URLComponents(string: link) else { return nil }
+    // A fresh signing key per rendered invite avoids introducing a reusable,
+    // globally correlatable identifier across otherwise anonymous links.
+    let key = P256.Signing.PrivateKey()
+    let expiry = Int64(expiresAt.timeIntervalSince1970)
+    guard let signature = try? key.signature(for: xauXatContactInviteCanonicalData(link: link, expiresAt: expiry)) else { return nil }
+    let envelope = XauXatContactInviteEnvelope(
+        version: 1,
+        link: link,
+        expiresAt: expiry,
+        publicKey: xauXatBase64URL(key.publicKey.x963Representation),
+        signature: xauXatBase64URL(signature.rawRepresentation)
+    )
+    guard let envelopeData = try? JSONEncoder().encode(envelope) else { return nil }
+    components.fragment = nil
+    components.queryItems = [URLQueryItem(name: CONTACT_INVITE_ENVELOPE_QUERY_ITEM, value: xauXatBase64URL(envelopeData))]
+    return components.string
+}
+
+public func xauXatValidateContactInviteLink(
+    _ value: String,
+    at observedAt: Date = .now
+) -> XauXatContactInviteEnvelopeResult {
+    guard let components = URLComponents(string: value),
+          let encodedEnvelope = components.queryItems?.first(where: { $0.name == CONTACT_INVITE_ENVELOPE_QUERY_ITEM })?.value else {
+        return .notEnvelope
+    }
+    guard let envelopeData = xauXatBase64URLData(encodedEnvelope),
+          let envelope = try? JSONDecoder().decode(XauXatContactInviteEnvelope.self, from: envelopeData),
+          envelope.version == 1,
+          let publicKeyData = xauXatBase64URLData(envelope.publicKey),
+          let signatureData = xauXatBase64URLData(envelope.signature),
+          let publicKey = try? P256.Signing.PublicKey(x963Representation: publicKeyData),
+          let signature = try? P256.Signing.ECDSASignature(rawRepresentation: signatureData),
+          publicKey.isValidSignature(
+              signature,
+              for: xauXatContactInviteCanonicalData(link: envelope.link, expiresAt: envelope.expiresAt)
+          ) else {
+        return .invalid
+    }
+    let expiresAt = Date(timeIntervalSince1970: TimeInterval(envelope.expiresAt))
+    let fingerprint = xauXatContactInviteEnvelopeFingerprint(encodedEnvelope)
+    if observedAt >= expiresAt || xauXatExpiredContactInviteEnvelopeFingerprints().contains(fingerprint) {
+        xauXatExpiredContactInviteEnvelopesLock.lock()
+        xauXatMarkContactInviteEnvelopeExpired(encodedEnvelope)
+        xauXatExpiredContactInviteEnvelopesLock.unlock()
+        return .expired(link: envelope.link, expiresAt: expiresAt)
+    }
+    return .valid(link: envelope.link, expiresAt: expiresAt)
 }
 
 public struct KeyChainItem {

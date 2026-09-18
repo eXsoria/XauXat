@@ -63,11 +63,19 @@ struct ContactConnectionInfo: View {
 
                     if contactConnection.initiated,
                        let connLinkInv = contactConnection.connLinkInv {
-                        infoRow("Invite status", "Unused")
-                        SimpleXCreatedLinkQRCode(link: connLinkInv, short: $showShortLink)
-                            .id("simplex-invitation-qrcode-\(connLinkInv.simplexChatUri(short: showShortLink))")
-                        incognitoEnabled()
-                        shareLinkButton(connLinkInv, short: showShortLink)
+                        let policy = xauXatObserveContactInvitePolicy(connectionId: contactConnection.pccConnId)
+                        infoRow("Invite status", policy?.state == .expired ? "Expired" : "Unused")
+                        if let policy {
+                            infoRow("Expires", policy.expiresAt.formatted(date: .abbreviated, time: .shortened))
+                        }
+                        if policy?.state != .expired {
+                            if let shareLink = xauXatContactInviteShareLink(connLinkInv, short: showShortLink, policy: policy) {
+                                QRCode(uri: shareLink)
+                                    .id("simplex-invitation-qrcode-\(shareLink)")
+                                incognitoEnabled()
+                                shareLinkButton(shareLink)
+                            }
+                        }
                         oneTimeLinkLearnMoreButton()
                     } else {
                         incognitoEnabled()
@@ -86,7 +94,7 @@ struct ContactConnectionInfo: View {
                     Button(role: .destructive) {
                         alert = .deleteInvitationAlert
                     } label: {
-                        Label("Delete connection", systemImage: "trash")
+                        Label(contactConnection.initiated ? "Revoke invite" : "Delete connection", systemImage: "trash")
                             .foregroundColor(Color.red)
                     }
                 }
@@ -171,9 +179,9 @@ struct ContactConnectionInfo: View {
     }
 }
 
-private func shareLinkButton(_ connLinkInvitation: CreatedConnLink, short: Bool) -> some View {
+private func shareLinkButton(_ link: String) -> some View {
     Button {
-        showShareSheet(items: [connLinkInvitation.simplexChatUri(short: short)])
+        showShareSheet(items: [link])
     } label: {
         Label("Share 1-time link", systemImage: "square.and.arrow.up")
     }

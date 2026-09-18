@@ -707,6 +707,7 @@ func deleteContactConnectionAlert(_ contactConnection: PendingContactConnection,
             Task {
                 do {
                     try await apiDeleteChat(type: .contactConnection, id: contactConnection.apiId)
+                    _ = xauXatSetContactInviteState(connectionId: contactConnection.pccConnId, state: .revoked)
                     await MainActor.run {
                         ChatModel.shared.removeChat(contactConnection.id)
                         success()
