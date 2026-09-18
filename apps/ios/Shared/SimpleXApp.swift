@@ -242,6 +242,7 @@ enum XauXatPlusFeature: String, CaseIterable {
     case multipleIdentities
     case largeGroups
     case secureGroupAccess
+    case oneTimeGroupInvites
 }
 
 @MainActor
@@ -516,6 +517,14 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
         }
         _ = xauXatRemoveGroupAccessPolicies(.primary)
         _ = xauXatRemoveGroupAccessPolicies(.decoy)
+
+        for invite in xauXatOneTimeGroupInvites() where invite.state == .active || invite.state == .failed {
+            guard !Task.isCancelled, !status.hasAccess else { return }
+            try? await apiDeleteChat(type: .contactConnection, id: invite.connectionId)
+            await MainActor.run { chatModel.removeChat(":\(invite.connectionId)") }
+        }
+        _ = xauXatRemoveOneTimeGroupInvites(.primary)
+        _ = xauXatRemoveOneTimeGroupInvites(.decoy)
 
         for userInfo in chatModel.users where userInfo.user.hidden {
             guard let password = xauXatProtectedProfilePassword(userInfo.user.userId) else { continue }
