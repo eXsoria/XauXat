@@ -317,12 +317,13 @@ struct GroupLinkView: View {
                     .font(.caption)
                     .foregroundColor(theme.colors.secondary)
             }
-            if let activeInvite = oneTimeInvites.first(where: { $0.state == .active }) {
-                QRCode(uri: activeInvite.shareLink)
+            if let activeInvite = oneTimeInvites.first(where: { $0.state == .active }),
+               let shareLink = activeInvite.shareLink {
+                QRCode(uri: shareLink)
                     .id("xauxat-one-time-group-qr-\(activeInvite.connectionId)")
                 oneTimeInviteStatusRow(activeInvite)
                 Button {
-                    showShareSheet(items: [activeInvite.shareLink])
+                    showShareSheet(items: [shareLink])
                 } label: {
                     Label("Share one-time invite", systemImage: "square.and.arrow.up")
                 }
@@ -389,6 +390,11 @@ struct GroupLinkView: View {
                 .foregroundColor(theme.colors.secondary)
             if invite.usesOneTimeAccessCode {
                 Text("Protected by a one-time access code")
+                    .font(.caption)
+                    .foregroundColor(theme.colors.secondary)
+            }
+            if invite.state == .consumed {
+                Text("Link and code invalidated")
                     .font(.caption)
                     .foregroundColor(theme.colors.secondary)
             }
