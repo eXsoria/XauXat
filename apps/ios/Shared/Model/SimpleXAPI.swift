@@ -3172,7 +3172,7 @@ private func markContactInviteUsed(_ contact: Contact) {
 private func rejectExpiredContactInvite(_ contact: Contact) async -> Bool {
     guard let connectionId = contact.activeConn?.connId,
           let policy = xauXatObserveContactInvitePolicy(connectionId: connectionId),
-          policy.state == .expired else { return false }
+          policy.state == .expired || policy.state == .revoked else { return false }
     do {
         try await apiDeleteChat(type: .direct, id: contact.apiId)
     } catch {
@@ -3198,7 +3198,8 @@ func expirePendingXauXatContactInvites() async {
         var contacts: [Contact] = []
         for chat in ChatModel.shared.chats {
             switch chat.chatInfo {
-            case let .contactConnection(connection) where policiesById[connection.pccConnId]?.state == .expired:
+            case let .contactConnection(connection)
+                where policiesById[connection.pccConnId]?.state == .expired || policiesById[connection.pccConnId]?.state == .revoked:
                 pendingConnections.append(connection)
             case let .direct(contact):
                 if let connectionId = contact.activeConn?.connId, policiesById[connectionId] != nil {
@@ -3222,7 +3223,7 @@ func expirePendingXauXatContactInvites() async {
     for contact in contacts {
         guard let connectionId = contact.activeConn?.connId,
               let policy = policiesById[connectionId] else { continue }
-        if policy.state == .expired {
+        if policy.state == .expired || policy.state == .revoked {
             try? await apiDeleteChat(type: .direct, id: contact.apiId)
             await MainActor.run { ChatModel.shared.removeChat(contact.id) }
         } else if policy.state == .active {

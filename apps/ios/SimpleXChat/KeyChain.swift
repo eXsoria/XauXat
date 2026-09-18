@@ -245,12 +245,16 @@ public struct XauXatContactInvitePolicy: Codable, Hashable, Sendable {
     public var maxObservedAt: Date
     public var state: XauXatContactInviteState
     public var permissions: XauXatContactInvitePermissions?
+    public var bundleId: String?
+    public var maxUses: Int?
 
     public init(
         connectionId: Int64,
         createdAt: Date,
         expiresAt: Date? = nil,
-        permissions: XauXatContactInvitePermissions? = nil
+        permissions: XauXatContactInvitePermissions? = nil,
+        bundleId: String? = nil,
+        maxUses: Int? = nil
     ) {
         self.connectionId = connectionId
         self.createdAt = createdAt
@@ -258,6 +262,8 @@ public struct XauXatContactInvitePolicy: Codable, Hashable, Sendable {
         self.maxObservedAt = createdAt
         self.state = .active
         self.permissions = permissions
+        self.bundleId = bundleId
+        self.maxUses = maxUses
     }
 
     public var isExpired: Bool { state == .expired }
@@ -369,8 +375,8 @@ public func xauXatContactInvitePolicies(at observedAt: Date = .now) -> [XauXatCo
 
 public enum XauXatContactInviteEnvelopeResult: Sendable {
     case notEnvelope
-    case valid(link: String, expiresAt: Date?, permissions: XauXatContactInvitePermissions)
-    case expired(link: String, expiresAt: Date)
+    case valid(links: [String], expiresAt: Date?, permissions: XauXatContactInvitePermissions)
+    case expired(links: [String], expiresAt: Date)
     case invalid
 }
 
@@ -382,6 +388,7 @@ private struct XauXatContactInviteEnvelope: Codable {
     var signature: String
     var messages: Bool?
     var calls: Bool?
+    var links: [String]?
 }
 
 private func xauXatBase64URL(_ data: Data) -> String {
@@ -398,17 +405,17 @@ private func xauXatBase64URLData(_ value: String) -> Data? {
 }
 
 private func xauXatContactInviteCanonicalData(
-    link: String,
+    links: [String],
     expiresAt: Int64?,
     permissions: XauXatContactInvitePermissions,
     version: Int
 ) -> Data {
+    let firstLink = links.first ?? ""
     if version == 1, let expiresAt {
-        return Data("xauxat-contact-invite-v1\n\(expiresAt)\n\(link)".utf8)
+        return Data("xauxat-contact-invite-v1\n\(expiresAt)\n\(firstLink)".utf8)
     }
-    return Data(
-        "xauxat-contact-invite-v2\n\(expiresAt.map { String($0) } ?? "never")\n\(permissions.messages ? 1 : 0)\n\(permissions.calls ? 1 : 0)\n\(link)".utf8
-    )
+    let prefix = "xauxat-contact-invite-v\(version)\n\(expiresAt.map { String($0) } ?? "never")\n\(permissions.messages ? 1 : 0)\n\(permissions.calls ? 1 : 0)\n"
+    return Data((prefix + links.joined(separator: "\n")).utf8)
 }
 
 private var kcExpiredContactInviteEnvelopes: KeyChainItem {
@@ -439,25 +446,35 @@ public func xauXatSignedContactInviteLink(
     expiresAt: Date?,
     permissions: XauXatContactInvitePermissions = .init()
 ) -> String? {
-    guard var components = URLComponents(string: link) else { return nil }
+    xauXatSignedContactInviteLink(links: [link], expiresAt: expiresAt, permissions: permissions)
+}
+
+public func xauXatSignedContactInviteLink(
+    links: [String],
+    expiresAt: Date?,
+    permissions: XauXatContactInvitePermissions = .init()
+) -> String? {
+    guard let firstLink = links.first, !links.contains(where: { $0.isEmpty }),
+          var components = URLComponents(string: firstLink) else { return nil }
     // A fresh signing key per rendered invite avoids introducing a reusable,
     // globally correlatable identifier across otherwise anonymous links.
     let key = P256.Signing.PrivateKey()
     let expiry = expiresAt.map { Int64($0.timeIntervalSince1970) }
     guard let signature = try? key.signature(for: xauXatContactInviteCanonicalData(
-        link: link,
+        links: links,
         expiresAt: expiry,
         permissions: permissions,
-        version: 2
+        version: 3
     )) else { return nil }
     let envelope = XauXatContactInviteEnvelope(
-        version: 2,
-        link: link,
+        version: 3,
+        link: firstLink,
         expiresAt: expiry,
         publicKey: xauXatBase64URL(key.publicKey.x963Representation),
         signature: xauXatBase64URL(signature.rawRepresentation),
         messages: permissions.messages,
-        calls: permissions.calls
+        calls: permissions.calls,
+        links: links
     )
     guard let envelopeData = try? JSONEncoder().encode(envelope) else { return nil }
     components.fragment = nil
@@ -475,7 +492,7 @@ public func xauXatValidateContactInviteLink(
     }
     guard let envelopeData = xauXatBase64URLData(encodedEnvelope),
           let envelope = try? JSONDecoder().decode(XauXatContactInviteEnvelope.self, from: envelopeData),
-          envelope.version == 1 || envelope.version == 2,
+          (1...3).contains(envelope.version),
           let publicKeyData = xauXatBase64URLData(envelope.publicKey),
           let signatureData = xauXatBase64URLData(envelope.signature),
           let publicKey = try? P256.Signing.PublicKey(x963Representation: publicKeyData),
@@ -483,7 +500,7 @@ public func xauXatValidateContactInviteLink(
           publicKey.isValidSignature(
               signature,
               for: xauXatContactInviteCanonicalData(
-                  link: envelope.link,
+                  links: envelope.version >= 3 ? (envelope.links ?? [envelope.link]) : [envelope.link],
                   expiresAt: envelope.expiresAt,
                   permissions: XauXatContactInvitePermissions(
                       messages: envelope.messages ?? true,
@@ -498,8 +515,10 @@ public func xauXatValidateContactInviteLink(
         messages: envelope.messages ?? true,
         calls: envelope.calls ?? true
     )
+    let links = envelope.version >= 3 ? (envelope.links ?? [envelope.link]) : [envelope.link]
+    guard !links.isEmpty, !links.contains(where: { $0.isEmpty }) else { return .invalid }
     guard let expiry = envelope.expiresAt else {
-        return .valid(link: envelope.link, expiresAt: nil, permissions: permissions)
+        return .valid(links: links, expiresAt: nil, permissions: permissions)
     }
     let expiresAt = Date(timeIntervalSince1970: TimeInterval(expiry))
     let fingerprint = xauXatContactInviteEnvelopeFingerprint(encodedEnvelope)
@@ -507,9 +526,13 @@ public func xauXatValidateContactInviteLink(
         xauXatExpiredContactInviteEnvelopesLock.lock()
         xauXatMarkContactInviteEnvelopeExpired(encodedEnvelope)
         xauXatExpiredContactInviteEnvelopesLock.unlock()
-        return .expired(link: envelope.link, expiresAt: expiresAt)
+        return .expired(links: links, expiresAt: expiresAt)
     }
-    return .valid(link: envelope.link, expiresAt: expiresAt, permissions: permissions)
+    return .valid(links: links, expiresAt: expiresAt, permissions: permissions)
+}
+
+public func xauXatContactInviteBundlePolicies(bundleId: String) -> [XauXatContactInvitePolicy] {
+    xauXatContactInvitePolicies().filter { $0.bundleId == bundleId }
 }
 
 public func xauXatContactInvitePermissions(connectionId: Int64) -> XauXatContactInvitePermissions {
