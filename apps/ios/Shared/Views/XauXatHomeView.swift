@@ -918,6 +918,39 @@ private struct XauXatSettingsHome: View {
                 XauXatSectionTitle("APP", palette: palette)
                     .padding(.top, 26)
                 XauXatSettingsCard(palette: palette) {
+                    if canCreateIdentities || chatModel.users.count > 1 {
+                        NavigationLink {
+                            UserProfilesView(
+                                allowsProfileCreation: canCreateIdentities,
+                                creationLockedByPlan: !canCreateIdentities,
+                                title: "XauXat identities"
+                            )
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "person.2",
+                                title: "Identities",
+                                value: identitiesStatusLabel
+                            )
+                        }
+                        .accessibilityHint(canCreateIdentities
+                            ? "Create, switch and protect separate XauXat identities"
+                            : "Manage existing identities; creating new identities requires XauXat Plus")
+                    } else {
+                        NavigationLink {
+                            XauXatPlusView()
+                                .navigationTitle("XauXat Plus")
+                                .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "person.2",
+                                title: "Identities",
+                                value: "Plus"
+                            )
+                        }
+                        .accessibilityHint("Unlock multiple separate identities with XauXat Plus")
+                    }
                     NavigationLink {
                         XauXatPrivacyView()
                     } label: {
@@ -989,6 +1022,14 @@ private struct XauXatSettingsHome: View {
         case .checking: return "Checking"
         case .notPurchased, .expired, .revoked, .unverified, .unavailable: return "Free"
         }
+    }
+
+    private var canCreateIdentities: Bool {
+        plusEntitlements.isAuthorized(for: .multipleIdentities)
+    }
+
+    private var identitiesStatusLabel: String {
+        canCreateIdentities ? "\(chatModel.users.count)" : "Existing"
     }
 }
 
