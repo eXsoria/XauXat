@@ -15,6 +15,11 @@ import SimpleXChat
 
 let logger = Logger()
 
+// Keep disabled until Apple assigns Notification Service Extension Filtering
+// to the notification-service App ID. This fallback keeps TestFlight builds
+// private without requesting an entitlement that is not yet provisioned.
+private let xauXatNotificationFilteringEnabled = false
+
 let appSuspendingDelay: UInt64 = 2_500_000_000
 
 typealias SuspendSchedule = (delay: TimeInterval, timeout: Int)
@@ -688,7 +693,7 @@ class NotificationService: UNNotificationServiceExtension {
             guard !notification.xauXatShouldSuppress else { return nil }
             return notification.callInvitation
         }.first
-        if callInv != nil && useCallKit() {
+        if callInv != nil && useCallKit() && xauXatNotificationFilteringEnabled {
             logger.debug("NotificationService.deliverCallkitOrNotification: will suspend, callkit")
             // suspending NSE even though there may be other notifications
             // to allow the app to process callkit call
@@ -733,7 +738,7 @@ class NotificationService: UNNotificationServiceExtension {
                 if xauXatIsChatHidden(callInv.contact.id) || callInv.user.hidden || xauXatIsProfileProtected(callInv.user.userId) {
                     removeHiddenEventFromBadge()
                 }
-                if useCallKit() {
+                if useCallKit() && xauXatNotificationFilteringEnabled {
                     logger.debug("NotificationService: reporting incoming audio call")
                     CXProvider.reportNewIncomingVoIPPushPayload([
                         "displayName": NSLocalizedString("XauXat call", comment: "private callkit banner"),
@@ -773,7 +778,17 @@ class NotificationService: UNNotificationServiceExtension {
         func createNtf(_ ntfs: [NSENotificationData]) -> UNMutableNotificationContent {
             logger.debug("NotificationService prepareNotification: \(ntfs.count) events")
             return switch ntfs.count {
-            case 0: UNMutableNotificationContent() // used to mute notifications that did not unsubscribe yet
+            case 0:
+                if xauXatNotificationFilteringEnabled {
+                    UNMutableNotificationContent() // used to mute notifications that did not unsubscribe yet
+                } else {
+                    createNotification(
+                        categoryIdentifier: ntfCategoryManyEvents,
+                        title: NSLocalizedString("XauXat", comment: "private notification fallback title"),
+                        body: NSLocalizedString("new activity", comment: "private notification fallback body"),
+                        badgeCount: nil
+                    )
+                }
             case 1: ntfs[0].notificationContent(badgeCount)
             default: createJointNtf(ntfs)
             }

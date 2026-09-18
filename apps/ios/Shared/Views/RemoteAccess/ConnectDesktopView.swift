@@ -14,7 +14,7 @@ struct ConnectDesktopView: View {
     @EnvironmentObject var m: ChatModel
     @EnvironmentObject var theme: AppTheme
     @Environment(\.dismiss) var dismiss: DismissAction
-    @AppStorage(DEFAULT_DEVICE_NAME_FOR_REMOTE_ACCESS) private var deviceName = UIDevice.current.name
+    @AppStorage(DEFAULT_DEVICE_NAME_FOR_REMOTE_ACCESS) private var deviceName = UIDevice.current.model
     @AppStorage(DEFAULT_CONFIRM_REMOTE_SESSIONS) private var confirmRemoteSessions = false
     @AppStorage(DEFAULT_CONNECT_REMOTE_VIA_MULTICAST) private var connectRemoteViaMulticast = true
     @AppStorage(DEFAULT_CONNECT_REMOTE_VIA_MULTICAST_AUTO) private var connectRemoteViaMulticastAuto = true
