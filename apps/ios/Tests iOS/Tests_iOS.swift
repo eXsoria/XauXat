@@ -39,4 +39,71 @@ class Tests_iOS: XCTestCase {
             }
         }
     }
+
+    func testGroupAccessRulesApplyInDeterministicOrder() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let rules = XauXatGroupAccessRules(
+            maxUses: 1,
+            expiresAt: now.addingTimeInterval(-1),
+            requiresCode: true,
+            individualAccessCount: nil
+        )
+        let evaluator = XauXatGroupAccessRuleEvaluator(rules: rules)
+
+        XCTAssertEqual(evaluator.claim(at: now, codeAccepted: false), .codeRequired)
+        XCTAssertEqual(evaluator.claim(at: now, codeAccepted: true), .expired)
+        evaluator.revoke()
+        XCTAssertEqual(evaluator.claim(at: now, codeAccepted: false), .revoked)
+    }
+
+    func testGroupAccessConcurrentClaimsCannotExceedMaximum() {
+        let rules = XauXatGroupAccessRules(maxUses: 5, expiresAt: nil, requiresCode: false, individualAccessCount: nil)
+        let evaluator = XauXatGroupAccessRuleEvaluator(rules: rules)
+        let resultLock = NSLock()
+        var allowed = 0
+
+        DispatchQueue.concurrentPerform(iterations: 64) { _ in
+            if case .allowed = evaluator.claim(codeAccepted: true) {
+                resultLock.lock()
+                allowed += 1
+                resultLock.unlock()
+            }
+        }
+
+        XCTAssertEqual(allowed, 5)
+        XCTAssertEqual(evaluator.claim(codeAccepted: true), .exhausted)
+    }
+
+    func testGroupAccessExpiryRejectsClaims() {
+        let deadline = Date(timeIntervalSince1970: 2_000)
+        let rules = XauXatGroupAccessRules(maxUses: 3, expiresAt: deadline, requiresCode: false, individualAccessCount: nil)
+        let evaluator = XauXatGroupAccessRuleEvaluator(rules: rules)
+
+        XCTAssertEqual(evaluator.claim(at: deadline.addingTimeInterval(-1), codeAccepted: true), .allowed(use: 1))
+        XCTAssertEqual(evaluator.claim(at: deadline, codeAccepted: true), .expired)
+    }
+
+    func testGroupAccessRevocationIsTerminal() {
+        let rules = XauXatGroupAccessRules(maxUses: 3, expiresAt: nil, requiresCode: false, individualAccessCount: nil)
+        let evaluator = XauXatGroupAccessRuleEvaluator(rules: rules)
+
+        XCTAssertEqual(evaluator.claim(codeAccepted: true), .allowed(use: 1))
+        evaluator.revoke()
+        XCTAssertEqual(evaluator.claim(codeAccepted: true), .revoked)
+    }
+
+    func testGroupAccessEditorValidatesCombinedRulesAndSummaryHasNoSecret() {
+        let now = Date(timeIntervalSince1970: 3_000)
+        let rules = XauXatGroupAccessRules(
+            maxUses: 1,
+            expiresAt: now.addingTimeInterval(3_600),
+            requiresCode: true,
+            individualAccessCount: 4
+        )
+
+        XCTAssertNil(rules.validationError(availableCapacity: 4, at: now))
+        XCTAssertEqual(rules.validationError(availableCapacity: 3, at: now), .insufficientCapacity(available: 3))
+        XCTAssertTrue(rules.summary().contains("Code required"))
+        XCTAssertFalse(rules.summary().contains("111111"))
+    }
 }

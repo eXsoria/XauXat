@@ -377,6 +377,14 @@ struct GroupLinkView: View {
                      : "XauXat combines independent SimpleX one-time invitations, so simultaneous entries cannot exceed this limit.")
                     .font(.caption)
                     .foregroundColor(theme.colors.secondary)
+                Text("Policy: \(configuredAdvancedGroupAccessRules.summary())")
+                    .font(.caption)
+                    .foregroundColor(theme.colors.secondary)
+                if let validationError = advancedGroupAccessValidationError {
+                    Text(validationError.message)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
             }
             let activeIndividualInvites = oneTimeInvites.filter { $0.state == .active && $0.accessId != nil }
             if !activeIndividualInvites.isEmpty {
@@ -389,7 +397,7 @@ struct GroupLinkView: View {
                     .id("xauxat-one-time-group-qr-\(activeInvite.connectionId)")
                 oneTimeInviteStatusRow(activeInvite)
                 Button {
-                    showShareSheet(items: [shareLink])
+                    showShareSheet(items: [groupAccessPolicySummary(activeInvite), shareLink])
                 } label: {
                     Label((activeInvite.maxUses ?? 1) > 1 ? "Share limited-use invite" : "Share one-time invite", systemImage: "square.and.arrow.up")
                 }
@@ -436,6 +444,7 @@ struct GroupLinkView: View {
                     )
                 }
                 .disabled(creatingOneTimeInvite || groupCapacity?.isFull != false)
+                .disabled(advancedGroupAccessValidationError != nil)
             }
 
             ForEach(oneTimeInviteHistory.prefix(5)) { invite in
@@ -477,7 +486,7 @@ struct GroupLinkView: View {
         }
         if let shareLink = invite.shareLink {
             Button {
-                showShareSheet(items: [shareLink])
+                showShareSheet(items: [groupAccessPolicySummary(invite), shareLink])
             } label: {
                 Label("Share access \(individualAccessLabel(invite))", systemImage: "square.and.arrow.up")
             }
@@ -504,6 +513,31 @@ struct GroupLinkView: View {
 
     private func individualAccessLabel(_ invite: XauXatOneTimeGroupInvite) -> String {
         String((invite.accessId ?? String(invite.connectionId)).prefix(8)).uppercased()
+    }
+
+    private var configuredAdvancedGroupAccessRules: XauXatGroupAccessRules {
+        XauXatGroupAccessRules(
+            maxUses: createIndividualGroupAccesses ? 1 : groupAccessMaximumUses,
+            expiresAt: oneTimeAccessLifetime.expiresAt(custom: customOneTimeAccessExpiry),
+            requiresCode: protectOneTimeInviteWithCode,
+            individualAccessCount: createIndividualGroupAccesses ? individualGroupAccessCount : nil
+        )
+    }
+
+    private var advancedGroupAccessValidationError: XauXatGroupAccessRulesError? {
+        guard let groupCapacity else { return nil }
+        return configuredAdvancedGroupAccessRules.validationError(availableCapacity: groupCapacity.remaining)
+    }
+
+    private func groupAccessPolicySummary(_ invite: XauXatOneTimeGroupInvite) -> String {
+        let rules = XauXatGroupAccessRules(
+            maxUses: invite.maxUses ?? 1,
+            expiresAt: invite.expiresAt,
+            requiresCode: invite.isProtected,
+            individualAccessCount: nil
+        )
+        let accessLabel = invite.accessId == nil ? nil : individualAccessLabel(invite)
+        return "\(invite.groupDisplayName) · \(rules.summary(accessLabel: accessLabel))"
     }
 
     private func oneTimeInviteStatusRow(_ invite: XauXatOneTimeGroupInvite) -> some View {
@@ -660,8 +694,12 @@ struct GroupLinkView: View {
         Task {
             var created: [(CreatedConnLink, PendingContactConnection)] = []
             do {
-                let individualAccesses = createIndividualGroupAccesses
-                let requestedUses = individualAccesses ? individualGroupAccessCount : groupAccessMaximumUses
+                let rules = configuredAdvancedGroupAccessRules
+                guard rules.validationError(availableCapacity: groupCapacity?.remaining ?? 0) == nil else {
+                    throw XauXatGroupAccessSetupError.inviteCreationFailed
+                }
+                let individualAccesses = rules.individualAccessCount != nil
+                let requestedUses = rules.requestedUses
                 _ = try await apiRequireXauXatGroupCapacity(
                     groupId,
                     adding: requestedUses,
@@ -672,7 +710,7 @@ struct GroupLinkView: View {
                     created.append(invitation)
                 }
                 guard created.count == requestedUses else { throw XauXatGroupAccessSetupError.inviteCreationFailed }
-                let expiresAt = oneTimeAccessLifetime.expiresAt(custom: customOneTimeAccessExpiry)
+                let expiresAt = rules.expiresAt
                 let invites: [XauXatOneTimeGroupInvite]
                 if individualAccesses {
                     let batchId = UUID().uuidString
@@ -682,8 +720,8 @@ struct GroupLinkView: View {
                         guard let signedLink = xauXatSignedContactInviteLink(link: rawLink, expiresAt: expiresAt) else {
                             throw XauXatGroupAccessSetupError.encryptionFailed
                         }
-                        let code = protectOneTimeInviteWithCode ? xauXatGenerateGroupAccessCode() : nil
-                        guard !protectOneTimeInviteWithCode || code != nil else {
+                        let code = rules.requiresCode ? xauXatGenerateGroupAccessCode() : nil
+                        guard !rules.requiresCode || code != nil else {
                             throw XauXatGroupAccessSetupError.encryptionFailed
                         }
                         let shareLink: String
@@ -712,8 +750,8 @@ struct GroupLinkView: View {
                     invites = individualInvites
                 } else {
                     let rawLinks = created.map { $0.0.simplexChatUri(short: false) }
-                    let code = protectOneTimeInviteWithCode ? xauXatGenerateGroupAccessCode() : nil
-                    guard !protectOneTimeInviteWithCode || code != nil,
+                    let code = rules.requiresCode ? xauXatGenerateGroupAccessCode() : nil
+                    guard !rules.requiresCode || code != nil,
                           let bundledLink = xauXatSignedContactInviteLink(links: rawLinks, expiresAt: expiresAt) else {
                         throw XauXatGroupAccessSetupError.encryptionFailed
                     }
@@ -750,7 +788,7 @@ struct GroupLinkView: View {
                     creatingOneTimeInvite = false
                     refreshOneTimeInvites()
                     if !individualAccesses, let shareLink = invites.first?.shareLink {
-                        showShareSheet(items: [shareLink])
+                        showShareSheet(items: [groupAccessPolicySummary(invites[0]), shareLink])
                     }
                 }
             } catch {
