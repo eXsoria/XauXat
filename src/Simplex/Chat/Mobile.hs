@@ -56,8 +56,9 @@ import Simplex.Messaging.Agent.Store.Shared (MigrationConfig (..), MigrationConf
 import qualified Simplex.Messaging.Crypto as C
 import Simplex.Messaging.Encoding.String
 import Simplex.Messaging.Parsers (defaultJSON, dropPrefix, sumTypeJSON)
-import Simplex.Messaging.Protocol (AProtoServerWithAuth (..), AProtocolType (..), BasicAuth (..), ProtoServerWithAuth (..), ProtocolServer (..))
+import Simplex.Messaging.Protocol (AProtoServerWithAuth (..), AProtocolType (..), BasicAuth (..), NtfServer, ProtoServerWithAuth (..), ProtocolServer (..))
 import Simplex.Messaging.Util (catchAll, liftEitherWith, safeDecodeUtf8)
+import System.Environment (lookupEnv)
 import System.IO (utf8)
 import System.Timeout (timeout)
 import qualified URI.ByteString as U
@@ -315,7 +316,8 @@ chatMigrateInitKey chatDbOpts keepKey confirm backgroundMode = runExceptT $ do
     opts = mobileChatOpts $ removeDbKey chatDbOpts
     initialize st db = do
       user_ <- liftIO $ getActiveUser_ st
-      first DBMAgentError <$> newChatController db user_ defaultMobileConfig opts backgroundMode
+      cfg <- xauXatMobileConfig
+      first DBMAgentError <$> newChatController db user_ cfg opts backgroundMode
     migrate createStore dbOpts confirmMigrations =
       ExceptT $
         (first (DBMErrorMigration errDbStr) <$> createStore dbOpts confirmMigrations)
@@ -332,6 +334,19 @@ chatMigrateInitKey chatDbOpts keepKey confirm backgroundMode = runExceptT $ do
 #endif
         dbError :: Show e => e -> Either DBMigrationResult DBStore
         dbError e = Left . DBMErrorSQL errDbStr $ show e
+
+xauXatMobileConfig :: IO ChatConfig
+xauXatMobileConfig =
+  lookupEnv "XAUXAT_NTF_SERVER" >>= \case
+    Nothing -> pure defaultMobileConfig
+    Just address ->
+      let ntfServers = xauXatNtfServers address
+          servers = presetServers defaultMobileConfig
+       in pure defaultMobileConfig {presetServers = servers {ntf = ntfServers}}
+
+xauXatNtfServers :: String -> [NtfServer]
+xauXatNtfServers "" = []
+xauXatNtfServers address = either (const []) pure $ strDecode (B.pack address)
 
 chatCloseStore :: ChatController -> IO String
 chatCloseStore ChatController {chatStore, smpAgent} = handleErr $ do

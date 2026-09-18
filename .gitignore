@@ -45,6 +45,10 @@ tests/tmp
 tests/tmp*
 logs/
 
+# XauXat notification service runtime secrets
+server/ntf/.env
+server/ntf/secrets/
+
 *.devcontainer
 # for website
 website/node_modules/
@@ -86,4 +90,3 @@ website/.cache
 website/test/stubs-layout-cache/_includes/*.js
 apps/android/app/release
 apps/multiplatform/.kotlin/sessions
-

@@ -25,13 +25,7 @@ struct NotificationsView: View {
                 ProgressView().scaleEffect(2)
             }
         }
-        .alert(item: $ntfAlert) { alert in
-            if let token = m.deviceToken {
-                return notificationAlert(alert, token)
-            } else {
-                return Alert(title: Text("No device token!"))
-            }
-        }
+        .alert(item: $ntfAlert) { alert in notificationAlert(alert, m.deviceToken) }
     }
 
     private func viewBody() -> some View {
@@ -41,7 +35,14 @@ struct NotificationsView: View {
                     List {
                         Section {
                             SelectionListView(list: NotificationsMode.values, selection: $notificationMode) { mode in
-                                ntfAlert = .setMode(mode: mode)
+                                if mode == .instant && !xauXatNotificationServerConfigured {
+                                    ntfAlert = .error(
+                                        title: "Instant notifications unavailable",
+                                        error: "This build has no XauXat notification server. No SimpleX server will be used as a fallback."
+                                    )
+                                } else {
+                                    ntfAlert = .setMode(mode: mode)
+                                }
                             }
                         } footer: {
                             VStack(alignment: .leading) {
@@ -76,6 +77,11 @@ struct NotificationsView: View {
                         .foregroundColor(theme.colors.secondary)
                         .font(.callout)
                         .padding(.top, 1)
+                } else if !xauXatNotificationServerConfigured {
+                    Text("Instant notifications are unavailable in this build. XauXat will not use a SimpleX notification server as a fallback.")
+                        .foregroundColor(theme.colors.secondary)
+                        .font(.callout)
+                        .padding(.top, 1)
                 }
             }
         }
@@ -85,9 +91,10 @@ struct NotificationsView: View {
         }
     }
 
-    private func notificationAlert(_ alert: NotificationAlert, _ token: DeviceToken) -> Alert {
+    private func notificationAlert(_ alert: NotificationAlert, _ token: DeviceToken?) -> Alert {
         switch alert {
         case let .setMode(mode):
+            guard let token else { return Alert(title: Text("No device token!")) }
             return Alert(
                 title: Text(ntfModeAlertTitle(mode)),
                 message: Text(ntfModeDescription(mode)),
@@ -246,9 +253,9 @@ struct NotificationsView: View {
 
 func ntfModeDescription(_ mode: NotificationsMode) -> LocalizedStringKey {
     switch mode {
-    case .off: return "**Most private**: do not use SimpleX Chat push server. The app will check messages in background, when the system allows it, depending on how often you use the app."
+    case .off: return "**Most private**: do not use the XauXat push service. The app will check messages in background, when the system allows it, depending on how often you use the app."
     case .periodic: return "**More private**: check new messages every 20 minutes. Only device token is shared with our push server. It doesn't see how many contacts you have, or any message metadata."
-    case .instant: return "**Recommended**: device token and end-to-end encrypted notifications are sent to SimpleX Chat push server, but it does not see the message content, size or who it is from."
+    case .instant: return "**Recommended**: device token and end-to-end encrypted notifications are sent to the XauXat push service, but it does not see the message content, size or who it is from."
     }
 }
 

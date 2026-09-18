@@ -40,6 +40,20 @@ assert_equal "$(read_plist "$share_path/Info.plist" CFBundleIdentifier)" "pt.exs
 assert_equal "$(read_plist "$main_plist" XauXatKeychainAccessGroup)" "$(read_plist "$nse_path/Info.plist" XauXatKeychainAccessGroup)" "main/NSE keychain group"
 assert_equal "$(read_plist "$main_plist" XauXatKeychainAccessGroup)" "$(read_plist "$share_path/Info.plist" XauXatKeychainAccessGroup)" "main/share keychain group"
 
+ntf_server_b64=$(read_plist "$main_plist" XauXatNotificationServerBase64)
+assert_equal "$ntf_server_b64" "$(read_plist "$nse_path/Info.plist" XauXatNotificationServerBase64)" "main/NSE notification server"
+assert_equal "$ntf_server_b64" "$(read_plist "$share_path/Info.plist" XauXatNotificationServerBase64)" "main/share notification server"
+if [[ -n "$ntf_server_b64" && "$ntf_server_b64" != *'$('* ]]; then
+  python3 - "$ntf_server_b64" <<'PY'
+import base64
+import sys
+
+address = base64.b64decode(sys.argv[1], validate=True).decode("utf-8")
+if not address.startswith("ntf://") or "@" not in address:
+    raise SystemExit("invalid XauXat notification server address")
+PY
+fi
+
 assert_equal "$(read_plist "$main_plist" BGTaskSchedulerPermittedIdentifiers.0)" "pt.exsoria.xauxat.receive" "background task identifier"
 
 main_entitlements="$repo_root/apps/ios/SimpleX (iOS).entitlements"

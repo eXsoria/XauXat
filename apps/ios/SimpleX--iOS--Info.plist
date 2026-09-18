@@ -62,5 +62,7 @@
 	<string>$(XAUXAT_PLUS_PRODUCT_ID)</string>
 	<key>XauXatKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)pt.exsoria.xauxat</string>
+	<key>XauXatNotificationServerBase64</key>
+	<string>$(XAUXAT_NTF_SERVER_B64)</string>
 </dict>
 </plist>
