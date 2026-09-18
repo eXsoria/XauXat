@@ -12,10 +12,10 @@ import SimpleXChat
 
 class NetworkObserver {
     static let shared = NetworkObserver()
-    private let queue: DispatchQueue = DispatchQueue(label: "chat.simplex.app.NetworkObserver")
+    private let queue: DispatchQueue = DispatchQueue(label: "pt.exsoria.xauxat.NetworkObserver")
     private var prevInfo: UserNetworkInfo? = nil
     private var monitor: NWPathMonitor?
-    private let monitorLock: DispatchQueue = DispatchQueue(label: "chat.simplex.app.monitorLock")
+    private let monitorLock: DispatchQueue = DispatchQueue(label: "pt.exsoria.xauxat.monitorLock")
 
     func restartMonitor() {
         monitorLock.sync {

@@ -64,7 +64,7 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
     }
 
     private let rtcAudioSession =  RTCAudioSession.sharedInstance()
-    private let audioQueue = DispatchQueue(label: "chat.simplex.app.audio")
+    private let audioQueue = DispatchQueue(label: "pt.exsoria.xauxat.audio")
     private var sendCallResponse: (WVAPIMessage) async -> Void
     var activeCall: Call?
     var notConnectedCall: NotConnectedCall?

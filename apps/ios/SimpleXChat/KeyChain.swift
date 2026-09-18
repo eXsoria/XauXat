@@ -12,7 +12,7 @@ import CryptoKit
 import CommonCrypto
 
 private let ACCESS_POLICY: CFString = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-private let ACCESS_GROUP: String = "5NN7GUYB6T.chat.simplex.app"
+private let ACCESS_GROUP_INFO_KEY = "XauXatKeychainAccessGroup"
 private let DATABASE_PASSWORD_ITEM: String = "databasePassword"
 private let DECOY_DATABASE_PASSWORD_ITEM: String = "databasePassword.localProfile"
 private let APP_PASSWORD_ITEM: String = "appPassword"
@@ -1276,7 +1276,13 @@ private func baseItemQuery(forKey key: String) -> [NSString : AnyObject] {
     query[kSecClass] = kSecClassGenericPassword
     query[kSecAttrAccount] = key as AnyObject?
     #if TARGET_OS_IOS && !TARGET_OS_SIMULATOR
-        query[kSecAttrAccessGroup] = ACCESS_GROUP
+        if let accessGroup = Bundle.main.object(forInfoDictionaryKey: ACCESS_GROUP_INFO_KEY) as? String,
+           !accessGroup.isEmpty,
+           !accessGroup.contains("$(") {
+            query[kSecAttrAccessGroup] = accessGroup as AnyObject
+        } else {
+            logger.error("Missing resolved XauXat keychain access group")
+        }
     #endif
     return query
 }

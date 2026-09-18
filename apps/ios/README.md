@@ -1,19 +1,19 @@
-# SimpleX Chat iOS app
+# XauXat iOS app
 
 This file provides guidance when working with code in this repository.
 
 ## iOS App Overview
 
-The iOS app is a SwiftUI application that interfaces with the Haskell core library via FFI. It shares the SimpleXChat framework with two extensions: Notification Service Extension (NSE) for push notifications and Share Extension (SE) for sharing content from other apps.
+XauXat is a SwiftUI fork that interfaces with the SimpleX Haskell core library via FFI. It shares the SimpleXChat framework with two extensions: Notification Service Extension (NSE) for push notifications and Share Extension (SE) for sharing content from other apps.
 
 ## Build & Development
 
 Open `SimpleX.xcodeproj` in Xcode. The project has five targets:
-- **SimpleX (iOS)** - Main app (Bundle ID: `chat.simplex.app`)
-- **SimpleXChat** - Framework containing FFI bridge and shared types
-- **SimpleX NSE** - Notification Service Extension
-- **SimpleX SE** - Share Extension
-- **Tests iOS** - UI tests
+- **SimpleX (iOS)** - XauXat app (`pt.exsoria.xauxat`)
+- **SimpleXChat** - FFI framework (`pt.exsoria.xauxat.core`)
+- **SimpleX NSE** - Notification Service Extension (`pt.exsoria.xauxat.notification-service`)
+- **SimpleX SE** - Share Extension (`pt.exsoria.xauxat.share`)
+- **Tests iOS** - UI tests (`pt.exsoria.xauxat.tests`)
 
 Build and run via Xcode (Product > Build/Run). Tests run via Product > Test or:
 ```bash
@@ -65,7 +65,7 @@ Key directories in `Shared/`:
 
 ### Shared Data Between Targets
 
-All three targets share data via App Group (`group.chat.simplex.app`):
+All three targets share data via App Group (`group.pt.exsoria.xauxat`):
 - `SimpleXChat/AppGroup.swift` - GroupDefaults wrapper for typed shared preferences
 - Keychain for sensitive data: `kcDatabasePassword`, `kcAppPassword`, `kcSelfDestructPassword`
 
@@ -111,4 +111,6 @@ cd path/to/assets && ./resize.sh
 Configured in Info.plist:
 - Background modes: audio, fetch, remote-notification, voip
 - URL scheme: `simplex://` for deep linking
-- BGTaskScheduler: `chat.simplex.app.receive`
+- BGTaskScheduler: `pt.exsoria.xauxat.receive`
+
+The definitive identifiers, Apple Developer setup and signing checks are documented in [`../../docs/xauxat/IOS_APP_IDENTIFIERS.md`](../../docs/xauxat/IOS_APP_IDENTIFIERS.md).

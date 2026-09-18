@@ -451,17 +451,17 @@ func hiddenSecretsView<V: View>(_ v: V) -> some View {
     )
 }
 
-private let linkAttrKey = NSAttributedString.Key("chat.simplex.app.link")
+private let linkAttrKey = NSAttributedString.Key("pt.exsoria.xauxat.link")
 
-private let webLinkAttrKey = NSAttributedString.Key("chat.simplex.app.webLink")
+private let webLinkAttrKey = NSAttributedString.Key("pt.exsoria.xauxat.webLink")
 
-private let simplexLinkAttrKey = NSAttributedString.Key("chat.simplex.app.simplexLink")
+private let simplexLinkAttrKey = NSAttributedString.Key("pt.exsoria.xauxat.simplexLink")
 
-private let secretAttrKey = NSAttributedString.Key("chat.simplex.app.secret")
+private let secretAttrKey = NSAttributedString.Key("pt.exsoria.xauxat.secret")
 
-private let commandAttrKey = NSAttributedString.Key("chat.simplex.app.command")
-private let nameAttrKey = NSAttributedString.Key("chat.simplex.app.name")
-private let modalAttrKey = NSAttributedString.Key("chat.simplex.app.modal")
+private let commandAttrKey = NSAttributedString.Key("pt.exsoria.xauxat.command")
+private let nameAttrKey = NSAttributedString.Key("pt.exsoria.xauxat.name")
+private let modalAttrKey = NSAttributedString.Key("pt.exsoria.xauxat.modal")
 
 typealias MsgTextResult = (string: NSMutableAttributedString, hasSecrets: Bool, handleTaps: Bool)
 

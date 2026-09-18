@@ -55,11 +55,11 @@ public class SharedFileSubscriber<Message: Codable>: NSObject, NSFilePresenter {
     }
 }
 
-let appMessagesSharedFile = getGroupContainerDirectory().appendingPathComponent("chat.simplex.app.messages", isDirectory: false)
+let appMessagesSharedFile = getGroupContainerDirectory().appendingPathComponent("pt.exsoria.xauxat.messages", isDirectory: false)
 
-let nseMessagesSharedFile = getGroupContainerDirectory().appendingPathComponent("chat.simplex.app.SimpleX-NSE.messages", isDirectory: false)
+let nseMessagesSharedFile = getGroupContainerDirectory().appendingPathComponent("pt.exsoria.xauxat.notification-service.messages", isDirectory: false)
 
-let seMessagesSharedFile = getGroupContainerDirectory().appendingPathComponent("chat.simplex.app.SimpleX-SE.messages", isDirectory: false)
+let seMessagesSharedFile = getGroupContainerDirectory().appendingPathComponent("pt.exsoria.xauxat.share.messages", isDirectory: false)
 
 public struct ProcessMessage<Message: Codable>: Codable {
     var createdAt: Date = Date.now

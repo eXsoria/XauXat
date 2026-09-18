@@ -4,7 +4,7 @@
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>chat.simplex.app.receive</string>
+		<string>pt.exsoria.xauxat.receive</string>
 	</array>
 	<key>CFBundleIcons</key>
 	<dict>
@@ -36,7 +36,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>chat.simplex.app</string>
+			<string>pt.exsoria.xauxat</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>simplex</string>
@@ -60,5 +60,7 @@
 	<true/>
 	<key>XauXatPlusProductID</key>
 	<string>$(XAUXAT_PLUS_PRODUCT_ID)</string>
+	<key>XauXatKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)pt.exsoria.xauxat</string>
 </dict>
 </plist>

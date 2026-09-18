@@ -11,7 +11,7 @@ import Foundation
 import BackgroundTasks
 import SimpleXChat
 
-private let receiveTaskId = "chat.simplex.app.receive"
+private let receiveTaskId = "pt.exsoria.xauxat.receive"
 
 // TCP timeout + 2 sec
 private let waitForMessages: TimeInterval = 6
