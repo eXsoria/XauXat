@@ -961,7 +961,7 @@ private struct CallButton: View {
     var showAlert: (SomeAlert) -> Void
 
     var body: some View {
-        let canCall = contact.ready && contact.active && chat.chatInfo.featureEnabled(.calls) && ChatModel.shared.activeCall == nil
+        let canCall = xauXatContactInvitePermissions(contact).calls && contact.ready && contact.active && chat.chatInfo.featureEnabled(.calls) && ChatModel.shared.activeCall == nil
 
         InfoViewButton(image: image, title: title, disabledLook: !canCall, width: width) {
             if canCall {
