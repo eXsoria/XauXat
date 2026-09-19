@@ -40,7 +40,10 @@ jobs:
   native-core:
     name: XauXat native core (arm64)
     runs-on: macos-26
-    timeout-minutes: 120
+    # A cold Apple Silicon runner may need to bootstrap GHC before it can build
+    # the forked core. The resulting archive is cached, so this longer window is
+    # primarily needed for the first build of a new native-core source hash.
+    timeout-minutes: 360
 
     steps:
       - name: Check out fork and submodules
