@@ -31,6 +31,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: xauxat-ios-${{ github.ref }}
@@ -65,6 +66,13 @@ jobs:
           extra-conf: |
             extra-substituters = https://cache.iog.io
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+
+      - name: Restore and publish Nix derivation cache
+        if: steps.native-core-cache.outputs.cache-hit != 'true'
+        uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7
+        with:
+          use-flakehub: false
+          diagnostic-endpoint: ""
 
       - name: Build native core from this fork
         if: steps.native-core-cache.outputs.cache-hit != 'true'

@@ -3757,9 +3757,8 @@ processAgentMessageConn cxt user@User {userId} corrId agentConnId agentMessage =
       where
         onlyInviteRoleChanged gp gp' = normalizeAdmission gp == normalizeAdmission gp'
         normalizeAdmission gp@GroupProfile {memberAdmission} =
-          let admission :: GroupMemberAdmission
-              admission = fromMaybe emptyGroupMemberAdmission memberAdmission
-           in gp {memberAdmission = Just admission {inviteRole = Nothing}}
+          let GroupMemberAdmission admissionReview _ = fromMaybe emptyGroupMemberAdmission memberAdmission
+           in gp {memberAdmission = Just $ GroupMemberAdmission admissionReview Nothing}
 
     xGrpPrefs :: GroupInfo -> GroupMember -> GroupPreferences -> RcvMessage -> CM (Maybe DeliveryJobScope)
     xGrpPrefs g m@GroupMember {memberRole} ps' RcvMessage {msgSigned}
