@@ -2646,9 +2646,9 @@ processAgentMessageConn cxt user@User {userId} corrId agentConnId agentMessage =
       | isJust publicGroup = messageError "x.grp.inv: can't invite to channel"
       | otherwise = do
           let Contact {localDisplayName = c, activeConn} = ct
-              GroupInvitation {fromMember = (MemberIdRole fromMemId fromRole), invitedMember = (MemberIdRole memId memRole), connRequest, groupLinkId, groupProfile} = inv
+              GroupInvitation {fromMember = (MemberIdRole fromMemId fromRole), invitedMember = (MemberIdRole memId memRole), connRequest, groupLinkId, groupProfile = invitedGroupProfile} = inv
           forM_ activeConn $ \Connection {connId, connChatVersion, peerChatVRange, customUserProfileId, groupLinkId = groupLinkId'} -> do
-            when (fromRole < groupInviteRole groupProfile || fromRole < memRole) $ throwChatError (CEGroupContactRole c)
+            when (fromRole < groupInviteRole invitedGroupProfile || fromRole < memRole) $ throwChatError (CEGroupContactRole c)
             when (fromMemId == memId) $ throwChatError CEGroupDuplicateMemberId
             -- [incognito] if direct connection with host is incognito, create membership using the same incognito profile
             (gInfo@GroupInfo {groupId, localDisplayName, groupProfile, membership}, hostId) <- withStore $ \db -> createGroupInvitation db cxt user ct inv customUserProfileId
