@@ -21,10 +21,12 @@ Create three explicit App IDs in the Apple Developer portal for the main app, no
 
 Enable Push Notifications on the main App ID. The project already declares `remote-notification`, `fetch`, `audio` and `voip` background modes. The Debug app entitlement uses the APNs `development` environment and the Release app entitlement uses `production`.
 
-Enable Multicast Networking on the main App ID after Apple assigns the managed
-capability to the team. Approval alone does not modify the App ID or existing
-profiles: save the capability on `pt.exsoria.xauxat`, then regenerate affected
-profiles or allow Xcode automatic signing to replace them.
+The initial TestFlight build does not request the Apple-managed Multicast
+Networking entitlement. Local multicast discovery is disabled in the iOS UI,
+while QR/address-based desktop pairing and the underlying SimpleX implementation
+remain in the source. If multicast discovery is enabled in a later release,
+first obtain Apple's approval, enable the capability on `pt.exsoria.xauxat`, and
+regenerate the affected profiles.
 
 Create matching development and distribution provisioning profiles after enabling those capabilities. Do not commit APNs private keys, certificates, provisioning profiles or the Apple team ID. Supply the team locally or in CI as a protected setting:
 

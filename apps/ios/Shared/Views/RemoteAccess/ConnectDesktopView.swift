@@ -11,6 +11,11 @@ import SimpleXChat
 import CodeScanner
 
 struct ConnectDesktopView: View {
+    // Local multicast discovery needs an Apple-managed entitlement. Keep the
+    // underlying SimpleX desktop pairing flow, but do not start or expose
+    // multicast discovery in the initial XauXat distribution build.
+    private static let multicastDiscoveryEnabled = false
+
     @EnvironmentObject var m: ChatModel
     @EnvironmentObject var theme: AppTheme
     @Environment(\.dismiss) var dismiss: DismissAction
@@ -27,7 +32,7 @@ struct ConnectDesktopView: View {
     @State private var firstAppearance = true
 
     private var useMulticast: Bool {
-        connectRemoteViaMulticast && !remoteCtrls.isEmpty
+        Self.multicastDiscoveryEnabled && connectRemoteViaMulticast && !remoteCtrls.isEmpty
     }
 
     private enum ConnectDesktopAlert: Identifiable {
@@ -372,9 +377,11 @@ struct ConnectDesktopView: View {
 
             Section(header: Text("Linked desktop options").foregroundColor(theme.colors.secondary)) {
                 Toggle("Verify connections", isOn: $confirmRemoteSessions)
-                Toggle("Discover via local network", isOn: $connectRemoteViaMulticast)
-                if connectRemoteViaMulticast {
-                    Toggle("Connect automatically", isOn: $connectRemoteViaMulticastAuto)
+                if Self.multicastDiscoveryEnabled {
+                    Toggle("Discover via local network", isOn: $connectRemoteViaMulticast)
+                    if connectRemoteViaMulticast {
+                        Toggle("Connect automatically", isOn: $connectRemoteViaMulticastAuto)
+                    }
                 }
             }
         }

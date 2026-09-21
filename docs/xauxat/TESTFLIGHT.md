@@ -21,8 +21,8 @@ Do not create aliases using the old `dev.exsoria` or SimpleX identifiers.
 In Certificates, Identifiers & Profiles:
 
 1. Open the explicit App ID `pt.exsoria.xauxat`.
-2. Enable Associated Domains, App Groups, Push Notifications and Multicast
-   Networking. Assign `group.pt.exsoria.xauxat`, then save and confirm.
+2. Enable Associated Domains, App Groups and Push Notifications. Assign
+   `group.pt.exsoria.xauxat`, then save and confirm.
 3. Open `pt.exsoria.xauxat.notification-service` and
    `pt.exsoria.xauxat.share`. Enable App Groups and assign the same group to
    each extension.
@@ -30,9 +30,9 @@ In Certificates, Identifiers & Profiles:
    them automatically on the next archive with `-allowProvisioningUpdates`.
 5. In Xcode Settings > Accounts, make sure the intended team is signed in.
 
-Apple approval for a managed capability only makes the capability available to
-the team. It still needs to be enabled on the explicit App ID. Existing profiles
-do not gain it automatically and must be regenerated.
+The initial TestFlight build does not request Multicast Networking. Local
+multicast desktop discovery is disabled in the iOS UI until the managed
+capability is approved and deliberately enabled in a later release.
 
 ## One-time App Store Connect setup
 
@@ -69,7 +69,7 @@ The script:
 - installs the pinned Tor CocoaPod;
 - runs the notification/Tor policy checks;
 - creates a Release archive with automatic signing;
-- verifies production APNs, Multicast Networking, App Groups, keychain groups
+- verifies production APNs, App Groups, keychain groups
   and every XauXat bundle identifier from the signed entitlements;
 - exports and re-verifies the App Store Connect IPA.
 

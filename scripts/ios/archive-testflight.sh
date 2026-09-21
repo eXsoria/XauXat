@@ -148,6 +148,16 @@ assert_entitlement() {
   fi
 }
 
+assert_entitlement_absent() {
+  local entitlements_path=$1
+  local key_path=$2
+  local label=$3
+  if /usr/libexec/PlistBuddy -c "Print :$key_path" "$entitlements_path" >/dev/null 2>&1; then
+    echo "$label must not be present in this distribution build" >&2
+    exit 1
+  fi
+}
+
 verify_signed_entitlements() {
   local app_path=$1
   local expected_apns=${2:-}
@@ -163,7 +173,7 @@ verify_signed_entitlements() {
   if [[ -n "$expected_apns" ]]; then
     assert_entitlement "$main_entitlements" "aps-environment" "$expected_apns" "APNs environment"
   fi
-  assert_entitlement "$main_entitlements" "com.apple.developer.networking.multicast" "true" "Multicast Networking"
+  assert_entitlement_absent "$main_entitlements" "com.apple.developer.networking.multicast" "Multicast Networking"
   assert_entitlement "$main_entitlements" "com.apple.security.application-groups:0" "group.pt.exsoria.xauxat" "main App Group"
   assert_entitlement "$main_entitlements" "keychain-access-groups:0" "$team_id.pt.exsoria.xauxat" "main keychain group"
 
