@@ -3221,10 +3221,10 @@ processChatCommand cxt nm = \case
     runUpdateGroupProfile user gInfo p' False
   APISetGroupInviteRole groupId inviteRole' -> withUser $ \user -> do
     gInfo@GroupInfo {groupProfile = p@GroupProfile {memberAdmission}} <- withFastStore $ \db -> getGroupInfo db cxt user groupId
-    unless (inviteRole' `elem` [GRMember, GRModerator, GRAdmin]) $
+    unless (inviteRole' == GRMember || inviteRole' == GRModerator || inviteRole' == GRAdmin) $
       throwCmdError "invalid group invite role"
-    let admission = fromMaybe emptyGroupMemberAdmission memberAdmission
-        p' = p {memberAdmission = Just admission {inviteRole = Just inviteRole'}}
+    let GroupMemberAdmission admissionReview _ = fromMaybe emptyGroupMemberAdmission memberAdmission
+        p' = p {memberAdmission = Just $ GroupMemberAdmission admissionReview (Just inviteRole')}
     runUpdateGroupProfileAs GRAdmin user gInfo p' False
   UpdateGroupNames gName GroupProfile {displayName, fullName, shortDescr} ->
     updateGroupProfileByName gName $ \p -> p {displayName, fullName, shortDescr}
