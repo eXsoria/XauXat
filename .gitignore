@@ -73,6 +73,10 @@ website/.nyc_output/
 website/coverage/
 result
 
+# Local XauXat iOS release inputs and outputs
+.xauxat-cache/
+.xauxat-release/
+
 # Ignore API documentation
 website/api-docs/
 

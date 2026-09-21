@@ -21,6 +21,11 @@ Create three explicit App IDs in the Apple Developer portal for the main app, no
 
 Enable Push Notifications on the main App ID. The project already declares `remote-notification`, `fetch`, `audio` and `voip` background modes. The Debug app entitlement uses the APNs `development` environment and the Release app entitlement uses `production`.
 
+Enable Multicast Networking on the main App ID after Apple assigns the managed
+capability to the team. Approval alone does not modify the App ID or existing
+profiles: save the capability on `pt.exsoria.xauxat`, then regenerate affected
+profiles or allow Xcode automatic signing to replace them.
+
 Create matching development and distribution provisioning profiles after enabling those capabilities. Do not commit APNs private keys, certificates, provisioning profiles or the Apple team ID. Supply the team locally or in CI as a protected setting:
 
 ```bash
@@ -34,6 +39,10 @@ xcodebuild \
 ```
 
 For Xcode UI builds, define `XAUXAT_DEVELOPMENT_TEAM` in a user-local `.xcconfig` or as a user-defined build setting. Never add the real value to the repository.
+
+For an App Store Connect archive and validated IPA, use
+`scripts/ios/archive-testflight.sh`; the full flow is documented in
+`TESTFLIGHT.md`.
 
 ## Verification
 
