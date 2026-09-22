@@ -94,7 +94,7 @@ creates a local IPA that can be uploaded with Xcode Organizer or Transporter.
 Apple must process the build before it appears in App Store Connect. For the
 first beta:
 
-1. Open XauXat > TestFlight and wait for version `7.0.2` build `351` to finish
+1. Open XauXat > TestFlight and wait for version `0.0.1` build `1` to finish
    processing.
 2. Complete the export-compliance status shown for the build. XauXat contains
    its own encryption and Tor, so confirm the answers against the actual
