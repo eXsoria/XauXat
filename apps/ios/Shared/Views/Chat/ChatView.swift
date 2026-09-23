@@ -119,11 +119,15 @@ struct ChatView: View {
             let wallpaperType = theme.wallpaper.type
             let backgroundColor = theme.wallpaper.background ?? wallpaperType.defaultBackgroundColor(theme.base, theme.colors.background)
             let tintColor = theme.wallpaper.tint ?? wallpaperType.defaultTintColor(theme.base)
-            Color.clear.ignoresSafeArea(.all)
-                .if(wallpaperImage != nil && im.secondaryIMFilter == nil) { view in
-                    view.modifier(
-                        ChatViewBackground(image: wallpaperImage!, imageType: wallpaperType, background: backgroundColor, tint: tintColor)
-                    )
+            if case .local = cInfo {
+                xauXatPrivateNotesBackground.ignoresSafeArea(.all)
+            } else {
+                Color.clear.ignoresSafeArea(.all)
+                    .if(wallpaperImage != nil && im.secondaryIMFilter == nil) { view in
+                        view.modifier(
+                            ChatViewBackground(image: wallpaperImage!, imageType: wallpaperType, background: backgroundColor, tint: tintColor)
+                        )
+                }
             }
             VStack(spacing: 0) {
                 ZStack(alignment: .bottomTrailing) {
@@ -480,6 +484,12 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    private var xauXatPrivateNotesBackground: Color {
+        colorScheme == .dark
+            ? Color.black
+            : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
     }
 
     private func connectInProgressView(_ s: String) -> some View {
