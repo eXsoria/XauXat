@@ -267,6 +267,11 @@ enum XauXatPlusStatus: Equatable {
 
 enum XauXatPlusConfiguration {
     static let fallbackProductID = "pt.exsoria.xauxat.plus.monthly"
+    // Build 3 ships with Plus enabled for every installation while the
+    // subscription product is not yet configured in App Store Connect.
+    // StoreKit remains wired underneath so paid access can be restored later
+    // by changing this single release policy.
+    static let includedInBuild = true
 
     static var productID: String {
         if let override = ProcessInfo.processInfo.environment["XAUXAT_PLUS_PRODUCT_ID"],
@@ -303,19 +308,11 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
     }
 
     var hasAccess: Bool {
-#if DEBUG
-        true
-#else
-        status.hasAccess
-#endif
+        XauXatPlusConfiguration.includedInBuild || status.hasAccess
     }
 
-    var hasLocalDebugAccess: Bool {
-#if DEBUG
-        true
-#else
-        false
-#endif
+    var hasIncludedAccess: Bool {
+        XauXatPlusConfiguration.includedInBuild
     }
 
     func isAuthorized(for feature: XauXatPlusFeature) -> Bool {
@@ -463,7 +460,7 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
     private func updateStatus(_ nextStatus: XauXatPlusStatus) {
         status = nextStatus
 #if !DEBUG
-        if nextStatus.hasAccess {
+        if hasAccess {
             enforceFreeDefaultsTask?.cancel()
             enforceFreeDefaultsTask = nil
         } else {
@@ -477,7 +474,7 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
     }
 
     private func enforceFreeDefaults() async {
-        guard !status.hasAccess else { return }
+        guard !hasAccess else { return }
 
         _ = xauXatRemoveConversationLocks(.primary)
         _ = xauXatRemoveConversationLocks(.decoy)
@@ -500,16 +497,16 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
 
         for _ in 0..<120 {
             if chatModel.chatRunning == true { break }
-            guard !Task.isCancelled, !status.hasAccess else { return }
+            guard !Task.isCancelled, !hasAccess else { return }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
-        guard chatModel.chatRunning == true, !Task.isCancelled, !status.hasAccess else { return }
+        guard chatModel.chatRunning == true, !Task.isCancelled, !hasAccess else { return }
 
         // Protected group invites must not survive a Plus downgrade. Deleting
         // the underlying SimpleX link invalidates every encrypted copy without
         // removing the group or any existing member.
         for policy in xauXatGroupAccessPolicies() {
-            guard !Task.isCancelled, !status.hasAccess else { return }
+            guard !Task.isCancelled, !hasAccess else { return }
             do {
                 try await apiDeleteGroupLink(policy.groupId)
             } catch {
@@ -520,7 +517,7 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
         _ = xauXatRemoveGroupAccessPolicies(.decoy)
 
         for invite in xauXatOneTimeGroupInvites() where invite.state == .active || invite.state == .failed {
-            guard !Task.isCancelled, !status.hasAccess else { return }
+            guard !Task.isCancelled, !hasAccess else { return }
             try? await apiDeleteChat(type: .contactConnection, id: invite.connectionId)
             await MainActor.run { chatModel.removeChat(":\(invite.connectionId)") }
         }

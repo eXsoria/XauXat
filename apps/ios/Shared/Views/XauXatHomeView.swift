@@ -1016,7 +1016,7 @@ private struct XauXatSettingsHome: View {
     }
 
     private var plusStatusLabel: String {
-        if plusEntitlements.hasLocalDebugAccess { return "Included" }
+        if plusEntitlements.hasIncludedAccess { return "Included" }
         switch plusEntitlements.status {
         case .active: return "Active"
         case .checking: return "Checking"

@@ -610,55 +610,44 @@ struct XauXatPlusView: View {
                         .multilineTextAlignment(.trailing)
                 }
             } footer: {
-                if plusEntitlements.hasLocalDebugAccess {
-                    Text("This local Debug build includes XauXat Plus automatically.")
+                if plusEntitlements.hasIncludedAccess {
+                    Text("XauXat Plus is included automatically in this build.")
                 } else {
                     Text("The App Store provides the localized price and cryptographically verifies access. XauXat does not unlock Plus from a local setting.")
                 }
             }
 
-            Section {
-                if plusEntitlements.hasLocalDebugAccess {
-                    Button {
-                        Task { await plusEntitlements.purchase() }
-                    } label: {
-                        HStack {
-                            Text("Test App Store purchase")
-                            Spacer()
-                            if plusEntitlements.isPurchasing { ProgressView() }
+            if !plusEntitlements.hasIncludedAccess {
+                Section {
+                    if !plusEntitlements.hasAccess {
+                        Button {
+                            Task { await plusEntitlements.purchase() }
+                        } label: {
+                            HStack {
+                                Text("Subscribe for \(plusEntitlements.displayPrice)")
+                                Spacer()
+                                if plusEntitlements.isPurchasing { ProgressView() }
+                            }
                         }
+                        .disabled(plusEntitlements.product == nil || plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
                     }
-                    .disabled(plusEntitlements.product == nil || plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
-                } else if !plusEntitlements.hasAccess {
-                    Button {
-                        Task { await plusEntitlements.purchase() }
-                    } label: {
-                        HStack {
-                            Text("Subscribe for \(plusEntitlements.displayPrice)")
-                            Spacer()
-                            if plusEntitlements.isPurchasing { ProgressView() }
-                        }
-                    }
-                    .disabled(plusEntitlements.product == nil || plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
-                }
 
-                Button {
-                    Task { await plusEntitlements.restorePurchases() }
-                } label: {
-                    HStack {
-                        Text("Restore purchases")
-                        Spacer()
-                        if plusEntitlements.isRestoring { ProgressView() }
+                    Button {
+                        Task { await plusEntitlements.restorePurchases() }
+                    } label: {
+                        HStack {
+                            Text("Restore purchases")
+                            Spacer()
+                            if plusEntitlements.isRestoring { ProgressView() }
+                        }
                     }
-                }
-                .disabled(plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
-            } footer: {
-                if plusEntitlements.hasLocalDebugAccess {
-                    Text("Plus stays included in this Debug build. The test purchase uses the configured StoreKit environment; App Store and TestFlight builds still require a verified subscription.")
-                } else if plusEntitlements.product == nil {
-                    Text("The product is not available in this build or App Store environment. Configure \(plusEntitlements.productID) before testing purchases.")
-                } else {
-                    Text("Payment and subscription management are handled by Apple. Restoring may ask you to authenticate with the App Store.")
+                    .disabled(plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
+                } footer: {
+                    if plusEntitlements.product == nil {
+                        Text("The product is not available in this build or App Store environment. Configure \(plusEntitlements.productID) before testing purchases.")
+                    } else {
+                        Text("Payment and subscription management are handled by Apple. Restoring may ask you to authenticate with the App Store.")
+                    }
                 }
             }
         }
@@ -676,34 +665,34 @@ struct XauXatPlusView: View {
 
     @ViewBuilder
     private var statusText: some View {
-#if DEBUG
-        Text("Included in local build")
-#else
-        switch plusEntitlements.status {
-        case .checking:
-            Text("Checking App Store…")
-        case .notPurchased:
-            Text("Free plan")
-        case let .active(expiresAt, willAutoRenew):
-            if let expiresAt {
-                Text(willAutoRenew ? "Active, renews \(expiresAt.formatted(date: .abbreviated, time: .omitted))" : "Active until \(expiresAt.formatted(date: .abbreviated, time: .omitted)), cancelled")
-            } else {
-                Text("Active")
+        if plusEntitlements.hasIncludedAccess {
+            Text("Included in this build")
+        } else {
+            switch plusEntitlements.status {
+            case .checking:
+                Text("Checking App Store…")
+            case .notPurchased:
+                Text("Free plan")
+            case let .active(expiresAt, willAutoRenew):
+                if let expiresAt {
+                    Text(willAutoRenew ? "Active, renews \(expiresAt.formatted(date: .abbreviated, time: .omitted))" : "Active until \(expiresAt.formatted(date: .abbreviated, time: .omitted)), cancelled")
+                } else {
+                    Text("Active")
+                }
+            case let .expired(expiresAt):
+                if let expiresAt {
+                    Text("Expired \(expiresAt.formatted(date: .abbreviated, time: .omitted))")
+                } else {
+                    Text("Expired")
+                }
+            case .revoked:
+                Text("Revoked")
+            case .unverified:
+                Text("Could not verify")
+            case .unavailable:
+                Text("Unavailable")
             }
-        case let .expired(expiresAt):
-            if let expiresAt {
-                Text("Expired \(expiresAt.formatted(date: .abbreviated, time: .omitted))")
-            } else {
-                Text("Expired")
-            }
-        case .revoked:
-            Text("Revoked")
-        case .unverified:
-            Text("Could not verify")
-        case .unavailable:
-            Text("Unavailable")
         }
-#endif
     }
 }
 
