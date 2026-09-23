@@ -163,6 +163,9 @@ jobs:
           xcrun vtool -show-build "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'platform IOS'
           otool -L "$app_path/SimpleX" | grep -q '@rpath/Tor.framework/Tor'
           ./scripts/ios/verify-xauxat-identifiers.sh "$app_path" development
+          swiftygif_privacy_manifest=$(find "$app_path/Frameworks" -path '*SwiftyGif*.framework/*/PrivacyInfo.xcprivacy' -type f -print -quit)
+          test -n "$swiftygif_privacy_manifest"
+          plutil -lint "$swiftygif_privacy_manifest"
 
       - name: Upload arm64 device app
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
