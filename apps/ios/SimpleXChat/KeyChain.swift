@@ -16,6 +16,7 @@ private let ACCESS_GROUP_INFO_KEY = "XauXatKeychainAccessGroup"
 private let DATABASE_PASSWORD_ITEM: String = "databasePassword"
 private let DECOY_DATABASE_PASSWORD_ITEM: String = "databasePassword.localProfile"
 private let APP_PASSWORD_ITEM: String = "appPassword"
+private let APP_PIN_ATTEMPT_STATE_ITEM: String = "appPINAttemptState"
 private let SELF_DESTRUCT_PASSWORD_ITEM: String = "selfDestructPassword"
 private let DECOY_PASSWORD_ITEM: String = "localProfilePassword"
 private let PRIMARY_CONVERSATION_LOCKS_ITEM: String = "conversationLocks"
@@ -68,6 +69,8 @@ public var kcDatabasePassword: KeyChainItem {
 }
 
 public let kcAppPassword = KeyChainItem(forKey: APP_PASSWORD_ITEM)
+
+public let kcAppPINAttemptState = KeyChainItem(forKey: APP_PIN_ATTEMPT_STATE_ITEM)
 
 public let kcSelfDestructPassword = KeyChainItem(forKey: SELF_DESTRUCT_PASSWORD_ITEM)
 

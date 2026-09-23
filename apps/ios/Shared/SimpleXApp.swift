@@ -484,6 +484,7 @@ final class XauXatPlusEntitlements: ObservableObject, XauXatPlusAuthorizing {
         UserDefaults.standard.removeObject(forKey: DEFAULT_LA_SELF_DESTRUCT)
         UserDefaults.standard.removeObject(forKey: DEFAULT_LA_SELF_DESTRUCT_DISPLAY_NAME)
         UserDefaults.standard.removeObject(forKey: DEFAULT_LA_DURESS_SCOPE)
+        UserDefaults.standard.removeObject(forKey: DEFAULT_LA_DESTROY_AFTER_FAILED_ATTEMPTS)
 
         if xauXatStorageScope() == .primary {
             deleteDecoyStorage()

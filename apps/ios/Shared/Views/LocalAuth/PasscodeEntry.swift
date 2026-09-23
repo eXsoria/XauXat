@@ -15,6 +15,7 @@ struct PasscodeEntry: View {
     @Binding var password: String
     var expectedPasscodeLength: Int? = nil
     var showsIndicators = true
+    var buttonsEnabled = true
 
     var body: some View {
         VStack(spacing: 22) {
@@ -28,6 +29,7 @@ struct PasscodeEntry: View {
                 landscapeKeypad
             }
         }
+        .disabled(!buttonsEnabled)
     }
 
     private var portraitKeypad: some View {

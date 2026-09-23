@@ -45,7 +45,8 @@ struct PasscodeView: View {
                 width: min(geometry.size.width - 40, 390),
                 height: geometry.size.height * 0.62,
                 password: $passcode,
-                expectedPasscodeLength: expectedPasscodeLength
+                expectedPasscodeLength: expectedPasscodeLength,
+                buttonsEnabled: buttonsEnabled
             )
 
             Spacer(minLength: 18)
@@ -70,7 +71,8 @@ struct PasscodeView: View {
                 height: geometry.size.height - 28,
                 password: $passcode,
                 expectedPasscodeLength: nil,
-                showsIndicators: false
+                showsIndicators: false,
+                buttonsEnabled: buttonsEnabled
             )
         }
         .padding(.horizontal, 28)

@@ -229,6 +229,8 @@
 		A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */; };
 		A11E002233D4000100000022 /* XauXatGroupAccessRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E002133D4000100000021 /* XauXatGroupAccessRules.swift */; };
 		A11E002333D4000100000023 /* XauXatGroupAccessRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E002133D4000100000021 /* XauXatGroupAccessRules.swift */; };
+		A11E003233D5000100000032 /* XauXatPINAttemptPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E003133D5000100000031 /* XauXatPINAttemptPolicy.swift */; };
+		A11E003333D5000100000033 /* XauXatPINAttemptPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E003133D5000100000031 /* XauXatPINAttemptPolicy.swift */; };
 		B70A39732D24090D00E80A5F /* TagListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70A39722D24090D00E80A5F /* TagListView.swift */; };
 		B70CE9E62D4BE5930080F36D /* GroupMentions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70CE9E52D4BE5930080F36D /* GroupMentions.swift */; };
 		B728945B2D0C62BF00F7A19A /* ElegantEmojiPicker in Frameworks */ = {isa = PBXBuildFile; productRef = B728945A2D0C62BF00F7A19A /* ElegantEmojiPicker */; };
@@ -620,6 +622,7 @@
 		B3B79D8F8E95FE108F604F0D /* Pods-SimpleX NSE.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SimpleX NSE.debug.xcconfig"; path = "Target Support Files/Pods-SimpleX NSE/Pods-SimpleX NSE.debug.xcconfig"; sourceTree = "<group>"; };
 		A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatCodeLockedContent.swift; sourceTree = "<group>"; };
 		A11E002133D4000100000021 /* XauXatGroupAccessRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatGroupAccessRules.swift; sourceTree = "<group>"; };
+		A11E003133D5000100000031 /* XauXatPINAttemptPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatPINAttemptPolicy.swift; sourceTree = "<group>"; };
 		B5D5FB384075FF4C67AA7A2A /* Pods_SimpleX__iOS_.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_SimpleX__iOS_.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70A39722D24090D00E80A5F /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
 		B70CE9E52D4BE5930080F36D /* GroupMentions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupMentions.swift; sourceTree = "<group>"; };
@@ -873,6 +876,7 @@
 				A11E000133D1000100000001 /* EmbeddedTorManager.swift */,
 				A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */,
 				A11E002133D4000100000021 /* XauXatGroupAccessRules.swift */,
+				A11E003133D5000100000031 /* XauXatPINAttemptPolicy.swift */,
 				E5DDBE6D2DC4106200A0EFF0 /* AppAPITypes.swift */,
 				5C764E88279CBCB3000C6508 /* ChatModel.swift */,
 				5C2E260627A2941F00F70299 /* SimpleXAPI.swift */,
@@ -1628,6 +1632,7 @@
 				A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */,
 				A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */,
 				A11E002233D4000100000022 /* XauXatGroupAccessRules.swift in Sources */,
+				A11E003233D5000100000032 /* XauXatPINAttemptPolicy.swift in Sources */,
 				64C06EB52A0A4A7C00792D4D /* ChatItemInfoView.swift in Sources */,
 				8CC317442D4FEB9B00292A20 /* EndlessScrollView.swift in Sources */,
 				640417CE2B29B8C200CCB412 /* NewChatView.swift in Sources */,
@@ -1828,6 +1833,7 @@
 				5CA059DE279559F40002BEB4 /* Tests_iOSLaunchTests.swift in Sources */,
 				5CA059DC279559F40002BEB4 /* Tests_iOS.swift in Sources */,
 				A11E002333D4000100000023 /* XauXatGroupAccessRules.swift in Sources */,
+				A11E003333D5000100000033 /* XauXatPINAttemptPolicy.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
