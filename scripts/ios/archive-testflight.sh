@@ -206,6 +206,14 @@ exported_app=$(find "$work_dir/ipa/Payload" -maxdepth 1 -type d -name '*.app' -p
 test -n "$exported_app"
 "$repo_root/scripts/ios/verify-xauxat-identifiers.sh" "$exported_app" production
 verify_signed_entitlements "$exported_app" production
+
+swiftygif_privacy_manifest=$(find "$exported_app/Frameworks" -path '*SwiftyGif*.framework/*/PrivacyInfo.xcprivacy' -type f -print -quit)
+if [[ -z "$swiftygif_privacy_manifest" ]]; then
+  echo "The exported app is missing SwiftyGif's required PrivacyInfo.xcprivacy manifest." >&2
+  exit 1
+fi
+plutil -lint "$swiftygif_privacy_manifest" >/dev/null
+
 echo "Exported TestFlight IPA: $ipa_path"
 
 if [[ "$upload" == true ]]; then
