@@ -16,7 +16,13 @@ struct ChatInfoImage: View {
     var color = Color(uiColor: .tertiarySystemGroupedBackground)
 
     var body: some View {
-        let iconColor = if case .local = chat.chatInfo { theme.appColors.primaryVariant2 } else { color }
+        let iconColor = if case .local = chat.chatInfo {
+            theme.colors.isLight
+                ? Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+                : Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+        } else {
+            color
+        }
         return ProfileImage(
             imageStr: chat.chatInfo.image,
             iconName: chatIconName(chat.chatInfo),
