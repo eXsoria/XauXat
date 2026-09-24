@@ -66,13 +66,11 @@ struct QRCode: View {
                     let m = w * 0.005
                     ZStack {
                         if withLogo {
-                            Image("icon-light")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: l, height: l)
-                            .frame(width: l + m, height: l + m)
-                            .background(.white)
-                            .clipShape(Circle())
+                            XauXatQRCodeLogo()
+                                .frame(width: l, height: l)
+                                .frame(width: l + m, height: l + m)
+                                .background(.white)
+                                .clipShape(Circle())
                         }
                     }
                     .onAppear {
@@ -90,8 +88,66 @@ struct QRCode: View {
             }
         }
         .onTapGesture(perform: makeScreenshotFunc)
-        .task { image = await generateImage(uri, tintColor: tintColor, errorLevel: small ? "M" : "L") }
+        .task { image = await generateImage(uri, tintColor: tintColor, errorLevel: withLogo ? "H" : (small ? "M" : "L")) }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct XauXatQRCodeLogo: View {
+    private static let appIcon = loadPrimaryAppIcon()
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Color.black)
+            if let appIcon = Self.appIcon {
+                Image(uiImage: appIcon)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                XauXatQRCodeMark()
+                    .fill(Color(red: 0.94, green: 0.91, blue: 0.85), style: FillStyle(eoFill: true))
+                    .padding(7)
+            }
+        }
+        .clipShape(Circle())
+        .accessibilityHidden(true)
+    }
+
+    private static func loadPrimaryAppIcon() -> UIImage? {
+        guard let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+              let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+              let files = primary["CFBundleIconFiles"] as? [String] else { return nil }
+        return files.reversed().compactMap { UIImage(named: $0) }.first
+    }
+}
+
+private struct XauXatQRCodeMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        }
+
+        var path = Path()
+        path.move(to: point(0.17, 0.08))
+        path.addLine(to: point(0.46, 0.32))
+        path.addLine(to: point(0.54, 0.32))
+        path.addLine(to: point(0.83, 0.08))
+        path.addLine(to: point(0.94, 0.42))
+        path.addLine(to: point(0.82, 0.78))
+        path.addLine(to: point(0.50, 0.97))
+        path.addLine(to: point(0.18, 0.78))
+        path.addLine(to: point(0.06, 0.42))
+        path.closeSubpath()
+
+        path.move(to: point(0.31, 0.43))
+        path.addLine(to: point(0.45, 0.54))
+        path.addLine(to: point(0.35, 0.58))
+        path.closeSubpath()
+        path.move(to: point(0.69, 0.43))
+        path.addLine(to: point(0.65, 0.58))
+        path.addLine(to: point(0.55, 0.54))
+        path.closeSubpath()
+        return path
     }
 }
 
