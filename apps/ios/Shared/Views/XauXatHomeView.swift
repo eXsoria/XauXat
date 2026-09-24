@@ -1034,10 +1034,110 @@ private struct XauXatSettingsHome: View {
 }
 
 private struct XauXatHelpDestination: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: XauXatPalette { XauXatPalette(colorScheme) }
 
     var body: some View {
-        ChatHelp(dismissSettingsSheet: dismiss)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Help with XauXat")
+                    .font(.custom("Courier", size: 26).weight(.bold))
+                    .foregroundStyle(palette.ink)
+                    .padding(.bottom, 8)
+
+                Text("Create private connections, exchange messages and keep your local data under your control.")
+                    .font(.custom("Courier", size: 13))
+                    .foregroundStyle(palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 30)
+
+                XauXatSectionTitle("START A CONVERSATION", palette: palette)
+                XauXatHelpCard(palette: palette) {
+                    XauXatHelpStep(
+                        palette: palette,
+                        number: "01",
+                        title: "Open the + menu",
+                        detail: "Use the button at the top of Chats or Contacts."
+                    )
+                    XauXatHelpStep(
+                        palette: palette,
+                        number: "02",
+                        title: "Choose how to connect",
+                        detail: "Start a conversation, create a private link, or scan a QR code."
+                    )
+                    XauXatHelpStep(
+                        palette: palette,
+                        number: "03",
+                        title: "Share privately",
+                        detail: "Only send invitation links and QR codes to people you intend to connect with."
+                    )
+                }
+
+                XauXatSectionTitle("MESSAGE FORMATTING", palette: palette)
+                    .padding(.top, 28)
+                XauXatHelpCard(palette: palette) {
+                    MarkdownHelp()
+                        .foregroundStyle(palette.ink)
+                        .padding(16)
+                }
+
+                XauXatSectionTitle("BETA SUPPORT", palette: palette)
+                    .padding(.top, 28)
+                XauXatHelpCard(palette: palette) {
+                    Text("For beta support, open XauXat in TestFlight and choose Send Beta Feedback.")
+                        .font(.custom("Courier", size: 13))
+                        .foregroundStyle(palette.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(16)
+                }
+            }
+            .padding(22)
+        }
+        .background(palette.background.ignoresSafeArea())
+    }
+}
+
+private struct XauXatHelpCard<Content: View>: View {
+    let palette: XauXatPalette
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+private struct XauXatHelpStep: View {
+    let palette: XauXatPalette
+    let number: String
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Text(number)
+                .font(.custom("Courier", size: 12).weight(.bold))
+                .foregroundStyle(palette.muted)
+                .frame(width: 24, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.custom("Courier", size: 14).weight(.bold))
+                    .foregroundStyle(palette.ink)
+                Text(detail)
+                    .font(.custom("Courier", size: 12))
+                    .foregroundStyle(palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 15)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
