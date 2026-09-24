@@ -445,6 +445,7 @@ struct SimplexLockView: View {
     @State private var currentSelfDestruct: Bool = UserDefaults.standard.bool(forKey: DEFAULT_LA_SELF_DESTRUCT)
     @AppStorage(DEFAULT_LA_SELF_DESTRUCT_DISPLAY_NAME) private var selfDestructDisplayName = ""
     @AppStorage(DEFAULT_LA_DURESS_SCOPE) private var duressScope = XauXatDuressScope.primary.rawValue
+    @AppStorage(DEFAULT_LA_DESTROY_AFTER_FAILED_ATTEMPTS) private var destroyAfterFailedAttempts = false
     @AppStorage(DEFAULT_LA_DECOY_DISPLAY_NAME) private var decoyDisplayName = "Alex"
     @AppStorage(GROUP_DEFAULT_ALLOW_SHARE_EXTENSION, store: groupDefaults) private var allowShareExtension = false
     @State private var performLAToggleReset = false
@@ -470,6 +471,7 @@ struct SimplexLockView: View {
         case decoyPasscodeChangedAlert
         case removeDecoyConfirmation
         case decoyRemovedAlert
+        case enableFailedAttemptDestruction
 
         var id: Self { self }
     }
@@ -524,6 +526,31 @@ struct SimplexLockView: View {
                             Button("Change passcode") {
                                 changeLAPassword()
                             }
+                        }
+                    }
+                }
+
+                if performLA && laMode == .passcode {
+                    Section {
+                        if plusEntitlements.isAuthorized(for: .duressPIN) {
+                            Toggle("Destroy data after 3 failed PINs", isOn: destroyAfterFailedAttemptsBinding)
+                        } else {
+                            NavigationLink {
+                                XauXatPlusView()
+                                    .navigationTitle("XauXat Plus")
+                                    .navigationBarTitleDisplayMode(.inline)
+                            } label: {
+                                XauXatPlusLockedLabel(title: "Destroy data after 3 failed PINs", systemImage: "exclamationmark.shield")
+                            }
+                        }
+                    } header: {
+                        Text("Failed PIN attempts")
+                            .foregroundColor(theme.colors.secondary)
+                    } footer: {
+                        if destroyAfterFailedAttempts && plusEntitlements.isAuthorized(for: .duressPIN) {
+                            Text("The third incorrect PIN permanently destroys all local encryption keys. Recovery is impossible.")
+                        } else {
+                            Text("After the third incorrect PIN, XauXat blocks all new attempts for one hour.")
                         }
                     }
                 }
@@ -672,6 +699,7 @@ struct SimplexLockView: View {
                 performLASelfDestructReset = true
                 selfDestruct = false
             }
+            destroyAfterFailedAttempts = false
         }
         .alert(item: $laAlert) { alertItem in
             switch alertItem {
@@ -694,6 +722,13 @@ struct SimplexLockView: View {
                     secondaryButton: .cancel()
                 )
             case .decoyRemovedAlert: return mkAlert(title: "Decoy environment removed")
+            case .enableFailedAttemptDestruction:
+                return Alert(
+                    title: Text("Destroy all data after 3 failed PINs?"),
+                    message: Text("The third incorrect PIN will permanently destroy every local encryption key, including any decoy environment. XauXat cannot recover the data."),
+                    primaryButton: .destructive(Text("Enable")) { destroyAfterFailedAttempts = true },
+                    secondaryButton: .cancel()
+                )
             }
         }
         .sheet(item: $showPasswordAction) { a in
@@ -983,9 +1018,24 @@ struct SimplexLockView: View {
 
     private func resetLA() {
         _ = kcAppPassword.remove()
+        XauXatPINAttemptStore.shared.reset()
+        destroyAfterFailedAttempts = false
         laLockDelay = 30
         showChangePassword = false
         resetSelfDestruct()
+    }
+
+    private var destroyAfterFailedAttemptsBinding: Binding<Bool> {
+        Binding(
+            get: { destroyAfterFailedAttempts },
+            set: { enabled in
+                if enabled {
+                    laAlert = .enableFailedAttemptDestruction
+                } else {
+                    destroyAfterFailedAttempts = false
+                }
+            }
+        )
     }
 
     private func resetLAEnabled(_ onOff: Bool) {

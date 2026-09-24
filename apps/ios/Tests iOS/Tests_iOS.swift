@@ -106,4 +106,58 @@ class Tests_iOS: XCTestCase {
         XCTAssertTrue(rules.summary().contains("Code required"))
         XCTAssertFalse(rules.summary().contains("111111"))
     }
+
+    func testPINAttemptPolicyLocksAfterThirdFailure() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var state = XauXatPINAttemptState()
+
+        XCTAssertEqual(state.recordFailure(policy: .lock, now: now, uptime: 100), .retry(remainingAttempts: 2))
+        XCTAssertEqual(state.recordFailure(policy: .lock, now: now, uptime: 101), .retry(remainingAttempts: 1))
+        XCTAssertEqual(state.recordFailure(policy: .lock, now: now, uptime: 102), .locked(remaining: 3_600))
+        XCTAssertEqual(state.failedAttempts, 3)
+    }
+
+    func testPINAttemptLockExpiresAndResetsCounter() {
+        let now = Date(timeIntervalSince1970: 20_000)
+        var state = XauXatPINAttemptState()
+        _ = state.recordFailure(policy: .lock, now: now, uptime: 200)
+        _ = state.recordFailure(policy: .lock, now: now, uptime: 201)
+        _ = state.recordFailure(policy: .lock, now: now, uptime: 202)
+
+        XCTAssertNil(state.lockRemaining(now: now.addingTimeInterval(3_601), uptime: 3_803))
+        XCTAssertEqual(state.failedAttempts, 0)
+        XCTAssertEqual(
+            state.recordFailure(policy: .lock, now: now.addingTimeInterval(3_602), uptime: 3_804),
+            .retry(remainingAttempts: 2)
+        )
+    }
+
+    func testPINAttemptLockCannotBeBypassedByMovingClockBackwards() {
+        let now = Date(timeIntervalSince1970: 30_000)
+        var state = XauXatPINAttemptState()
+        _ = state.recordFailure(policy: .lock, now: now, uptime: 500)
+        _ = state.recordFailure(policy: .lock, now: now, uptime: 501)
+        _ = state.recordFailure(policy: .lock, now: now, uptime: 502)
+
+        let remaining = state.lockRemaining(now: now.addingTimeInterval(-7_200), uptime: 602)
+        XCTAssertNotNil(remaining)
+        XCTAssertEqual(remaining!, 3_500, accuracy: 0.001)
+    }
+
+    func testPINAttemptDestructionRequiresExplicitPolicy() {
+        let now = Date(timeIntervalSince1970: 40_000)
+        var lockedState = XauXatPINAttemptState()
+        _ = lockedState.recordFailure(policy: .lock, now: now, uptime: 800)
+        _ = lockedState.recordFailure(policy: .lock, now: now, uptime: 801)
+        XCTAssertEqual(
+            lockedState.recordFailure(policy: .lock, now: now, uptime: 802),
+            .locked(remaining: 3_600)
+        )
+
+        var destructiveState = XauXatPINAttemptState()
+        _ = destructiveState.recordFailure(policy: .destroy, now: now, uptime: 900)
+        _ = destructiveState.recordFailure(policy: .destroy, now: now, uptime: 901)
+        XCTAssertEqual(destructiveState.recordFailure(policy: .destroy, now: now, uptime: 902), .destroy)
+        XCTAssertNotNil(destructiveState.lockRemaining(now: now, uptime: 902))
+    }
 }

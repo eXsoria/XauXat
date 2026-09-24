@@ -9,15 +9,20 @@
 
 import SwiftUI
 import SimpleXChat
+import Combine
 
 struct LocalAuthView: View {
     @EnvironmentObject var m: ChatModel
     var authRequest: LocalAuthRequest
     @State private var password = ""
     @State private var allowToReact = true
+    @State private var failedAttempts = 0
+    @State private var lockRemaining: TimeInterval?
+    @State private var feedbackMessage: String?
+    @State private var pendingFailure: Task<Void, Never>?
 
     var body: some View {
-        PasscodeView(passcode: $password, title: authRequest.title ?? "Enter Passcode", reason: authRequest.reason, submitLabel: "Submit",
+        PasscodeView(passcode: $password, title: authRequest.title ?? "Enter Passcode", reason: displayedReason, submitLabel: "Submit",
                      showsSubmitButton: false, expectedPasscodeLength: authRequest.password.count, buttonsEnabled: $allowToReact) {
             submitPasscode()
         } cancel: {
@@ -25,20 +30,69 @@ struct LocalAuthView: View {
             authRequest.completed(.failed(authError: NSLocalizedString("Authentication cancelled", comment: "PIN entry")))
         }
         .onChange(of: password) { enteredPassword in
+            pendingFailure?.cancel()
             if allowToReact && matchesConfiguredPasscode(enteredPassword) {
+                submitPasscode()
+            } else if allowToReact && enteredPassword.count >= minimumConfiguredPasscodeLength {
+                scheduleFailedAttempt(for: enteredPassword)
+            }
+        }
+        .onAppear(perform: refreshAttemptStatus)
+        .onDisappear { pendingFailure?.cancel() }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+            if lockRemaining != nil { refreshAttemptStatus() }
+        }
+    }
+
+    private var displayedReason: String {
+        if let lockRemaining {
+            return String(
+                format: NSLocalizedString("Too many incorrect attempts. Try again in %@.", comment: "PIN lockout countdown"),
+                lockDurationText(lockRemaining)
+            )
+        }
+        if let feedbackMessage { return feedbackMessage }
+        if authRequest.isAppUnlock, failedAttempts > 0 {
+            return String(
+                format: NSLocalizedString("%d attempts remaining.", comment: "PIN attempts remaining"),
+                XauXatPINAttemptState.maximumAttempts - failedAttempts
+            )
+        }
+        return authRequest.reason
+    }
+
+    private var configuredPasscodes: [String] {
+        var passcodes = [authRequest.password]
+        if authRequest.selfDestruct {
+            if let password = kcSelfDestructPassword.get() { passcodes.append(password) }
+            if let password = kcDecoyPassword.get() { passcodes.append(password) }
+        }
+        return passcodes
+    }
+
+    private var minimumConfiguredPasscodeLength: Int {
+        configuredPasscodes.map(\.count).min() ?? authRequest.password.count
+    }
+
+    private func matchesConfiguredPasscode(_ enteredPassword: String) -> Bool {
+        configuredPasscodes.contains(enteredPassword)
+    }
+
+    private func scheduleFailedAttempt(for candidate: String) {
+        pendingFailure = Task {
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard allowToReact, password == candidate, !matchesConfiguredPasscode(candidate) else { return }
                 submitPasscode()
             }
         }
     }
 
-    private func matchesConfiguredPasscode(_ enteredPassword: String) -> Bool {
-        if enteredPassword == authRequest.password { return true }
-        guard authRequest.selfDestruct else { return false }
-        return enteredPassword == kcSelfDestructPassword.get() || enteredPassword == kcDecoyPassword.get()
-    }
-
     private func submitPasscode() {
+        pendingFailure?.cancel()
         if let sdPassword = kcSelfDestructPassword.get(), authRequest.selfDestruct && password == sdPassword {
+            resetAttemptProtection()
             allowToReact = false
             deleteStorageAndRestart(sdPassword) { r in
                 m.laRequest = nil
@@ -47,6 +101,7 @@ struct LocalAuthView: View {
             return
         }
         if let decoyPassword = kcDecoyPassword.get(), authRequest.selfDestruct && password == decoyPassword {
+            resetAttemptProtection()
             allowToReact = false
             openStorageAndRestart(.decoy) { result in
                 m.laRequest = nil
@@ -56,6 +111,7 @@ struct LocalAuthView: View {
         }
         let r: LAResult
         if password == authRequest.password {
+            resetAttemptProtection()
             if authRequest.selfDestruct &&
                 (xauXatStorageScope() != .primary ||
                  (!m.chatInitialized && (kcSelfDestructPassword.get() != nil || kcDecoyPassword.get() != nil))) {
@@ -68,10 +124,70 @@ struct LocalAuthView: View {
             }
             r = .success
         } else {
+            if authRequest.isAppUnlock {
+                handleFailedAppUnlock()
+                return
+            }
             r = .failed(authError: NSLocalizedString("Incorrect passcode", comment: "PIN entry"))
         }
         m.laRequest = nil
         authRequest.completed(r)
+    }
+
+    private func handleFailedAppUnlock() {
+        let destructivePolicyEnabled =
+            UserDefaults.standard.bool(forKey: DEFAULT_LA_DESTROY_AFTER_FAILED_ATTEMPTS) &&
+            XauXatPlusEntitlements.shared.isAuthorized(for: .duressPIN)
+        let policy: XauXatPINFailurePolicy = destructivePolicyEnabled ? .destroy : .lock
+
+        switch XauXatPINAttemptStore.shared.recordFailure(policy: policy) {
+        case let .retry(remainingAttempts):
+            failedAttempts = XauXatPINAttemptState.maximumAttempts - remainingAttempts
+            feedbackMessage = String(
+                format: NSLocalizedString("Incorrect passcode. %d attempts remaining.", comment: "PIN attempts remaining"),
+                remainingAttempts
+            )
+            password = ""
+        case let .locked(remaining):
+            failedAttempts = XauXatPINAttemptState.maximumAttempts
+            feedbackMessage = nil
+            password = ""
+            lockRemaining = remaining
+            allowToReact = false
+        case .destroy:
+            failedAttempts = XauXatPINAttemptState.maximumAttempts
+            feedbackMessage = NSLocalizedString("Security reset in progress…", comment: "PIN failed-attempt destruction")
+            password = ""
+            allowToReact = false
+            deleteStorageAndRestart(authRequest.password, duressScopeOverride: .all) { result in
+                if case .success = result { XauXatPINAttemptStore.shared.reset() }
+                m.laRequest = nil
+                authRequest.completed(result)
+            }
+        }
+    }
+
+    private func refreshAttemptStatus() {
+        guard authRequest.isAppUnlock else { return }
+        let status = XauXatPINAttemptStore.shared.status()
+        failedAttempts = status.failedAttempts
+        lockRemaining = status.lockRemaining
+        allowToReact = status.lockRemaining == nil
+        if status.lockRemaining == nil, failedAttempts == 0 {
+            feedbackMessage = nil
+        }
+    }
+
+    private func resetAttemptProtection() {
+        XauXatPINAttemptStore.shared.reset()
+        failedAttempts = 0
+        lockRemaining = nil
+        feedbackMessage = nil
+    }
+
+    private func lockDurationText(_ duration: TimeInterval) -> String {
+        let seconds = max(0, Int(ceil(duration)))
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 
     private func openStorageAndRestart(_ scope: XauXatStorageScope, completed: @escaping (LAResult) -> Void) {
@@ -136,10 +252,14 @@ struct LocalAuthView: View {
         m.users = []
     }
 
-    private func deleteStorageAndRestart(_ password: String, completed: @escaping (LAResult) -> Void) {
+    private func deleteStorageAndRestart(
+        _ password: String,
+        duressScopeOverride: XauXatDuressScope? = nil,
+        completed: @escaping (LAResult) -> Void
+    ) {
         Task {
             do {
-                let requestedScope = XauXatDuressScope.configured
+                let requestedScope = duressScopeOverride ?? XauXatDuressScope.configured
                 let duressScope: XauXatDuressScope =
                     (requestedScope == .decoy || requestedScope == .all) && kcDecoyPassword.get() == nil
                     ? .primary

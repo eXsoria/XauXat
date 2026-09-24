@@ -60,10 +60,75 @@ struct LocalAuthRequest {
     var title: LocalizedStringKey? // if title is null, reason is shown
     var reason: String
     var password: String
+    var isAppUnlock: Bool
     var selfDestruct: Bool
     var completed: (LAResult) -> Void
 
-    static var sample = LocalAuthRequest(title: "Enter Passcode", reason: "Authenticate", password: "", selfDestruct: false, completed: { _ in })
+    static var sample = LocalAuthRequest(title: "Enter Passcode", reason: "Authenticate", password: "", isAppUnlock: true, selfDestruct: false, completed: { _ in })
+}
+
+struct XauXatPINAttemptStatus {
+    let failedAttempts: Int
+    let lockRemaining: TimeInterval?
+}
+
+final class XauXatPINAttemptStore {
+    static let shared = XauXatPINAttemptStore()
+
+    private let lock = NSLock()
+
+    func status(
+        now: Date = Date(),
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> XauXatPINAttemptStatus {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var state = load()
+        let previous = state
+        let remaining = state.lockRemaining(now: now, uptime: uptime)
+        if state != previous { save(state) }
+        return XauXatPINAttemptStatus(failedAttempts: state.failedAttempts, lockRemaining: remaining)
+    }
+
+    func recordFailure(
+        policy: XauXatPINFailurePolicy,
+        now: Date = Date(),
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> XauXatPINFailureOutcome {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var state = load()
+        let outcome = state.recordFailure(policy: policy, now: now, uptime: uptime)
+        save(state)
+        return outcome
+    }
+
+    func reset() {
+        lock.lock()
+        defer { lock.unlock() }
+        _ = kcAppPINAttemptState.remove()
+    }
+
+    private func load() -> XauXatPINAttemptState {
+        guard let value = kcAppPINAttemptState.get(),
+              let data = value.data(using: .utf8),
+              let state = try? JSONDecoder().decode(XauXatPINAttemptState.self, from: data) else {
+            return XauXatPINAttemptState()
+        }
+        return state
+    }
+
+    private func save(_ state: XauXatPINAttemptState) {
+        guard state != XauXatPINAttemptState(),
+              let data = try? JSONEncoder().encode(state),
+              let value = String(data: data, encoding: .utf8) else {
+            _ = kcAppPINAttemptState.remove()
+            return
+        }
+        _ = kcAppPINAttemptState.set(value)
+    }
 }
 
 func authenticate(title: LocalizedStringKey? = nil, reason: String, selfDestruct: Bool = false, completed: @escaping (LAResult) -> Void) {
@@ -77,6 +142,7 @@ func authenticate(title: LocalizedStringKey? = nil, reason: String, selfDestruct
                     title: title,
                     reason: reason,
                     password: password,
+                    isAppUnlock: selfDestruct,
                     selfDestruct: true,
                     completed: completed
                 )
@@ -95,6 +161,7 @@ func authenticate(title: LocalizedStringKey? = nil, reason: String, selfDestruct
                     title: title,
                     reason: reason,
                     password: password,
+                    isAppUnlock: selfDestruct,
                     selfDestruct: selfDestruct && UserDefaults.standard.bool(forKey: DEFAULT_LA_SELF_DESTRUCT),
                     completed: completed
                 )
