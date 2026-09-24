@@ -9,13 +9,20 @@
 
 import SwiftUI
 
+enum PasscodeEntryLayout {
+    case portrait
+    case landscape
+}
+
 struct PasscodeEntry: View {
     var width: CGFloat
     var height: CGFloat
     @Binding var password: String
+    var layout: PasscodeEntryLayout
     var expectedPasscodeLength: Int? = nil
     var showsIndicators = true
     var buttonsEnabled = true
+    var cancel: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 22) {
@@ -23,9 +30,10 @@ struct PasscodeEntry: View {
                 PasscodeIndicators(passwordLength: password.count, expectedLength: expectedPasscodeLength)
             }
 
-            if width < height * 2 / 3 {
+            switch layout {
+            case .portrait:
                 portraitKeypad
-            } else {
+            case .landscape:
                 landscapeKeypad
             }
         }
@@ -39,7 +47,7 @@ struct PasscodeEntry: View {
             digitRow(keySize, 4, 5, 6)
             digitRow(keySize, 7, 8, 9)
             HStack(spacing: 24) {
-                clearButton(keySize)
+                cancelButton(keySize)
                 digitButton(keySize, 0)
                 deleteButton(keySize)
             }
@@ -88,6 +96,21 @@ struct PasscodeEntry: View {
         .disabled(password.count >= 16)
     }
 
+    private func cancelButton(_ size: CGFloat) -> some View {
+        Button {
+            cancel?()
+        } label: {
+            Text(cancel == nil ? "" : "Cancel")
+                .font(.system(size: 16, weight: .medium))
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(.primary)
+        .disabled(cancel == nil)
+        .accessibilityLabel("Cancel passcode entry")
+    }
+
     private func clearButton(_ size: CGFloat) -> some View {
         Button {
             password = ""
@@ -111,6 +134,7 @@ struct PasscodeEntry: View {
                 .font(.system(size: min(size * 0.3, 24), weight: .regular))
                 .frame(width: size, height: size)
                 .contentShape(Circle())
+                .opacity(password.isEmpty ? 0 : 1)
         }
         .buttonStyle(.plain)
         .foregroundColor(.primary)
@@ -138,6 +162,7 @@ struct PasscodeEntry: View {
             password.append(String(digit))
         }
     }
+
 }
 
 private struct XauXatKeypadButtonStyle: ButtonStyle {
@@ -153,6 +178,6 @@ private struct XauXatKeypadButtonStyle: ButtonStyle {
 
 struct PasscodeEntry_Previews: PreviewProvider {
     static var previews: some View {
-        PasscodeEntry(width: 390, height: 620, password: Binding.constant("12"), expectedPasscodeLength: 6)
+        PasscodeEntry(width: 390, height: 620, password: Binding.constant("12"), layout: .portrait, expectedPasscodeLength: 6)
     }
 }
