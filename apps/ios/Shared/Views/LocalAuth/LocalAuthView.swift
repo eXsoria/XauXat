@@ -18,7 +18,7 @@ struct LocalAuthView: View {
 
     var body: some View {
         PasscodeView(passcode: $password, title: authRequest.title ?? "Enter Passcode", reason: authRequest.reason, submitLabel: "Submit",
-                     buttonsEnabled: $allowToReact) {
+                     showsSubmitButton: false, expectedPasscodeLength: authRequest.password.count, buttonsEnabled: $allowToReact) {
             submitPasscode()
         } cancel: {
             m.laRequest = nil

@@ -10,149 +10,147 @@
 import SwiftUI
 
 struct PasscodeEntry: View {
-    @EnvironmentObject var m: ChatModel
-    @EnvironmentObject var theme: AppTheme
     var width: CGFloat
     var height: CGFloat
     @Binding var password: String
-    @State private var showPassword = false
+    var expectedPasscodeLength: Int? = nil
+    var showsIndicators = true
 
     var body: some View {
-        VStack {
-            passwordView()
-                .padding(.bottom, 4)
+        VStack(spacing: 22) {
+            if showsIndicators {
+                PasscodeIndicators(passwordLength: password.count, expectedLength: expectedPasscodeLength)
+            }
+
             if width < height * 2 / 3 {
-                verticalPasswordGrid()
+                portraitKeypad
             } else {
-                horizontalPasswordGrid()
+                landscapeKeypad
             }
         }
     }
 
-    private func passwordView() -> some View {
-        Text(
-            password == ""
-            ? " "
-            : splitPassword()
-        )
-        .font(showPassword ? .title2.monospacedDigit() : .body)
-        .onTapGesture {
-            showPassword = !showPassword
-        }
-        .frame(height: 30)
-    }
-
-    private func splitPassword() -> String {
-        let n = password.count < 8 ? 8 : 4
-        return password.enumerated().reduce("") { acc, c in
-            acc
-            + (showPassword ? String(c.element) : "●")
-            + ((c.offset + 1) % n == 0 ? " " : "")
-        }
-    }
-
-    private func verticalPasswordGrid() -> some View {
-        let s = width / 3
-        return VStack(spacing: 0) {
-            digitsRow(s, 1, 2, 3)
-            Divider()
-            digitsRow(s, 4, 5, 6)
-            Divider()
-            digitsRow(s, 7, 8, 9)
-            Divider()
-            HStack(spacing: 0) {
-                passwordEdit(s, image: "multiply") {
-                    password = ""
-                }
-                Divider()
-                passwordDigit(s, 0)
-                Divider()
-                passwordEdit(s, image: "delete.backward") {
-                    if password != "" { password.removeLast() }
-                }
-            }
-            .frame(height: s)
-        }
-        .frame(width: width, height: s * 4 * 0.97)
-    }
-
-    private func horizontalPasswordGrid() -> some View {
-        let s = height / 5
-        return VStack(spacing: 0) {
-            horizontalDigitsRow(s, 1, 2, 3) {
-                passwordEdit(s, image: "multiply") {
-                    password = ""
-                }
-            }
-            Divider()
-            horizontalDigitsRow(s, 4, 5, 6) {
-                passwordDigit(s, 0)
-            }
-            Divider()
-            horizontalDigitsRow(s, 7, 8, 9) {
-                passwordEdit(s, image: "delete.backward") {
-                    if password != "" { password.removeLast() }
-                }
+    private var portraitKeypad: some View {
+        let keySize = min((width - 72) / 3, 78)
+        return VStack(spacing: 15) {
+            digitRow(keySize, 1, 2, 3)
+            digitRow(keySize, 4, 5, 6)
+            digitRow(keySize, 7, 8, 9)
+            HStack(spacing: 24) {
+                clearButton(keySize)
+                digitButton(keySize, 0)
+                deleteButton(keySize)
             }
         }
-        .frame(width: s * 4, height: s * 3 * 0.97)
+        .frame(maxWidth: .infinity)
     }
 
-    private func digitsRow(_ size: CGFloat, _ d1: Int, _ d2: Int, _ d3: Int) -> some View {
-        HStack(spacing: 0) {
-            passwordDigit(size, d1)
-            Divider()
-            passwordDigit(size, d2)
-            Divider()
-            passwordDigit(size, d3)
-        }
-        .frame(height: size * 0.97)
-    }
-
-    private func horizontalDigitsRow<V: View>(_ size: CGFloat, _ d1: Int, _ d2: Int, _ d3: Int, _ button: @escaping () -> V) -> some View {
-        HStack(spacing: 0) {
-            digitsRow(size, d1, d2, d3)
-            Divider()
-            button()
-        }
-        .frame(height: size * 0.97)
-    }
-
-    private func passwordDigit(_ size: CGFloat, _ d: Int) -> some View {
-        let s = String(describing: d)
-        return passwordButton(size) {
-            if password.count < 16 {
-                password = password + s
+    private var landscapeKeypad: some View {
+        let keySize = min((height - 24) / 3, (width - 72) / 4, 64)
+        return VStack(spacing: 10) {
+            HStack(spacing: 18) {
+                digitButton(keySize, 1)
+                digitButton(keySize, 2)
+                digitButton(keySize, 3)
+                clearButton(keySize)
             }
-        } label: {
-            Text(s).font(.title)
+            HStack(spacing: 18) {
+                digitButton(keySize, 4)
+                digitButton(keySize, 5)
+                digitButton(keySize, 6)
+                digitButton(keySize, 0)
+            }
+            HStack(spacing: 18) {
+                digitButton(keySize, 7)
+                digitButton(keySize, 8)
+                digitButton(keySize, 9)
+                deleteButton(keySize)
+            }
         }
+    }
+
+    private func digitRow(_ size: CGFloat, _ first: Int, _ second: Int, _ third: Int) -> some View {
+        HStack(spacing: 24) {
+            digitButton(size, first)
+            digitButton(size, second)
+            digitButton(size, third)
+        }
+    }
+
+    private func digitButton(_ size: CGFloat, _ digit: Int) -> some View {
+        keypadButton(size: size, action: appendDigit(digit)) {
+            Text(String(digit))
+                .font(.system(size: min(size * 0.42, 34), weight: .regular, design: .rounded))
+        }
+        .accessibilityLabel(String(digit))
         .disabled(password.count >= 16)
     }
 
-    private func passwordEdit(_ size: CGFloat, image: String, action: @escaping () -> Void) -> some View {
-        passwordButton(size, action: action) {
-            Image(systemName: image)
+    private func clearButton(_ size: CGFloat) -> some View {
+        Button {
+            password = ""
+        } label: {
+            Text(password.isEmpty ? "" : "Clear")
+                .font(.callout)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .foregroundColor(.primary)
+        .disabled(password.isEmpty)
+        .accessibilityLabel("Clear passcode")
     }
 
-    private func passwordButton<V: View>(_ size: CGFloat, action: @escaping () -> Void, label: () -> V) -> some View {
-        let h = size * 0.97
-        return Button(action: action) {
-            ZStack {
-                Circle()
-                    .frame(width: h, height: h)
-                    .foregroundColor(AppTheme.shared.colors.background)
-                label()
-            }
+    private func deleteButton(_ size: CGFloat) -> some View {
+        Button {
+            if !password.isEmpty { password.removeLast() }
+        } label: {
+            Image(systemName: "delete.backward")
+                .font(.system(size: min(size * 0.3, 24), weight: .regular))
+                .frame(width: size, height: size)
+                .contentShape(Circle())
         }
-        .foregroundColor(theme.colors.secondary)
-        .frame(width: size, height: h)
+        .buttonStyle(.plain)
+        .foregroundColor(.primary)
+        .disabled(password.isEmpty)
+        .accessibilityLabel("Delete digit")
+    }
+
+    private func keypadButton<Label: View>(size: CGFloat, action: @escaping () -> Void, @ViewBuilder label: () -> Label) -> some View {
+        Button(action: action) {
+            label()
+                .foregroundColor(.primary)
+                .frame(width: size, height: size)
+                .background {
+                    Circle()
+                        .fill(Color.primary.opacity(0.09))
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(XauXatKeypadButtonStyle())
+    }
+
+    private func appendDigit(_ digit: Int) -> () -> Void {
+        {
+            guard password.count < 16 else { return }
+            password.append(String(digit))
+        }
+    }
+}
+
+private struct XauXatKeypadButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                Circle()
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.12 : 0))
+            }
+            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
     }
 }
 
 struct PasscodeEntry_Previews: PreviewProvider {
     static var previews: some View {
-        PasscodeEntry(width: 800, height: 420, password: Binding.constant(""))
+        PasscodeEntry(width: 390, height: 620, password: Binding.constant("12"), expectedPasscodeLength: 6)
     }
 }
