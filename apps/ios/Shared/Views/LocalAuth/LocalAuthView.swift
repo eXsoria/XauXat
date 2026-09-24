@@ -19,44 +19,59 @@ struct LocalAuthView: View {
     var body: some View {
         PasscodeView(passcode: $password, title: authRequest.title ?? "Enter Passcode", reason: authRequest.reason, submitLabel: "Submit",
                      buttonsEnabled: $allowToReact) {
-            if let sdPassword = kcSelfDestructPassword.get(), authRequest.selfDestruct && password == sdPassword {
-                allowToReact = false
-                deleteStorageAndRestart(sdPassword) { r in
-                    m.laRequest = nil
-                    authRequest.completed(r)
-                }
-                return
+            submitPasscode()
+        } cancel: {
+            m.laRequest = nil
+            authRequest.completed(.failed(authError: NSLocalizedString("Authentication cancelled", comment: "PIN entry")))
+        }
+        .onChange(of: password) { enteredPassword in
+            if allowToReact && matchesConfiguredPasscode(enteredPassword) {
+                submitPasscode()
             }
-            if let decoyPassword = kcDecoyPassword.get(), authRequest.selfDestruct && password == decoyPassword {
+        }
+    }
+
+    private func matchesConfiguredPasscode(_ enteredPassword: String) -> Bool {
+        if enteredPassword == authRequest.password { return true }
+        guard authRequest.selfDestruct else { return false }
+        return enteredPassword == kcSelfDestructPassword.get() || enteredPassword == kcDecoyPassword.get()
+    }
+
+    private func submitPasscode() {
+        if let sdPassword = kcSelfDestructPassword.get(), authRequest.selfDestruct && password == sdPassword {
+            allowToReact = false
+            deleteStorageAndRestart(sdPassword) { r in
+                m.laRequest = nil
+                authRequest.completed(r)
+            }
+            return
+        }
+        if let decoyPassword = kcDecoyPassword.get(), authRequest.selfDestruct && password == decoyPassword {
+            allowToReact = false
+            openStorageAndRestart(.decoy) { result in
+                m.laRequest = nil
+                authRequest.completed(result)
+            }
+            return
+        }
+        let r: LAResult
+        if password == authRequest.password {
+            if authRequest.selfDestruct &&
+                (xauXatStorageScope() != .primary ||
+                 (!m.chatInitialized && (kcSelfDestructPassword.get() != nil || kcDecoyPassword.get() != nil))) {
                 allowToReact = false
-                openStorageAndRestart(.decoy) { result in
+                openStorageAndRestart(.primary) { result in
                     m.laRequest = nil
                     authRequest.completed(result)
                 }
                 return
             }
-            let r: LAResult
-            if password == authRequest.password {
-                if authRequest.selfDestruct &&
-                    (xauXatStorageScope() != .primary ||
-                     (!m.chatInitialized && (kcSelfDestructPassword.get() != nil || kcDecoyPassword.get() != nil))) {
-                    allowToReact = false
-                    openStorageAndRestart(.primary) { result in
-                        m.laRequest = nil
-                        authRequest.completed(result)
-                    }
-                    return
-                }
-                r = .success
-            } else {
-                r = .failed(authError: NSLocalizedString("Incorrect passcode", comment: "PIN entry"))
-            }
-            m.laRequest = nil
-            authRequest.completed(r)
-        } cancel: {
-            m.laRequest = nil
-            authRequest.completed(.failed(authError: NSLocalizedString("Authentication cancelled", comment: "PIN entry")))
+            r = .success
+        } else {
+            r = .failed(authError: NSLocalizedString("Incorrect passcode", comment: "PIN entry"))
         }
+        m.laRequest = nil
+        authRequest.completed(r)
     }
 
     private func openStorageAndRestart(_ scope: XauXatStorageScope, completed: @escaping (LAResult) -> Void) {
