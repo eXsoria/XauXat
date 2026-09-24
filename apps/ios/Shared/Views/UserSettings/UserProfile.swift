@@ -10,6 +10,7 @@ import SwiftUI
 import SimpleXChat
 
 struct UserProfile: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var theme: AppTheme
     @EnvironmentObject var ss: SaveableSettings
@@ -165,6 +166,7 @@ struct UserProfile: View {
                         getCurrentProfile()
                         // onChange(editSnapshot) won't fire when saved values equal typed, so clear the pending dismiss-save here
                         ss.profileSave = nil
+                        dismiss()
                     }
                 } else {
                     alert = .duplicateUserError
