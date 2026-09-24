@@ -37,22 +37,29 @@ struct PasscodeView: View {
     private func portraitLayout(_ geometry: GeometryProxy) -> some View {
         VStack(spacing: 0) {
             heading
-                .padding(.top, 34)
+                .padding(.top, 32)
 
-            Spacer(minLength: 22)
+            passcodeIndicators
+                .padding(.top, 30)
+
+            Spacer(minLength: 28)
 
             PasscodeEntry(
                 width: min(geometry.size.width - 40, 390),
-                height: geometry.size.height * 0.62,
+                height: min(geometry.size.height * 0.52, 375),
                 password: $passcode,
-                expectedPasscodeLength: expectedPasscodeLength,
-                buttonsEnabled: buttonsEnabled
+                layout: .portrait,
+                showsIndicators: false,
+                buttonsEnabled: buttonsEnabled,
+                cancel: cancel
             )
 
-            Spacer(minLength: 18)
+            Spacer(minLength: 16)
 
-            actions
-                .padding(.bottom, 20)
+            if showsSubmitButton {
+                submitAction
+                    .padding(.bottom, 20)
+            }
         }
         .padding(.horizontal, 20)
     }
@@ -70,6 +77,7 @@ struct PasscodeView: View {
                 width: geometry.size.width * 0.58,
                 height: geometry.size.height - 28,
                 password: $passcode,
+                layout: .landscape,
                 expectedPasscodeLength: nil,
                 showsIndicators: false,
                 buttonsEnabled: buttonsEnabled
@@ -113,6 +121,15 @@ struct PasscodeView: View {
         .buttonStyle(.plain)
         .foregroundColor(.primary)
         .frame(minHeight: 44)
+    }
+
+    private var submitAction: some View {
+        Button(submitLabel, action: submit)
+            .font(.body.weight(.semibold))
+            .buttonStyle(.plain)
+            .foregroundColor(.primary)
+            .frame(minHeight: 44)
+            .disabled(submitEnabled?(passcode) == false || passcode.count < 4 || !buttonsEnabled)
     }
 }
 
