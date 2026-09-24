@@ -36,7 +36,6 @@ private var indent: CGFloat = 36
 struct NewChatSheet: View {
     @EnvironmentObject var theme: AppTheme
     @EnvironmentObject var chatModel: ChatModel
-    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @State private var searchMode = false
     @FocusState var searchFocussed: Bool
     @State private var searchText = ""
@@ -110,23 +109,13 @@ struct NewChatSheet: View {
 
             if (searchText.isEmpty) {
                 Section {
-                    if plusEntitlements.isAuthorized(for: .advancedContactInvites) {
-                        NavigationLink(isActive: $isAddContactActive) {
-                            NewChatView(selection: .invite)
-                                .modifier(ThemedBackground(grouped: true))
-                                .navigationBarTitleDisplayMode(.inline)
-                        } label: {
-                            navigateOnTap(Label("Create 1-time link", systemImage: "link.badge.plus")) {
-                                isAddContactActive = true
-                            }
-                        }
-                    } else {
-                        NavigationLink {
-                            XauXatPlusView()
-                                .navigationTitle("XauXat Plus")
-                                .navigationBarTitleDisplayMode(.inline)
-                        } label: {
-                            XauXatPlusLockedLabel(title: "Create 1-time link", systemImage: "link.badge.plus")
+                    NavigationLink(isActive: $isAddContactActive) {
+                        NewChatView(selection: .invite)
+                            .modifier(ThemedBackground(grouped: true))
+                            .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        navigateOnTap(Label("Create 1-time link", systemImage: "link.badge.plus")) {
+                            isAddContactActive = true
                         }
                     }
                     NavigationLink(isActive: $isScanPasteLinkActive) {

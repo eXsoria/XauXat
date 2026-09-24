@@ -45,6 +45,8 @@ enum NewChatOption: Identifiable {
     var id: Self { self }
 }
 
+private let xauXatFreeActiveInviteLimit = 3
+
 func showKeepInvitationAlert() {
     if let showingInvitation = ChatModel.shared.showingInvitation,
        !showingInvitation.connChatUsed {
@@ -100,10 +102,7 @@ struct NewChatView: View {
         VStack(alignment: .leading) {
             if !onboarding {
                 Picker("New chat", selection: $selection) {
-                    Label(
-                        "1-time link",
-                        systemImage: plusEntitlements.isAuthorized(for: .advancedContactInvites) ? "link" : "lock.fill"
-                    )
+                    Label("1-time link", systemImage: "link")
                         .tag(NewChatOption.invite)
                     Label("Connect via link", systemImage: "qrcode")
                         .tag(NewChatOption.connect)
@@ -121,13 +120,7 @@ struct NewChatView: View {
                 // it seems there's a bug in iOS 15 if several views in switch (or if-else) statement have different transitions
                 // https://developer.apple.com/forums/thread/714977?answerId=731615022#731615022
                 if case .invite = selection {
-                    Group {
-                        if plusEntitlements.isAuthorized(for: .advancedContactInvites) {
-                            prepareAndInviteView()
-                        } else {
-                            lockedOneTimeInviteView()
-                        }
-                    }
+                    prepareAndInviteView()
                         .transition(.move(edge: .leading))
                         .onAppear {
                             refreshInvitePolicy()
@@ -224,83 +217,121 @@ struct NewChatView: View {
 
     private func inviteSetupView() -> some View {
         Form {
-            Section {
-                Picker("Expires", selection: $inviteLifetime) {
-                    ForEach(XauXatContactInviteLifetime.allCases) { lifetime in
-                        Text(lifetime.label).tag(lifetime)
+            if hasAdvancedContactInvites {
+                Section {
+                    Picker("Expires", selection: $inviteLifetime) {
+                        ForEach(XauXatContactInviteLifetime.allCases) { lifetime in
+                            Text(lifetime.label).tag(lifetime)
+                        }
+                    }
+                    if inviteLifetime == .custom {
+                        DatePicker(
+                            "Expiry date",
+                            selection: $customInviteExpiry,
+                            in: Date.now...,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                    }
+                } header: {
+                    Text("Invite lifetime")
+                } footer: {
+                    if inviteLifetime == .never {
+                        Text("The invite remains valid until it is used or revoked.")
+                    } else if inviteLifetime == .custom {
+                        Text("XauXat will permanently revoke the invite on the selected date.")
+                    } else {
+                        Text("XauXat will permanently revoke the invite when this duration ends.")
                     }
                 }
-                if inviteLifetime == .custom {
-                    DatePicker(
-                        "Expiry date",
-                        selection: $customInviteExpiry,
-                        in: Date.now...,
-                        displayedComponents: [.date, .hourAndMinute]
-                    )
-                }
-            } header: {
-                Text("Invite lifetime")
-            } footer: {
-                if inviteLifetime == .never {
-                    Text("The invite remains valid until it is used or revoked.")
-                } else if inviteLifetime == .custom {
-                    Text("XauXat will permanently revoke the invite on the selected date.")
-                } else {
-                    Text("XauXat will permanently revoke the invite when this duration ends.")
-                }
-            }
 
-            Section {
-                Toggle("Messages", isOn: $allowInviteMessages)
-                Toggle("Audio calls", isOn: $allowInviteCalls)
-            } header: {
-                Text("Contact permissions")
-            } footer: {
-                Text("These authenticated restrictions are shown before the contact accepts the invite.")
-            }
-
-            Section {
-                Stepper("Maximum uses: \(inviteMaximumUses)", value: $inviteMaximumUses, in: 1...5)
-            } header: {
-                Text("Usage limit")
-            } footer: {
-                Text(inviteMaximumUses == 1
-                     ? "The invite can create one contact."
-                     : "XauXat combines independent SimpleX one-time links so concurrent use cannot exceed this limit.")
-            }
-
-            Section {
-                Button(inviteLifetime == .never ? "Create invite" : "Create expiring invite") {
-                    authorizeAndCreateInvitation()
+                Section {
+                    Toggle("Messages", isOn: $allowInviteMessages)
+                    Toggle("Audio calls", isOn: $allowInviteCalls)
+                } header: {
+                    Text("Contact permissions")
+                } footer: {
+                    Text("These authenticated restrictions are shown before the contact accepts the invite.")
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
+
+                Section {
+                    Stepper("Maximum uses: \(inviteMaximumUses)", value: $inviteMaximumUses, in: 1...5)
+                } header: {
+                    Text("Usage limit")
+                } footer: {
+                    Text(inviteMaximumUses == 1
+                         ? "The invite can create one contact."
+                         : "XauXat combines independent SimpleX one-time links so concurrent use cannot exceed this limit.")
+                }
+
+                Section {
+                    Button(inviteLifetime == .never ? "Create invite" : "Create expiring invite") {
+                        authorizeAndCreateInvitation()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+            } else {
+                Section {
+                    HStack {
+                        Text("Active invites")
+                        Spacer()
+                        Text("\(activeFreeInviteCount) of \(xauXatFreeActiveInviteLimit)")
+                            .foregroundStyle(theme.colors.secondary)
+                    }
+                    if canCreateFreeInvite {
+                        Button("Create 1-time invite") {
+                            createInvitation()
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    } else {
+                        NavigationLink {
+                            XauXatPlusView()
+                                .navigationTitle("XauXat Plus")
+                                .navigationBarTitleDisplayMode(.inline)
+                        } label: {
+                            XauXatPlusLockedLabel(title: "Create another invite", systemImage: "link.badge.plus")
+                        }
+                    }
+                } header: {
+                    Text("Free invites")
+                } footer: {
+                    Text(canCreateFreeInvite
+                         ? "Free includes up to three active one-time invites. A used or revoked invite frees a slot."
+                         : "All three Free invite slots are in use. Revoke an unused invite or use XauXat Plus for more.")
+                }
+
+                Section {
+                    NavigationLink {
+                        XauXatPlusView()
+                            .navigationTitle("XauXat Plus")
+                            .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        XauXatPlusLockedLabel(title: "Advanced invite controls", systemImage: "slider.horizontal.3")
+                    }
+                } footer: {
+                    Text("Expiry, custom permissions and links for multiple contacts are available with XauXat Plus.")
+                }
             }
         }
     }
 
-    private func lockedOneTimeInviteView() -> some View {
-        VStack(spacing: 18) {
-            Image(systemName: "link.badge.plus")
-                .font(.system(size: 38, weight: .regular))
-                .foregroundStyle(theme.colors.secondary)
-                .accessibilityHidden(true)
-            Text("One-time contact invites")
-                .font(.title2.weight(.semibold))
-            Text("Create a link that becomes invalid as soon as the first contact uses it.")
-                .foregroundStyle(theme.colors.secondary)
-                .multilineTextAlignment(.center)
-            NavigationLink {
-                XauXatPlusView()
-                    .navigationTitle("XauXat Plus")
-                    .navigationBarTitleDisplayMode(.inline)
-            } label: {
-                Label("Open XauXat Plus", systemImage: "lock.open")
-                    .frame(minHeight: 44)
+    private var hasAdvancedContactInvites: Bool {
+        plusEntitlements.isAuthorized(for: .advancedContactInvites)
+    }
+
+    private var activeFreeInviteCount: Int {
+        Set(m.chats.compactMap { chat -> Int64? in
+            guard case let .contactConnection(connection) = chat.chatInfo,
+                  connection.initiated else { return nil }
+            if let policy = xauXatObserveContactInvitePolicy(connectionId: connection.pccConnId),
+               policy.state != .active {
+                return nil
             }
-            .buttonStyle(.borderedProminent)
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+            return connection.pccConnId
+        }).count
+    }
+
+    private var canCreateFreeInvite: Bool {
+        activeFreeInviteCount < xauXatFreeActiveInviteLimit
     }
 
     private func authorizeAndCreateInvitation() {
@@ -321,14 +352,15 @@ struct NewChatView: View {
     }
 
     private func createInvitation() {
-        guard plusEntitlements.isAuthorized(for: .advancedContactInvites) else { return }
+        let advancedInvites = hasAdvancedContactInvites
+        guard advancedInvites || canCreateFreeInvite else { return }
         if connLinkInvitation.connFullLink == "" && contactConnections.isEmpty && !creatingConnReq {
             creatingConnReq = true
-            let maximumUses = inviteMaximumUses
-            let lifetime = inviteLifetime
+            let maximumUses = advancedInvites ? inviteMaximumUses : 1
+            let lifetime = advancedInvites ? inviteLifetime : .never
             let customExpiry = customInviteExpiry
-            let messagesAllowed = allowInviteMessages
-            let callsAllowed = allowInviteCalls
+            let messagesAllowed = advancedInvites ? allowInviteMessages : true
+            let callsAllowed = advancedInvites ? allowInviteCalls : true
             Task {
                 _ = try? await Task.sleep(nanoseconds: 250_000000)
                 var created: [(CreatedConnLink, PendingContactConnection)] = []
