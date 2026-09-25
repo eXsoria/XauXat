@@ -1524,7 +1524,7 @@ private struct XauXatAboutView: View {
                     XauXatValueRow(palette: palette, title: "App version", value: appVersion.map { "v\($0)" } ?? "Unknown")
                     XauXatValueRow(palette: palette, title: "Build", value: appBuild ?? "Unknown")
                     if let coreVersion {
-                        XauXatValueRow(palette: palette, title: "SimpleX core", value: "v\(coreVersion.version)")
+                        XauXatValueRow(palette: palette, title: "Messaging core", value: "v\(coreVersion.version)")
                     }
                 }
             }
@@ -1810,7 +1810,7 @@ struct XauXatTorDiagnosticsView: View {
 
                 XauXatSettingsCard(palette: palette) {
                     statusRow("Embedded Tor", value: torState)
-                    statusRow("SimpleX route", value: routeState)
+                    statusRow("Messaging route", value: routeState)
                     statusRow("Tor route probe", value: verificationState)
                 }
 

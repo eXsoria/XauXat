@@ -155,7 +155,7 @@ struct MigrateToAppGroupView: View {
     }
 
     private func migrationFailed() -> some View {
-        Text("Migration failed. Tap **Skip** below to continue using the current database. Please report the issue to the app developers via chat or email [chat@simplex.chat](mailto:chat@simplex.chat).")
+        Text("Migration failed. Tap **Skip** below to continue using the current database. Please report the issue through TestFlight beta feedback.")
     }
 
     private func skipMigration() -> some View {

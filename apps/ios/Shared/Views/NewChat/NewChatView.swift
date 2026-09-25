@@ -260,7 +260,7 @@ struct NewChatView: View {
                 } footer: {
                     Text(inviteMaximumUses == 1
                          ? "The invite can create one contact."
-                         : "XauXat combines independent SimpleX one-time links so concurrent use cannot exceed this limit.")
+            : "XauXat combines independent one-time links so concurrent use cannot exceed this limit.")
                 }
 
                 Section {
@@ -627,7 +627,7 @@ private struct InviteView: View {
 
     @ViewBuilder private var sectionHeaderText: some View {
         if onboarding {
-            Text("Send the link via any messenger - it's secure. Ask to paste into SimpleX.")
+            Text("Send the link via any messenger - it's secure. Ask the recipient to paste it into XauXat.")
                 .font(.body).foregroundColor(theme.colors.onBackground).textCase(nil)
         } else {
             Text((observedPolicy?.maxUses ?? 1) > 1 ? "Share this limited-use invite link" : "Share this 1-time invite link")
@@ -1011,7 +1011,7 @@ private struct ConnectView: View {
                             connect(pastedLink)
                         case .none:
                             alert = .newChatSomeAlert(alert: SomeAlert(
-                                alert: mkAlert(title: "Invalid link", message: "The text you pasted is not a SimpleX link."),
+                    alert: mkAlert(title: "Invalid link", message: "The text you pasted is not a valid connection link."),
                                 id: "pasteLinkView: code is not a SimpleX link"
                             ))
                         }
@@ -1043,7 +1043,7 @@ private struct ConnectView: View {
                 connect(link)
             } else {
                 alert = .newChatSomeAlert(alert: SomeAlert(
-                    alert: mkAlert(title: "Invalid QR code", message: "The code you scanned is not a SimpleX link QR code."),
+                    alert: mkAlert(title: "Invalid QR code", message: "The code you scanned is not a valid connection QR code."),
                     id: "processQRCode: code is not a SimpleX link"
                 ))
             }
@@ -1980,7 +1980,7 @@ func planAndConnect(
                         logger.debug("planAndConnect, .contactAddress, .ownLink")
                         await MainActor.run {
                             showAskCurrentOrIncognitoProfileSheet(
-                                title: NSLocalizedString("Connect to yourself?\nThis is your own SimpleX address!", comment: "new chat sheet title"),
+                                title: NSLocalizedString("Connect to yourself?\nThis is your own XauXat address!", comment: "new chat sheet title"),
                                 actionStyle: .destructive,
                                 connectionLink: connectionLink,
                                 connectionPlan: connectionPlan,

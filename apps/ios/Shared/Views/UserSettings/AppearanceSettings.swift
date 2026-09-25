@@ -14,10 +14,10 @@ import Yams
 let colorModesLocalized: [LocalizedStringKey] = ["System", "Light", "Dark"]
 let colorModesNames: [DefaultThemeMode?] = [nil, DefaultThemeMode.light, DefaultThemeMode.dark]
 
-let darkThemesLocalized: [LocalizedStringKey] = ["Dark", "SimpleX", "Black"]
+let darkThemesLocalized: [LocalizedStringKey] = ["Dark", "Midnight", "Black"]
 let darkThemesNames: [String] = [DefaultTheme.DARK.themeName, DefaultTheme.SIMPLEX.themeName, DefaultTheme.BLACK.themeName]
 
-let darkThemesWithoutBlackLocalized: [LocalizedStringKey] = ["Dark", "SimpleX"]
+let darkThemesWithoutBlackLocalized: [LocalizedStringKey] = ["Dark", "Midnight"]
 let darkThemesWithoutBlackNames: [String] = [DefaultTheme.DARK.themeName, DefaultTheme.SIMPLEX.themeName]
 
 let appSettingsURL = URL(string: UIApplication.openSettingsURLString)!

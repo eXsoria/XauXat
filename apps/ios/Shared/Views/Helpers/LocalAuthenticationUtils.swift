@@ -197,15 +197,15 @@ func systemAuthenticate(_ reason: String, _ completed: @escaping (LAResult) -> V
 
 func laTurnedOnAlert() -> Alert {
     mkAlert(
-        title: "SimpleX Lock turned on",
+            title: "App Lock turned on",
         message: "You will be required to authenticate when you start or resume the app after 30 seconds in background."
     )
 }
 
 func laPasscodeNotSetAlert() -> Alert {
     mkAlert(
-        title: "SimpleX Lock not enabled!",
-        message: "You can turn on SimpleX Lock via Settings."
+            title: "App Lock not enabled!",
+            message: "You can turn on App Lock via Settings."
     )
 }
 
@@ -219,13 +219,13 @@ func laFailedAlert() -> Alert {
 func laUnavailableInstructionAlert() -> Alert {
     mkAlert(
         title: "Authentication unavailable",
-        message: "Device authentication is not enabled. You can turn on SimpleX Lock via Settings, once you enable device authentication."
+            message: "Device authentication is not enabled. You can turn on App Lock via Settings once you enable device authentication."
     )
 }
 
 func laUnavailableTurningOffAlert() -> Alert {
     mkAlert(
         title: "Authentication unavailable",
-        message: "Device authentication is disabled. Turning off SimpleX Lock."
+            message: "Device authentication is disabled. Turning off App Lock."
     )
 }

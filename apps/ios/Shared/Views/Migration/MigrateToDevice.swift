@@ -205,11 +205,11 @@ struct MigrateToDevice: View {
                             if strHasSimplexFileLink(link.trimmingCharacters(in: .whitespaces)) {
                                 migrationState = .linkDownloading(link: link.trimmingCharacters(in: .whitespaces))
                             } else {
-                                alert = .error(title: "Invalid link", error: "The text you pasted is not a SimpleX link.")
+            alert = .error(title: "Invalid link", error: "The text you pasted is not a valid migration link.")
                             }
                         case let .failure(e):
                             logger.error("processQRCode QR code error: \(e.localizedDescription)")
-                            alert = .error(title: "Invalid link", error: "The text you pasted is not a SimpleX link.")
+            alert = .error(title: "Invalid link", error: "The text you pasted is not a valid migration link.")
                         }
                     }
                 }
@@ -232,7 +232,7 @@ struct MigrateToDevice: View {
                 if strHasSimplexFileLink(str.trimmingCharacters(in: .whitespaces)) {
                     migrationState = .linkDownloading(link: str.trimmingCharacters(in: .whitespaces))
                 } else {
-                    alert = .error(title: "Invalid link", error: "The text you pasted is not a SimpleX link.")
+            alert = .error(title: "Invalid link", error: "The text you pasted is not a valid migration link.")
                 }
             }
         } label: {

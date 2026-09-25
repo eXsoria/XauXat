@@ -1091,7 +1091,7 @@ struct ChatView: View {
                         contact.profile.contactLink
                     }
                     if let connLink {
-                        return ("SimpleX address", connLink)
+                return ("XauXat address", connLink)
                     }
                 }
             case let .group(groupInfo, _):

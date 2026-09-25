@@ -702,7 +702,7 @@ struct ChatInfoView: View {
     private func blockContactAlert() -> Alert {
         Alert(
             title: Text("Block contact?"),
-            message: Text("This revokes the current connection without notifying the contact and keeps the conversation on your device. Because SimpleX has no global contact IDs, a new invitation can create a new connection."),
+            message: Text("This revokes the current connection without notifying the contact and keeps the conversation on your device. Because the network has no global contact IDs, a new invitation can create a new connection."),
             primaryButton: .destructive(Text("Block")) {
                 deleteContactMaybeErrorAlert(chat, contact, chatDeleteMode: .entity(notify: false), true) {
                     alert = .someAlert(alert: $0)
@@ -1656,7 +1656,7 @@ struct SimplexNameView: View {
                 showSpinner = false
                 // show the reason on a manual run, or on an inconclusive auto run (state stayed nil)
                 if let (newV, reason) = res, let reason, manual || newV == nil {
-                    showAlert(NSLocalizedString("SimpleX name not verified", comment: "alert title"), message: reason)
+                    showAlert(NSLocalizedString("Public name not verified", comment: "alert title"), message: reason)
                 }
             }
         }

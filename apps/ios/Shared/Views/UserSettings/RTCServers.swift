@@ -8,8 +8,6 @@
 
 import SwiftUI
 
-private let howToUrl = URL(string: "https://simplex.chat/docs/webrtc.html#configure-mobile-apps")!
-
 let serversFont = Font.custom("Menlo", size: 14)
 
 struct RTCServers: View {
@@ -38,7 +36,7 @@ struct RTCServers: View {
                     }
                     .alert(isPresented: $showResetServersAlert) {
                         Alert(
-                            title: Text("Use SimpleX Chat servers?"),
+                            title: Text("Use preset call relay servers?"),
                             message: Text("Saved WebRTC ICE servers will be removed"),
                             primaryButton: .destructive(Text("Confirm")) {
                                 resetRTCServers()
@@ -53,7 +51,7 @@ struct RTCServers: View {
                 Text("")
             } footer: {
                 if !isUserRTCServers {
-                    Text("Using SimpleX Chat servers.")
+                    Text("Using preset call relay servers.")
                         .foregroundColor(theme.colors.secondary)
                 }
             }
@@ -95,14 +93,10 @@ struct RTCServers: View {
                             .alert(isPresented: $showBadServersAlert) {
                                 Alert(title: Text("Error saving ICE servers"), message: Text("Make sure WebRTC ICE server addresses are in correct format, line separated and are not duplicated."))
                             }
-                            Spacer()
-                            howToButton()
                         } else {
                             Button("Edit") {
                                 editRTCServers = true
                             }
-                            Spacer()
-                            howToButton()
                         }
                     }
                     .font(.body)
@@ -137,16 +131,6 @@ struct RTCServers: View {
         }
     }
 
-    func howToButton() -> some View {
-        Button {
-            openExternalLink(howToUrl)
-        } label: {
-            HStack{
-                Text("How to")
-                Image(systemName: "arrow.up.right.circle")
-            }
-        }
-    }
 }
 
 struct RTCServers_Previews: PreviewProvider {

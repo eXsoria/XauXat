@@ -17,14 +17,14 @@ struct OldHowItWorks: View {
 
     var body: some View {
         VStack(alignment: .leading) {
-            Text("How SimpleX works")
+            Text("How private connections work")
                 .font(.largeTitle)
                 .bold()
                 .padding(.vertical)
             ScrollView {
                 VStack(alignment: .leading) {
                     Group {
-                        Text("To protect your privacy, SimpleX uses separate IDs for each of your contacts.")
+                        Text("To protect your privacy, XauXat uses separate IDs for each of your contacts.")
                         Text("Only client devices store user profiles, contacts, groups, and messages.")
                         Text("All messages and files are sent **end-to-end encrypted**, with post-quantum security in direct messages.")
                         if !onboarding {

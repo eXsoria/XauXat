@@ -22,7 +22,7 @@ enum UserPickerSheet: Identifiable {
 
     var navigationTitle: LocalizedStringKey {
         switch self {
-        case .address: "SimpleX address"
+        case .address: "XauXat address"
         case .chatPreferences: "Your preferences"
         case .chatProfiles: "Your chat profiles"
         case .currentProfile: "Your current profile"
@@ -668,7 +668,7 @@ struct ChatListSearchBar: View {
             HStack(spacing: 12) {
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
-                    TextField("Search or paste SimpleX link", text: $searchText)
+                    TextField("Search or paste connection link", text: $searchText)
                         .foregroundColor(searchShowingSimplexLink ? theme.colors.secondary : theme.colors.onBackground)
                         .disabled(searchShowingSimplexLink)
                         .focused($searchFocussed)

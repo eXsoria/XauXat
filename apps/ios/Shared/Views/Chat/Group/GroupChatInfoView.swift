@@ -159,16 +159,6 @@ struct GroupChatInfoView: View {
                         }
                     }
 
-                    if groupInfo.useRelays && groupInfo.isOwner && groupLink != nil {
-                        Section {
-                            channelSimplexNameButton()
-                        } header: {
-                            if groupInfo.groupProfile.publicGroup?.publicGroupAccess?.groupDomainClaim?.shortName != nil {
-                                Text("Channel SimpleX name").foregroundColor(theme.colors.secondary)
-                            }
-                        }
-                    }
-
                     Section {
                         XauXatConversationLockButton(chatID: chat.id)
                     } footer: {
@@ -694,38 +684,6 @@ struct GroupChatInfoView: View {
                 .navigationBarTitleDisplayMode(.large)
         } label: {
             Label(title, systemImage: "globe")
-        }
-    }
-
-    private func channelSimplexNameButton() -> some View {
-        NavigationLink {
-            let domain = if let d = groupInfo.groupProfile.publicGroup?.publicGroupAccess?.groupDomainClaim?.shortName { "#\(d)" } else { "" }
-            SetSimplexDomainView(
-                title: "SimpleX name",
-                footer: "Let people join via name registered with this channel link.",
-                prompt: "#channelname.testing",
-                simplexName: domain,
-                save: { domain in
-                    do {
-                        var access = groupInfo.groupProfile.publicGroup?.publicGroupAccess ?? PublicGroupAccess()
-                        access.groupDomainClaim = domain.map { SimplexDomainClaim(domain: $0) }
-                        let gInfo = try await apiSetPublicGroupAccess(groupInfo.groupId, access: access)
-                        await MainActor.run {
-                            chatModel.updateGroup(gInfo)
-                            groupInfo = gInfo
-                        }
-                        return true
-                    } catch {
-                        return false
-                    }
-                }
-            )
-        } label: {
-            if let d = groupInfo.groupProfile.publicGroup?.publicGroupAccess?.groupDomainClaim?.shortName {
-                Label("\(d)", systemImage: "number")
-            } else {
-                Label("Get SimpleX name (BETA)", systemImage: "number")
-            }
         }
     }
 

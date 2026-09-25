@@ -149,26 +149,11 @@ func showBadgeInfoAlert(_ name: String, _ badge: LocalBadge) {
         // a verified badge's type is signed and can't be faked, so the real (possibly unknown) type name is the title
         let t = badge.badge.badgeType.text
         let title = t.prefix(1).uppercased() + t.dropFirst()
-        if case .investor = badge.badge.badgeType {
-            let message = String.localizedStringWithFormat(NSLocalizedString("%@ invested in SimpleX Chat crowdfunding.", comment: "badge alert"), name)
-            showAlert(title, message: message) {
-                [ UIAlertAction(title: NSLocalizedString("Learn more", comment: "badge alert button"), style: .default) { _ in
-                    if let url = URL(string: "https://simplex.chat/crowdfunding") {
-                        UIApplication.shared.open(url)
-                    }
-                  },
-                  okAlertAction ]
-            }
+        let message = if badge.status == .expired, let expiry = badge.badge.badgeExpiry {
+            String.localizedStringWithFormat(NSLocalizedString("%1$@ has a verified community badge that expired on %2$@.", comment: "badge alert"), name, expiry.formatted(date: .abbreviated, time: .omitted))
         } else {
-            // supporter, legend and unknown types use the supporter wording
-            let supports =
-                if badge.status == .expired, let expiry = badge.badge.badgeExpiry {
-                    String.localizedStringWithFormat(NSLocalizedString("%1$@ supported SimpleX Chat. The badge expired on %2$@.", comment: "badge alert"), name, expiry.formatted(date: .abbreviated, time: .omitted))
-                } else {
-                    String.localizedStringWithFormat(NSLocalizedString("%@ supports SimpleX Chat.", comment: "badge alert"), name)
-                }
-            let v7 = NSLocalizedString("You can support SimpleX starting from v7 of the app.", comment: "badge alert")
-            showAlert(title, message: supports + "\n\n" + v7)
+            String.localizedStringWithFormat(NSLocalizedString("%@ has a verified community badge.", comment: "badge alert"), name)
         }
+        showAlert(title, message: message)
     }
 }

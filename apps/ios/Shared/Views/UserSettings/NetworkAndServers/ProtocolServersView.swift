@@ -10,8 +10,6 @@
 import SwiftUI
 import SimpleXChat
 
-private let howToUrl = URL(string: "https://simplex.chat/docs/server.html")!
-
 struct YourServersView: View {
     @Environment(\.dismiss) var dismiss: DismissAction
     @EnvironmentObject private var m: ChatModel
@@ -189,7 +187,6 @@ struct YourServersView: View {
                     chatRelays: $userServers[operatorIndex].chatRelays,
                     testing: $testing
                 )
-                howToButton()
             }
         }
         .toolbar {
@@ -227,16 +224,6 @@ struct YourServersView: View {
         .modifier(ThemedBackground(grouped: true))
     }
 
-    func howToButton() -> some View {
-        Button {
-            openExternalLink(howToUrl)
-        } label: {
-            HStack {
-                Text("How to use your servers")
-                Image(systemName: "arrow.up.right.circle")
-            }
-        }
-    }
 }
 
 struct ProtocolServerViewLink: View {

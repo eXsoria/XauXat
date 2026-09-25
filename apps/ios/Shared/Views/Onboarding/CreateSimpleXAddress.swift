@@ -24,7 +24,7 @@ struct CreateSimpleXAddress: View {
             ScrollView {
                 ZStack {
                     VStack(alignment: .leading) {
-                        Text("SimpleX Address")
+                        Text("XauXat Address")
                             .font(.largeTitle)
                             .bold()
                             .frame(maxWidth: .infinity)
@@ -93,9 +93,9 @@ struct CreateSimpleXAddress: View {
                     }
                 }
             } label: {
-                Text("Create SimpleX address").font(.title)
+                Text("Create XauXat address").font(.title)
             }
-            Text("You can make it visible to your SimpleX contacts via Settings.")
+            Text("You can make it visible to your XauXat contacts via Settings.")
                 .multilineTextAlignment(.center)
                 .font(.footnote)
                 .padding(.horizontal, 32)
@@ -189,7 +189,7 @@ struct SendAddressMailView: View {
         MailView(
             isShowing: self.$showMailView,
             result: $mailViewResult,
-            subject: NSLocalizedString("Let's talk in SimpleX Chat", comment: "email subject"),
+            subject: NSLocalizedString("Let's talk in XauXat", comment: "email subject"),
             messageBody: messageBody
         )
     }
