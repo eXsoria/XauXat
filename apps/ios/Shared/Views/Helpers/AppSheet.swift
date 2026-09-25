@@ -34,6 +34,65 @@ struct XauXatAppSwitcherProtection: ViewModifier {
     }
 }
 
+struct XauXatTapToPreview<ProtectedContent: View, Placeholder: View>: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var tappedReveal = false
+    @State private var screenCaptured = UIScreen.main.isCaptured
+
+    let onReveal: () -> Void
+    let onHide: () -> Void
+    @ViewBuilder let protectedContent: () -> ProtectedContent
+    @ViewBuilder let placeholder: () -> Placeholder
+
+    private var revealed: Bool {
+        scenePhase == .active && !screenCaptured && tappedReveal
+    }
+
+    var body: some View {
+        ZStack {
+            if revealed {
+                protectedContent()
+                    .privacySensitive()
+                    .accessibilityAction(named: Text("Hide protected content")) {
+                        hide()
+                    }
+            } else {
+                placeholder()
+                    .accessibilityAction(named: Text("Reveal protected content")) {
+                        reveal()
+                    }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if revealed { hide() } else { reveal() }
+        }
+        .onChange(of: revealed) { isRevealed in
+            if isRevealed { onReveal() } else { onHide() }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active { hide() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)) { _ in
+            screenCaptured = UIScreen.main.isCaptured
+            if screenCaptured { hide() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+            hide()
+        }
+        .onDisappear { hide() }
+    }
+
+    private func reveal() {
+        guard scenePhase == .active && !screenCaptured else { return }
+        tappedReveal = true
+    }
+
+    private func hide() {
+        tappedReveal = false
+    }
+}
+
 struct XauXatPressToPreview<ProtectedContent: View, Placeholder: View>: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var touchDown = false
