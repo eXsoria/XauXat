@@ -43,12 +43,15 @@ private func xauxatRemoveConsumedPhotoFile(_ chatItem: ChatItem) {
 struct CIImageView: View {
     private enum OneTimePlaceholderState {
         case sent
+        case sentPressToView
         case unopened
+        case pressToView
         case consumed
 
         var icon: String {
             switch self {
             case .sent, .unopened: "1.circle"
+            case .sentPressToView, .pressToView: "hand.tap"
             case .consumed: "eye.slash"
             }
         }
@@ -56,7 +59,9 @@ struct CIImageView: View {
         var label: LocalizedStringKey {
             switch self {
             case .sent: "One-time photo"
+            case .sentPressToView: "Press-to-view photo"
             case .unopened: "Tap to view"
+            case .pressToView: "Press and hold to view"
             case .consumed: "Photo expired"
             }
         }
@@ -64,7 +69,9 @@ struct CIImageView: View {
         var accessibilityLabel: LocalizedStringKey {
             switch self {
             case .sent: "One-time photo sent"
+            case .sentPressToView: "Press-to-view photo sent"
             case .unopened: "One-time photo. Tap to view"
+            case .pressToView: "One-time photo. Press and hold to view"
             case .consumed: "One-time photo expired"
             }
         }
@@ -88,6 +95,11 @@ struct CIImageView: View {
         return XauXatCodeLockedEnvelope.isFileWireText(text)
     }
 
+    private var pressToViewPhoto: Bool {
+        guard case let .xauXatImage(_, _, privacy) = chatItem.content.msgContent else { return false }
+        return privacy.pressToView
+    }
+
     var body: some View {
         let file = chatItem.file
         let sentOneTime = chatItem.chatDir.sent && xauxatIsOneTimePhoto(chatItem)
@@ -95,29 +107,43 @@ struct CIImageView: View {
         let consumed = !oneTimeRevealing && (oneTimeConsumed || xauxatOneTimePhotoConsumed(chatItem))
         VStack(alignment: .center, spacing: 6) {
             if sentOneTime {
-                oneTimePlaceholder(state: .sent)
+                oneTimePlaceholder(state: pressToViewPhoto ? .sentPressToView : .sent)
             } else if codeLockedPhoto {
                 codeLockedPhotoView(file: file, receivedOneTime: receivedOneTime, consumed: consumed)
             } else if receivedOneTime, consumed {
                 oneTimePlaceholder(state: .consumed)
             } else if receivedOneTime, let uiImage = getLoadedXauXatImage(chatItem) {
-                oneTimePlaceholder(state: .unopened)
-                    .fullScreenCover(isPresented: $showFullScreenImage, onDismiss: consumeOneTimePhoto) {
-                        FullScreenMediaView(
-                            chatItem: chatItem,
-                            scrollToItem: nil,
-                            image: uiImage,
-                            showView: $showFullScreenImage,
-                            restrictToCurrentItem: true,
-                            allowSave: xauxatOneTimePhotoPolicy(chatItem) == .allowSave,
-                            onPresented: { xauxatMarkOneTimePhotoConsumed(chatItem) }
-                        )
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        oneTimeRevealing = true
-                        showFullScreenImage = true
-                    }
+                if pressToViewPhoto {
+                    XauXatPressToPreview(
+                        onReveal: {
+                            oneTimeRevealing = true
+                            xauxatMarkOneTimePhotoConsumed(chatItem)
+                        },
+                        onHide: {
+                            if oneTimeRevealing { consumeOneTimePhoto() }
+                        },
+                        protectedContent: { imageView(uiImage) },
+                        placeholder: { oneTimePlaceholder(state: .pressToView) }
+                    )
+                } else {
+                    oneTimePlaceholder(state: .unopened)
+                        .fullScreenCover(isPresented: $showFullScreenImage, onDismiss: consumeOneTimePhoto) {
+                            FullScreenMediaView(
+                                chatItem: chatItem,
+                                scrollToItem: nil,
+                                image: uiImage,
+                                showView: $showFullScreenImage,
+                                restrictToCurrentItem: true,
+                                allowSave: xauxatOneTimePhotoPolicy(chatItem) == .allowSave,
+                                onPresented: { xauxatMarkOneTimePhotoConsumed(chatItem) }
+                            )
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            oneTimeRevealing = true
+                            showFullScreenImage = true
+                        }
+                }
             } else if let uiImage = getLoadedXauXatImage(chatItem) {
                 Group { if smallView { smallViewImageView(uiImage) } else { imageView(uiImage) } }
                 .fullScreenCover(isPresented: $showFullScreenImage) {

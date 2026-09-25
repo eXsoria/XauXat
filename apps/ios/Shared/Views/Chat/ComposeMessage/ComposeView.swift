@@ -551,7 +551,7 @@ struct ComposeView: View {
     @State private var showMediaPicker = false
     @State private var showTakePhoto = false
     @State var chosenMedia: [UploadContent] = []
-    @State private var oneTimePhotoEnabled = true
+    @State private var photoSendMode: XauXatPhotoSendMode = .oneTime
     @State private var allowOneTimePhotoSave = false
     @State private var showFileImporter = false
     @State private var showCodeLockSetup = false
@@ -1692,12 +1692,13 @@ struct ComposeView: View {
                     default: false
                     }
                 },
-                oneTimeView: $oneTimePhotoEnabled,
+                sendMode: $photoSendMode,
                 allowSave: $allowOneTimePhotoSave,
+                requestPlus: { showCodeLockPaywall = true },
                 cancelImage: {
                     composeState = composeState.copy(preview: .noPreview)
                     chosenMedia = []
-                    oneTimePhotoEnabled = true
+                    photoSendMode = .oneTime
                     allowOneTimePhotoSave = false
                 },
                 cancelEnabled: !composeState.editing && !composeState.inProgress)
@@ -2035,8 +2036,12 @@ struct ComposeView: View {
                         )
                     )
                 }
-                if oneTimePhotoEnabled {
-                    guard let prepared = saveXauXatOneTimeImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
+                if photoSendMode != .normal {
+                    guard let prepared = saveXauXatOneTimeImage(
+                        image,
+                        allowSave: allowOneTimePhotoSave,
+                        pressToView: photoSendMode == .pressToView
+                    ) else { return nil }
                     return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
                 }
                 return (saveImage(image), .image(text: text, image: previewImage))
@@ -2060,8 +2065,12 @@ struct ComposeView: View {
                         )
                     )
                 }
-                if oneTimePhotoEnabled {
-                    guard let prepared = saveXauXatOneTimeAnimImage(image, allowSave: allowOneTimePhotoSave) else { return nil }
+                if photoSendMode != .normal {
+                    guard let prepared = saveXauXatOneTimeAnimImage(
+                        image,
+                        allowSave: allowOneTimePhotoSave,
+                        pressToView: photoSendMode == .pressToView
+                    ) else { return nil }
                     return (prepared.file, .xauXatImage(text: text, image: previewImage, privacy: prepared.privacy))
                 }
                 return (saveAnimImage(image), .image(text: text, image: previewImage))
@@ -2397,7 +2406,7 @@ struct ComposeView: View {
             resetLinkPreview()
         }
         chosenMedia = []
-        oneTimePhotoEnabled = true
+        photoSendMode = .oneTime
         allowOneTimePhotoSave = false
         codeLockCode = nil
         codeLockMaxAttempts = nil

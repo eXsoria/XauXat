@@ -139,10 +139,10 @@ public func saveAnimImage(_ image: UIImage, oneTimeAllowSave: Bool? = nil) -> Cr
     return saveFile(sanitizedData, fileName, encrypted: privacyEncryptLocalFilesGroupDefault.get())
 }
 
-public func saveXauXatOneTimeAnimImage(_ image: UIImage, allowSave: Bool) -> XauXatPreparedOneTimePhoto? {
+public func saveXauXatOneTimeAnimImage(_ image: UIImage, allowSave: Bool, pressToView: Bool = false) -> XauXatPreparedOneTimePhoto? {
     guard let imageData = image.imageData,
           let sanitizedData = xauxatSanitizeAnimatedImageData(imageData) else { return nil }
-    return saveXauXatProtectedPhotoData(sanitizedData, allowSave: allowSave)
+    return saveXauXatProtectedPhotoData(sanitizedData, allowSave: allowSave, pressToView: pressToView)
 }
 
 @MainActor
@@ -225,13 +225,13 @@ public func saveImage(_ uiImage: UIImage, oneTimeAllowSave: Bool? = nil) -> Cryp
     return nil
 }
 
-public func saveXauXatOneTimeImage(_ image: UIImage, allowSave: Bool) -> XauXatPreparedOneTimePhoto? {
+public func saveXauXatOneTimeImage(_ image: UIImage, allowSave: Bool, pressToView: Bool = false) -> XauXatPreparedOneTimePhoto? {
     let hasAlpha = imageHasAlpha(image)
     guard let sanitizedData = resizeImageToDataSize(image, maxDataSize: MAX_IMAGE_SIZE, hasAlpha: hasAlpha) else { return nil }
-    return saveXauXatProtectedPhotoData(sanitizedData, allowSave: allowSave)
+    return saveXauXatProtectedPhotoData(sanitizedData, allowSave: allowSave, pressToView: pressToView)
 }
 
-public func saveXauXatProtectedPhotoData(_ data: Data, allowSave: Bool) -> XauXatPreparedOneTimePhoto? {
+public func saveXauXatProtectedPhotoData(_ data: Data, allowSave: Bool, pressToView: Bool = false) -> XauXatPreparedOneTimePhoto? {
     let fileName = generateNewFileName("photo", "xauxat")
     let path = getAppFilePath(fileName)
     do {
@@ -239,7 +239,7 @@ public func saveXauXatProtectedPhotoData(_ data: Data, allowSave: Bool) -> XauXa
         _ = excludeFromSystemBackup(path)
         return XauXatPreparedOneTimePhoto(
             file: CryptoFile.plain(fileName),
-            privacy: XauXatImagePrivacy(allowSave: allowSave, fileCrypto: cryptoArgs)
+            privacy: XauXatImagePrivacy(pressToView: pressToView, allowSave: allowSave, fileCrypto: cryptoArgs)
         )
     } catch {
         logger.error("Unable to encrypt XauXat one-time photo: \(error.localizedDescription)")

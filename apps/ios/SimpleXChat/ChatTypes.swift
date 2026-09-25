@@ -4933,14 +4933,33 @@ public enum FileError: Decodable, Equatable, Hashable {
 public struct XauXatImagePrivacy: Codable, Hashable {
     public let version: Int
     public let viewOnce: Bool
+    public let pressToView: Bool
     public let allowSave: Bool
     public let fileCrypto: CryptoFileArgs
 
-    public init(viewOnce: Bool = true, allowSave: Bool, fileCrypto: CryptoFileArgs) {
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case viewOnce
+        case pressToView
+        case allowSave
+        case fileCrypto
+    }
+
+    public init(viewOnce: Bool = true, pressToView: Bool = false, allowSave: Bool, fileCrypto: CryptoFileArgs) {
         self.version = 1
         self.viewOnce = viewOnce
+        self.pressToView = pressToView
         self.allowSave = allowSave
         self.fileCrypto = fileCrypto
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        viewOnce = try container.decode(Bool.self, forKey: .viewOnce)
+        pressToView = try container.decodeIfPresent(Bool.self, forKey: .pressToView) ?? false
+        allowSave = try container.decode(Bool.self, forKey: .allowSave)
+        fileCrypto = try container.decode(CryptoFileArgs.self, forKey: .fileCrypto)
     }
 }
 
