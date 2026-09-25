@@ -29,7 +29,7 @@ struct DeveloperView: View {
                                 .frame(width: 24, height: 24)
                                 .opacity(0.5)
                                 .colorMultiply(theme.colors.secondary)
-                            Text("Install SimpleX Chat for terminal")
+                            Text("Install the command-line client")
                                 .padding(.leading, 36)
                         }
                     }
@@ -70,7 +70,7 @@ struct DeveloperView: View {
                 }
                 Section("Deprecated options") {
                     settingsRow("link", color: theme.colors.secondary) {
-                        Picker("SimpleX links", selection: $simplexLinkMode) {
+                        Picker("Connection links", selection: $simplexLinkMode) {
                             ForEach(
                                 SimpleXLinkMode.values + (SimpleXLinkMode.values.contains(simplexLinkMode) ? [] : [simplexLinkMode])
                             ) { mode in

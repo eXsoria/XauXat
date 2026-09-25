@@ -262,7 +262,7 @@ struct ChooseServerOperators: View {
                         operatorCheckView(srvOperator)
                     }
                     VStack {
-                        Text("SimpleX Chat and Flux made an agreement to include Flux-operated servers into the app.").padding(.bottom, 8)
+                        Text("Flux-operated relays are available as an optional network provider.").padding(.bottom, 8)
                         Text("You can configure servers via settings.")
                     }
                     .font(.footnote)
@@ -345,8 +345,6 @@ struct ChooseServerOperators: View {
     }
 }
 
-let operatorsPostLink = URL(string: "https://simplex.chat/blog/20241125-servers-operated-by-flux-true-privacy-and-decentralization-for-all-users.html")!
-
 struct ChooseServerOperatorsInfoView: View {
     @Environment(\.colorScheme) var colorScheme: ColorScheme
     @EnvironmentObject var theme: AppTheme
@@ -357,7 +355,7 @@ struct ChooseServerOperatorsInfoView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("The app protects your privacy by using different operators in each conversation.")
                     Text("When more than one operator is enabled, none of them has metadata to learn who communicates with whom.")
-                    Text("For example, if your contact receives messages via a SimpleX Chat server, your app will deliver them via a Flux server.")
+                    Text("For example, if your contact receives messages through another relay provider, your app can deliver them through a Flux relay.")
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 .listRowBackground(Color.clear)

@@ -19,11 +19,12 @@ struct VersionView: View {
                 Text("App version: v\(appVersion ?? "?")")
                 Text("App build: \(appBuild ?? "?")")
                 if let info = versionInfo {
-                    Text("Core version: v\(info.version)")
-                    if let v = try? AttributedString(markdown: "simplexmq: v\(info.simplexmqVersion) ([\(info.simplexmqCommit.prefix(7))](https://github.com/simplex-chat/simplexmq/commit/\(info.simplexmqCommit)))") {
-                        Text(v)
-                    }
+                    Text("Messaging core: v\(info.version)")
                 }
+            }
+
+            Section("Open source") {
+                ExternalLink("Source code and licences", destination: URL(string: "https://github.com/eXsoria/XauXat")!)
             }
 
             Section {

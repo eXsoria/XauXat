@@ -66,7 +66,7 @@ struct UserProfile: View {
                     Text(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add description" : "Edit description")
                 }
             } footer: {
-                Text("Your profile is stored on your device and shared only with your contacts. SimpleX servers cannot see your profile.")
+                Text("Your profile is stored on your device and shared only with your contacts. Relay servers cannot see your profile.")
             }
 
             Section {

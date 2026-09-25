@@ -79,7 +79,7 @@ struct SimpleXInfo: View {
                     Button {
                         showWhyBuilt = true
                     } label: {
-                        Label("Why SimpleX is built.", systemImage: "info.circle")
+                        Label("Why XauXat is built.", systemImage: "info.circle")
                             .font(.headline)
                     }
                 }

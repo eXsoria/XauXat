@@ -11,11 +11,11 @@ import Intents
 import SimpleXChat
 
 private enum NoticesSheet: Identifiable {
-    case whatsNew(updatedConditions: Bool)
+    case updatedConditions
 
     var id: String {
         switch self {
-        case .whatsNew: return "whatsNew"
+        case .updatedConditions: return "updatedConditions"
         }
     }
 }
@@ -117,7 +117,7 @@ struct ContentView: View {
             }
         }
         .alert(isPresented: $alertManager.presentAlert) { alertManager.alertView! }
-        .confirmationDialog("SimpleX Lock mode", isPresented: $showChooseLAMode, titleVisibility: .visible) {
+        .confirmationDialog("App Lock mode", isPresented: $showChooseLAMode, titleVisibility: .visible) {
             Button("System authentication") { initialEnableLA() }
             Button("Passcode entry") { showSetPasscode = true }
         }
@@ -275,11 +275,10 @@ struct ContentView: View {
                     } else if !chatModel.showCallView && CallController.shared.activeCallInvitation == nil {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                             if !noticesShown {
-                                let showWhatsNew = shouldShowWhatsNew()
                                 let showUpdatedConditions = chatModel.conditions.conditionsAction?.showNotice ?? false
-                                noticesShown = showWhatsNew || showUpdatedConditions
-                                if showWhatsNew || showUpdatedConditions {
-                                    noticesSheetItem = .whatsNew(updatedConditions: showUpdatedConditions)
+                                noticesShown = showUpdatedConditions
+                                if showUpdatedConditions {
+                                    noticesSheetItem = .updatedConditions
                                 }
                             }
                         }
@@ -292,12 +291,13 @@ struct ContentView: View {
             .onChange(of: chatModel.reRegisterTknStatus) { _ in showReRegisterTokenAlert() }
             .sheet(item: $noticesSheetItem) { item in
                 switch item {
-                case let .whatsNew(updatedConditions):
-                    WhatsNewView(updatedConditions: updatedConditions)
-                        .modifier(ThemedBackground())
-                        .if(updatedConditions) { v in
-                            v.task { await setConditionsNotified_() }
-                        }
+                case .updatedConditions:
+                    UsageConditionsView(
+                        currUserServers: Binding.constant([]),
+                        userServers: Binding.constant([])
+                    )
+                    .modifier(ThemedBackground(grouped: true))
+                    .task { await setConditionsNotified_() }
                 }
             }
             if chatModel.setDeliveryReceipts {
@@ -399,8 +399,8 @@ struct ContentView: View {
 
     func laNoticeAlert() -> Alert {
         Alert(
-            title: Text("SimpleX Lock"),
-            message: Text("To protect your information, turn on SimpleX Lock.\nYou will be prompted to complete authentication before this feature is enabled."),
+            title: Text("App Lock"),
+            message: Text("To protect your information, turn on App Lock.\nYou will be prompted to complete authentication before this feature is enabled."),
             primaryButton: .default(Text("Turn on")) { showChooseLAMode = true },
             secondaryButton: .cancel()
          )
@@ -408,7 +408,7 @@ struct ContentView: View {
 
     private func initialEnableLA () {
         privacyLocalAuthModeDefault.set(.system)
-        authenticate(reason: NSLocalizedString("Enable SimpleX Lock", comment: "authentication reason")) { laResult in
+        authenticate(reason: NSLocalizedString("Enable App Lock", comment: "authentication reason")) { laResult in
             switch laResult {
             case .success:
                 chatModel.contentViewAccessAuthenticated = true

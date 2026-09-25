@@ -8,7 +8,6 @@
 // Spec: spec/client/navigation.md
 
 import SwiftUI
-import StoreKit
 import SimpleXChat
 
 private struct VersionDescription {
@@ -42,12 +41,9 @@ private struct FeatureView {
     let view: () -> any View
 }
 
-let isInUS = {
-    let code = SKStorefront().countryCode
-    return code == "USA" || code == ""
-}()
-
-private let versionDescriptions: [VersionDescription] = [
+// Kept as source history for upstream maintenance only. XauXat never presents
+// these upstream release notes or promotional screens to users.
+private let upstreamVersionDescriptions: [VersionDescription] = [
     VersionDescription(
         version: "v4.2",
         post: URL(string: "https://simplex.chat/blog/20221108-simplex-chat-v4.2-security-audit-new-website.html"),
@@ -671,15 +667,9 @@ private let versionDescriptions: [VersionDescription] = [
         ]
     ),
     VersionDescription(
-        version: isInUS ? "v7.0.1" : "v7.0",
+        version: "v7.0",
         post: URL(string: "https://simplex.chat/blog/20260819-simplex-chat-crowdfunding.html"),
-        features: (isInUS ? [
-            .view(FeatureView(
-                icon: nil,
-                title: "You can now invest in SimpleX Chat",
-                view: { InvestInSimpleXChat() }
-            ))
-        ] : []) + [
+        features: [
             .feature(Description(
                 icon: "at",
                 title: "SimpleX public names (BETA)",
@@ -700,6 +690,30 @@ private let versionDescriptions: [VersionDescription] = [
     ),
 ]
 
+private let versionDescriptions: [VersionDescription] = [
+    VersionDescription(
+        version: "v0.0.1",
+        post: nil,
+        features: [
+            .feature(Description(
+                icon: "network.badge.shield.half.filled",
+                title: "Private connection by default",
+                description: "XauXat starts its protected network route automatically."
+            )),
+            .feature(Description(
+                icon: "eye.slash",
+                title: "Private media controls",
+                description: "Choose normal, one-time, or press-to-view photos before sending."
+            )),
+            .feature(Description(
+                icon: "lock.shield",
+                title: "Local protection",
+                description: "App Lock and encrypted local storage protect data on this device."
+            ))
+        ]
+    )
+]
+
 private let lastVersion = versionDescriptions.last!.version
 
 func setLastVersionDefault() {
@@ -707,9 +721,8 @@ func setLastVersionDefault() {
 }
 
 func shouldShowWhatsNew() -> Bool {
-    let v = UserDefaults.standard.string(forKey: DEFAULT_WHATS_NEW_VERSION)
     setLastVersionDefault()
-    return v != lastVersion
+    return false
 }
 
 fileprivate struct NewOperatorsView: View {

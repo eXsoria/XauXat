@@ -136,8 +136,8 @@ struct UserAddressView: View {
                 )
             case .shareOnCreate:
                 return Alert(
-                    title: Text("Share address with SimpleX contacts?"),
-                    message: Text("Add address to your profile, so that your SimpleX contacts can share it with other people. Profile update will be sent to your SimpleX contacts."),
+                    title: Text("Share address with XauXat contacts?"),
+                    message: Text("Add the address to your profile so your XauXat contacts can share it with other people. The profile update will be sent to your XauXat contacts."),
                     primaryButton: .default(Text("Share")) {
                         setProfileAddress($progressIndicator, true)
                         shareViaProfile = true
@@ -190,38 +190,6 @@ struct UserAddressView: View {
             if settings.businessAddress {
                 Text("Add your team members to the conversations.")
                     .foregroundColor(theme.colors.secondary)
-            }
-        }
-
-        Section {
-            NavigationLink {
-                let simplexName = if let d = chatModel.currentUser?.profile.contactDomain?.domain { "@\(d)" } else { "" }
-                SetSimplexDomainView(
-                    title: "Your SimpleX name",
-                    footer: "Let people connect to you via name registered with your SimpleX address.",
-                    prompt: "@yourname.testing",
-                    simplexName: simplexName,
-                    broadcastWarning: NSLocalizedString("Profile update will be sent to your SimpleX contacts.", comment: "alert title"),
-                    save: { simplexDomain in
-                        do {
-                            let u = try await apiSetUserDomain(simplexDomain)
-                            await MainActor.run { chatModel.updateUser(u) }
-                            return true
-                        } catch {
-                            return false
-                        }
-                    }
-                )
-            } label: {
-                if let d = chatModel.currentUser?.profile.contactDomain?.domain {
-                    Label("\(d)", systemImage: "at")
-                } else {
-                    Label("Get SimpleX name (BETA)", systemImage: "at")
-                }
-            }
-        } header: {
-            if chatModel.currentUser?.profile.contactDomain?.domain != nil {
-                Text("Your SimpleX name").foregroundColor(theme.colors.secondary)
             }
         }
 
@@ -296,7 +264,7 @@ struct UserAddressView: View {
         Button {
             createAddress()
         } label: {
-            Label("Create SimpleX address", systemImage: "qrcode")
+            Label("Create XauXat address", systemImage: "qrcode")
         }
     }
 
@@ -455,7 +423,7 @@ struct UserAddressView: View {
                 .navigationBarTitleDisplayMode(.inline)
         } label: {
             settingsRow("info.circle", color: theme.colors.secondary) {
-                Text("SimpleX address or 1-time link?")
+                Text("XauXat address or one-time link?")
             }
         }
     }
@@ -645,7 +613,7 @@ struct UserAddressSettingsView: View {
                     .onDisappear {
                         if savedSettings != settings {
                             showAlert(
-                                title: NSLocalizedString("SimpleX address settings", comment: "alert title"),
+                                title: NSLocalizedString("XauXat address settings", comment: "alert title"),
                                 message: NSLocalizedString("Settings were changed.", comment: "alert message"),
                                 buttonTitle: NSLocalizedString("Save", comment: "alert button"),
                                 buttonAction: { saveAddressSettings(settings, $savedSettings) },
@@ -688,15 +656,15 @@ struct UserAddressSettingsView: View {
 
     private func shareWithContactsButton() -> some View {
         settingsRow("person", color: theme.colors.secondary) {
-            Toggle("Share with SimpleX contacts", isOn: $shareViaProfile)
+            Toggle("Share with XauXat contacts", isOn: $shareViaProfile)
                 .onChange(of: shareViaProfile) { on in
                     if ignoreShareViaProfileChange {
                         ignoreShareViaProfileChange = false
                     } else {
                         if on {
                             showAlert(
-                                NSLocalizedString("Share address with SimpleX contacts?", comment: "alert title"),
-                                message: NSLocalizedString("Profile update will be sent to your SimpleX contacts.", comment: "alert message"),
+                                NSLocalizedString("Share address with XauXat contacts?", comment: "alert title"),
+                                message: NSLocalizedString("The profile update will be sent to your XauXat contacts.", comment: "alert message"),
                                 actions: {[
                                     UIAlertAction(
                                         title: NSLocalizedString("Cancel", comment: "alert action"),
@@ -718,7 +686,7 @@ struct UserAddressSettingsView: View {
                         } else {
                             showAlert(
                                 NSLocalizedString("Stop sharing address?", comment: "alert title"),
-                                message: NSLocalizedString("Profile update will be sent to your SimpleX contacts.", comment: "alert message"),
+                                message: NSLocalizedString("The profile update will be sent to your XauXat contacts.", comment: "alert message"),
                                 actions: {[
                                     UIAlertAction(
                                         title: NSLocalizedString("Cancel", comment: "alert action"),
@@ -909,17 +877,13 @@ struct SetSimplexDomainView: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: saleCountdown(timeToSaleStart))
-                    Text(timeToSaleStart > 0 ? "until you can register a SimpleX domain" : "Update the app to register a SimpleX domain")
+                    Text(timeToSaleStart > 0 ? "until you can register a public name" : "Update the app to register a public name")
                         .font(.caption)
                         .foregroundColor(theme.colors.secondary)
                 }
             } header: {
-                Text("SimpleX name sale starts in")
+                Text("Public name registration starts in")
                     .foregroundColor(theme.colors.secondary)
-            } footer: {
-                Text("Crowdfunding investors can reserve names before the sale starts: [simplex.domains](https://simplex.domains/)")
-                    .foregroundColor(theme.colors.secondary)
-                    .padding(.bottom)
             }
         }
         .modifier(ThemedBackground(grouped: true))
@@ -943,7 +907,7 @@ struct SetSimplexDomainView: View {
                 let domain = normalized(simplexName)
                 let saveName = save
                 showAlert(
-                    NSLocalizedString("Save SimpleX name?", comment: "alert title"),
+                    NSLocalizedString("Save public name?", comment: "alert title"),
                     message: broadcastWarning,
                     actions: {[
                         UIAlertAction(title: NSLocalizedString("Save", comment: "alert action"), style: .default) { _ in

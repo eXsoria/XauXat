@@ -38,7 +38,7 @@ struct NotificationsView: View {
                                 if mode == .instant && !xauXatNotificationServerConfigured {
                                     ntfAlert = .error(
                                         title: "Instant notifications unavailable",
-                                        error: "This build has no XauXat notification server. No SimpleX server will be used as a fallback."
+                                        error: "This build has no XauXat notification server. No third-party server will be used as a fallback."
                                     )
                                 } else {
                                     ntfAlert = .setMode(mode: mode)
@@ -78,7 +78,7 @@ struct NotificationsView: View {
                         .font(.callout)
                         .padding(.top, 1)
                 } else if !xauXatNotificationServerConfigured {
-                    Text("Instant notifications are unavailable in this build. XauXat will not use a SimpleX notification server as a fallback.")
+                    Text("Instant notifications are unavailable in this build. XauXat will not use a third-party notification server as a fallback.")
                         .foregroundColor(theme.colors.secondary)
                         .font(.callout)
                         .padding(.top, 1)

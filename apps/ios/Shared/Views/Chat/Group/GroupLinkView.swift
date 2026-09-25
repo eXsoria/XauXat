@@ -243,7 +243,7 @@ struct GroupLinkView: View {
                 } header: {
                     Text("One-time group invite")
                 } footer: {
-                    Text("The SimpleX core accepts only the first valid use. XauXat then sends that contact an invitation to this group.")
+                    Text("The messaging core accepts only the first valid use. XauXat then sends that contact an invitation to this group.")
                 }
             }
         }
@@ -337,7 +337,7 @@ struct GroupLinkView: View {
             } label: {
                 Label("Require access code", systemImage: "lock")
             }
-            Text("XauXat generates a strong code. The protected link cannot reveal the SimpleX group link without it.")
+            Text("XauXat generates a strong code. The protected link cannot reveal the underlying group invitation without it.")
                 .font(.caption)
                 .foregroundColor(theme.colors.secondary)
         } else {
@@ -373,8 +373,8 @@ struct GroupLinkView: View {
                 Text(createIndividualGroupAccesses
                      ? "Each access gets its own ID, link and optional code, and can be shared or revoked independently."
                      : groupAccessMaximumUses == 1
-                     ? "The code unlocks only this access and is erased locally as soon as the SimpleX invitation is used."
-                     : "XauXat combines independent SimpleX one-time invitations, so simultaneous entries cannot exceed this limit.")
+                     ? "The code unlocks only this access and is erased locally as soon as the invitation is used."
+                     : "XauXat combines independent one-time invitations, so simultaneous entries cannot exceed this limit.")
                     .font(.caption)
                     .foregroundColor(theme.colors.secondary)
                 Text("Policy: \(configuredAdvancedGroupAccessRules.summary())")

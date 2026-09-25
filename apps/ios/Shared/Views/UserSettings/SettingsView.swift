@@ -11,8 +11,6 @@ import SwiftUI
 import StoreKit
 import SimpleXChat
 
-let simplexTeamURL = URL(string: "simplex:/a#lrdvu2d8A1GumSmoKb2krQmtKhWXq-tyGpHuM7aMwsw?h=smp6.simplex.im")!
-
 let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
 
 let appBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion")  as? String
@@ -400,16 +398,6 @@ struct SettingsView: View {
                 }
             }
 
-            if isInUS {
-                Section(header: Text("You can now invest in SimpleX Chat").foregroundColor(theme.colors.secondary)) {
-                    NavigationLink {
-                        GetStakeView(fromSettings: true)
-                            .navigationBarTitle("", displayMode: .inline)
-                    } label: {
-                        settingsRow("dollarsign.circle", color: theme.colors.secondary) { Text("Crowdfunding on Wefunder") }
-                    }
-                }
-            }
         }
         .navigationTitle("Your settings")
         .modifier(ThemedBackground(grouped: true))
@@ -435,41 +423,23 @@ struct SettingsView: View {
                     }
                 }
                 NavigationLink {
-                    WhatsNewView(viaSettings: true, updatedConditions: false)
-                        .modifier(ThemedBackground())
-                        .navigationBarTitleDisplayMode(.inline)
+                    VersionView()
+                        .navigationTitle("About XauXat")
+                        .modifier(ThemedBackground(grouped: true))
                 } label: {
-                    settingsRow("plus", color: theme.colors.secondary) { Text("What's new") }
-                }
-
-                NavigationLink {
-                    SimpleXInfo(onboarding: false)
-                        .navigationBarTitle("", displayMode: .inline)
-                        .modifier(ThemedBackground())
-                        .frame(maxHeight: .infinity, alignment: .top)
-                } label: {
-                    settingsRow("info", color: theme.colors.secondary) { Text("About SimpleX Chat") }
+                    settingsRow("info", color: theme.colors.secondary) { Text("About XauXat") }
                 }
             }
 
             Section(header: Text("Contact").foregroundColor(theme.colors.secondary)) {
                 settingsRow("number", color: theme.colors.secondary) {
-                    Button("Send questions and ideas") {
-                        dismiss()
-                        DispatchQueue.main.async {
-                            // simplexTeamURL targets this same app; route to the in-app connect flow
-                            // (UIApplication.shared.open is dropped for self-owned URLs in the foreground)
-                            ChatModel.shared.appOpenUrl = simplexTeamURL
-                        }
-                    }
+                    ExternalLink("Report an issue", destination: URL(string: "https://github.com/eXsoria/XauXat/issues")!)
                 }
-                .disabled(chatModel.chatRunning != true)
-                settingsRow("envelope", color: theme.colors.secondary) { Text("[Send us email](mailto:chat@simplex.chat)") }
             }
 
-            Section(header: Text("Support the project").foregroundColor(theme.colors.secondary)) {
+            Section(header: Text("Open source").foregroundColor(theme.colors.secondary)) {
                 settingsRow("keyboard", color: theme.colors.secondary) {
-                    ExternalLink("Contribute", destination: URL(string: "https://github.com/simplex-chat/simplex-chat#contribute")!)
+                    ExternalLink("Source code and licences", destination: URL(string: "https://github.com/eXsoria/XauXat")!)
                 }
                 settingsRow("star", color: theme.colors.secondary) {
                     Button("Rate the app") {
@@ -478,7 +448,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                ExternalLink(destination: URL(string: "https://github.com/simplex-chat/simplex-chat")!) {
+                ExternalLink(destination: URL(string: "https://github.com/eXsoria/XauXat")!) {
                     ZStack(alignment: .leading) {
                         Image(colorScheme == .dark ? "github_light" : "github")
                             .resizable()

@@ -1208,18 +1208,18 @@ private func apiConnectResponseAlert<R>(_ r: APIResult<R>) async {
             case .noValidLink:
                 showAlert(
                     NSLocalizedString("No valid link", comment: ""),
-                    message: String.localizedStringWithFormat(NSLocalizedString("The SimpleX name %@ is registered, but it has no valid link.", comment: ""), domain.fullDomainName)
+                    message: String.localizedStringWithFormat(NSLocalizedString("The public name %@ is registered, but it has no valid link.", comment: ""), domain.fullDomainName)
                 )
             case .unknownDomain:
                 showAlert(
                     NSLocalizedString("Unconfirmed name", comment: ""),
-                    message: String.localizedStringWithFormat(NSLocalizedString("The SimpleX name %@ is registered, but not added to profile. Please add it to your address or channel profile, if you are the owner.", comment: ""), domain.fullDomainName)
+                    message: String.localizedStringWithFormat(NSLocalizedString("The public name %@ is registered, but not added to a profile. Please add it to your address or channel profile if you are the owner.", comment: ""), domain.fullDomainName)
                 )
             }
         case .errorAgent(.NO_NAME_SERVERS):
             showAlert(
-                NSLocalizedString("SimpleX name error", comment: ""),
-                message: NSLocalizedString("None of your servers are set to resolve SimpleX names. Configure servers, or use a connection link.", comment: "")
+                NSLocalizedString("Public name error", comment: ""),
+                message: NSLocalizedString("None of your servers are set to resolve public names. Configure servers, or use a connection link.", comment: "")
             )
         case .errorAgent(.SMP(_, .AUTH)):
             showAlert(
@@ -1258,16 +1258,16 @@ private func apiConnectResponseAlert<R>(_ r: APIResult<R>) async {
             case .NOT_FOUND:
                 showAlert(
                     NSLocalizedString("Name not found", comment: ""),
-                    message: NSLocalizedString("This SimpleX name is not registered. Please check the name.", comment: "")
+                    message: NSLocalizedString("This public name is not registered. Please check the name.", comment: "")
                 )
             case .NO_RESOLVER:
                 showAlert(
-                    NSLocalizedString("SimpleX name error", comment: ""),
+                    NSLocalizedString("Public name error", comment: ""),
                     message: String.localizedStringWithFormat(NSLocalizedString("Server %@ does not support name resolution. Configure servers, or use a connection link.", comment: ""), serverAddress)
                 )
             case let .RESOLVER(resolverErr):
                 showAlert(
-                    NSLocalizedString("SimpleX name error", comment: ""),
+                    NSLocalizedString("Public name error", comment: ""),
                     message: String.localizedStringWithFormat(NSLocalizedString("Resolver error: %@", comment: ""), resolverErr)
                 )
             }
@@ -1488,8 +1488,8 @@ func apiSetProfileAddress(on: Bool) async throws -> User? {
 func showSetSimplexNameError<R>(_ r: APIResult<R>, isChannel: Bool) async {
     if case let .error(.simplexDomainNotReady(domain, .noValidLink)) = r.unexpected {
         let format = isChannel
-            ? NSLocalizedString("The SimpleX name #%@ is registered without channel link. Add channel link to the name via the registration page.", comment: "alert message")
-            : NSLocalizedString("The SimpleX name @%@ is registered without SimpleX address. Add your SimpleX address to the name via the registration page.", comment: "alert message")
+            ? NSLocalizedString("The public name #%@ is registered without a channel link. Add a channel link to the name via the registration page.", comment: "alert message")
+            : NSLocalizedString("The public name @%@ is registered without a contact address. Add your XauXat address to the name via the registration page.", comment: "alert message")
         await MainActor.run {
             showAlert(NSLocalizedString("Error saving name", comment: "alert title"), message: String.localizedStringWithFormat(format, domain.fullDomainName))
         }

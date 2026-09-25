@@ -19,20 +19,8 @@ struct ChatHelp: View {
 
     func chatHelp() -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Thank you for installing SimpleX Chat!")
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text("To ask any questions and to receive updates:")
-                Button("connect to SimpleX Chat developers.") {
-                    dismissSettingsSheet()
-                    DispatchQueue.main.async {
-                        // simplexTeamURL targets this same app; route to the in-app connect flow
-                        // (UIApplication.shared.open is dropped for self-owned URLs in the foreground)
-                        ChatModel.shared.appOpenUrl = simplexTeamURL
-                    }
-                }
-                .padding(.top, 2)
-            }
+            Text("Welcome to XauXat.")
+            Text("Create private connections, exchange messages and keep your local data under your control.")
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("To make a new connection")
