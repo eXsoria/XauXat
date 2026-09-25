@@ -9,12 +9,38 @@
 import SwiftUI
 import SimpleXChat
 
+enum XauXatPhotoSendMode: String, CaseIterable, Identifiable {
+    case normal
+    case oneTime
+    case pressToView
+
+    var id: String { rawValue }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .normal: "Normal"
+        case .oneTime: "One-Time View"
+        case .pressToView: "Press-to-View"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .normal: "photo"
+        case .oneTime: "1.circle"
+        case .pressToView: "hand.tap"
+        }
+    }
+}
+
 struct ComposeImageView: View {
     @EnvironmentObject var theme: AppTheme
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     let images: [String]
     let showsOneTimePhotoControls: Bool
-    @Binding var oneTimeView: Bool
+    @Binding var sendMode: XauXatPhotoSendMode
     @Binding var allowSave: Bool
+    let requestPlus: () -> Void
     let cancelImage: (() -> Void)
     let cancelEnabled: Bool
 
@@ -52,15 +78,29 @@ struct ComposeImageView: View {
 
             if showsOneTimePhotoControls {
                 VStack(spacing: 8) {
-                    Toggle(isOn: $oneTimeView) {
-                        Label("One-Time View", systemImage: oneTimeView ? "eye" : "photo")
+                    HStack(spacing: 12) {
+                        Text("Photo mode")
                             .font(.subheadline.weight(.medium))
-                    }
-                    .onChange(of: oneTimeView) { enabled in
-                        if !enabled { allowSave = false }
+                        Spacer(minLength: 8)
+                        Menu {
+                            ForEach(XauXatPhotoSendMode.allCases) { mode in
+                                Button {
+                                    select(mode)
+                                } label: {
+                                    if mode == .pressToView && !plusEntitlements.isAuthorized(for: .pressToPreview) {
+                                        Label("Press-to-View · Plus", systemImage: "lock.fill")
+                                    } else {
+                                        Label(mode.title, systemImage: mode == sendMode ? "checkmark" : mode.icon)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label(sendMode.title, systemImage: sendMode.icon)
+                                .font(.subheadline.weight(.semibold))
+                        }
                     }
 
-                    if oneTimeView {
+                    if sendMode == .oneTime {
                         Toggle("Allow Save", isOn: $allowSave)
                             .font(.subheadline)
                     }
@@ -73,6 +113,17 @@ struct ComposeImageView: View {
         .background(theme.appColors.sentMessage)
         .frame(minHeight: 54)
         .frame(maxWidth: .infinity)
+    }
+
+    private func select(_ mode: XauXatPhotoSendMode) {
+        if mode == .pressToView && !plusEntitlements.isAuthorized(for: .pressToPreview) {
+            requestPlus()
+            return
+        }
+        sendMode = mode
+        if mode != .oneTime {
+            allowSave = false
+        }
     }
 }
 

@@ -81,6 +81,22 @@ struct FullScreenMediaView: View {
                 .padding(.trailing, 18)
             }
         }
+        .overlay(alignment: .topLeading) {
+            if restrictToCurrentItem {
+                Button {
+                    showView = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .padding(.top, 8)
+                .padding(.leading, 8)
+                .accessibilityLabel("Close one-time photo")
+            }
+        }
         .overlay {
             if restrictToCurrentItem && (screenCaptured || scenePhase != .active) {
                 ZStack {
@@ -180,7 +196,13 @@ struct FullScreenMediaView: View {
                         .scaledToFit()
             }
         }
-        .onTapGesture { showView = false } // this is used in full screen view, onTapGesture works
+        .onTapGesture {
+            // A tap is used to present one-time media. Ignoring taps while the
+            // protected view is open prevents that same gesture from closing it.
+            if !restrictToCurrentItem {
+                showView = false
+            }
+        }
     }
 
     private func videoView( _ player: AVPlayer, _ url: URL) -> some View {

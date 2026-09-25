@@ -41,8 +41,43 @@ private func xauxatRemoveConsumedPhotoFile(_ chatItem: ChatItem) {
 
 // Spec: spec/client/chat-view.md#CIImageView
 struct CIImageView: View {
+    private enum OneTimePlaceholderState {
+        case sent
+        case sentPressToView
+        case unopened
+        case pressToView
+        case consumed
+
+        var icon: String {
+            switch self {
+            case .sent, .unopened: "1.circle"
+            case .sentPressToView, .pressToView: "hand.tap"
+            case .consumed: "eye.slash"
+            }
+        }
+
+        var label: LocalizedStringKey {
+            switch self {
+            case .sent: "One-time photo"
+            case .sentPressToView: "Press-to-view photo"
+            case .unopened: "Tap to view"
+            case .pressToView: "Press and hold to view"
+            case .consumed: "Photo expired"
+            }
+        }
+
+        var accessibilityLabel: LocalizedStringKey {
+            switch self {
+            case .sent: "One-time photo sent"
+            case .sentPressToView: "Press-to-view photo sent"
+            case .unopened: "One-time photo. Tap to view"
+            case .pressToView: "One-time photo. Press and hold to view"
+            case .consumed: "One-time photo expired"
+            }
+        }
+    }
+
     @EnvironmentObject var m: ChatModel
-    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     let chatItem: ChatItem
     let senderProfile: LocalProfile?
     var scrollToItem: ((ChatItem.ID) -> Void)? = nil
@@ -60,17 +95,25 @@ struct CIImageView: View {
         return XauXatCodeLockedEnvelope.isFileWireText(text)
     }
 
+    private var pressToViewPhoto: Bool {
+        guard case let .xauXatImage(_, _, privacy) = chatItem.content.msgContent else { return false }
+        return privacy.pressToView
+    }
+
     var body: some View {
         let file = chatItem.file
+        let sentOneTime = chatItem.chatDir.sent && xauxatIsOneTimePhoto(chatItem)
         let receivedOneTime = !chatItem.chatDir.sent && xauxatIsOneTimePhoto(chatItem)
         let consumed = !oneTimeRevealing && (oneTimeConsumed || xauxatOneTimePhotoConsumed(chatItem))
         VStack(alignment: .center, spacing: 6) {
-            if codeLockedPhoto {
+            if sentOneTime {
+                oneTimePlaceholder(state: pressToViewPhoto ? .sentPressToView : .sent)
+            } else if codeLockedPhoto {
                 codeLockedPhotoView(file: file, receivedOneTime: receivedOneTime, consumed: consumed)
             } else if receivedOneTime, consumed {
-                oneTimePlaceholder(image: preview, consumed: true)
+                oneTimePlaceholder(state: .consumed)
             } else if receivedOneTime, let uiImage = getLoadedXauXatImage(chatItem) {
-                if plusEntitlements.isAuthorized(for: .pressToPreview) {
+                if pressToViewPhoto {
                     XauXatPressToPreview(
                         onReveal: {
                             oneTimeRevealing = true
@@ -80,10 +123,10 @@ struct CIImageView: View {
                             if oneTimeRevealing { consumeOneTimePhoto() }
                         },
                         protectedContent: { imageView(uiImage) },
-                        placeholder: { oneTimePlaceholder(image: uiImage, consumed: false, pressToPreview: true) }
+                        placeholder: { oneTimePlaceholder(state: .pressToView) }
                     )
                 } else {
-                    oneTimePlaceholder(image: uiImage, consumed: false)
+                    oneTimePlaceholder(state: .unopened)
                         .fullScreenCover(isPresented: $showFullScreenImage, onDismiss: consumeOneTimePhoto) {
                             FullScreenMediaView(
                                 chatItem: chatItem,
@@ -100,24 +143,9 @@ struct CIImageView: View {
                             oneTimeRevealing = true
                             showFullScreenImage = true
                         }
-                    }
+                }
             } else if let uiImage = getLoadedXauXatImage(chatItem) {
                 Group { if smallView { smallViewImageView(uiImage) } else { imageView(uiImage) } }
-                .overlay(alignment: .bottom) {
-                    if chatItem.chatDir.sent && xauxatIsOneTimePhoto(chatItem) && !smallView {
-                        HStack(spacing: 6) {
-                            Image(systemName: "eye")
-                            Text("One-Time View")
-                                .font(.caption.weight(.semibold))
-                            Spacer(minLength: 0)
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 10)
-                        .frame(height: 32)
-                        .background(Color.black.opacity(0.72))
-                        .accessibilityElement(children: .combine)
-                    }
-                }
                 .fullScreenCover(isPresented: $showFullScreenImage) {
                     FullScreenMediaView(chatItem: chatItem, scrollToItem: scrollToItem, image: uiImage, showView: $showFullScreenImage)
                 }
@@ -133,7 +161,7 @@ struct CIImageView: View {
             } else if let preview {
                 Group {
                     if receivedOneTime {
-                        oneTimePlaceholder(image: preview, consumed: false)
+                        oneTimePlaceholder(state: .unopened)
                     } else if smallView {
                         smallViewImageView(preview)
                     } else {
@@ -149,7 +177,11 @@ struct CIImageView: View {
             }
         }
         .onDisappear {
-            showFullScreenImage = false
+            // Presenting a one-time photo can make the chat cell temporarily
+            // disappear. Do not let that lifecycle event dismiss the cover.
+            if !oneTimeRevealing {
+                showFullScreenImage = false
+            }
         }
     }
 
@@ -192,29 +224,32 @@ struct CIImageView: View {
         oneTimeRevealing = false
     }
 
-    private func oneTimePlaceholder(image: UIImage?, consumed: Bool, pressToPreview: Bool = false) -> some View {
-        let size = image?.size ?? CGSize(width: 4, height: 3)
-        let width = smallView ? maxWidth : (size.width <= size.height ? maxWidth * 0.75 : maxWidth)
-        let height = smallView ? maxWidth : width * heightRatio(size)
+    private func oneTimePlaceholder(state: OneTimePlaceholderState) -> some View {
+        let width = smallView ? maxWidth : min(maxWidth, 228)
+        let height = smallView ? maxWidth : 62
         return ZStack {
             Color.black.opacity(0.88)
-            VStack(spacing: 7) {
-                Image(systemName: consumed ? "eye.slash" : pressToPreview ? "hand.tap" : "eye")
-                    .font(.system(size: smallView ? 18 : 25, weight: .medium))
-                if !smallView {
-                    Text(consumed ? "Photo expired" : pressToPreview ? "Press and hold to view" : "Tap to view once")
-                        .font(.subheadline.weight(.medium))
+            if smallView {
+                Image(systemName: state.icon)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(.white)
+            } else {
+                HStack(spacing: 12) {
+                    Image(systemName: state.icon)
+                        .font(.system(size: 24, weight: .regular))
+                    Text(state.label)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
                 }
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
             }
-            .foregroundColor(.white)
         }
         .frame(width: width, height: height)
-        .clipped()
-        .accessibilityLabel(
-            consumed
-            ? "One-time photo expired"
-            : pressToPreview ? "One-time photo. Use the reveal action to view for ten seconds" : "One-time photo. Tap to view"
-        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(state.accessibilityLabel))
+        .privacySensitive()
     }
 
     private func codeLockedPlaceholder(label: LocalizedStringKey, icon: String) -> some View {
