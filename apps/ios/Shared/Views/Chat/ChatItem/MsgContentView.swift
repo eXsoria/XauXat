@@ -194,7 +194,7 @@ private struct XauXatCodeLockedTextView: View {
             switch session.state {
             case let .unlocked(payload):
                 if let clearText = payload.text {
-                    XauXatPressToPreview(
+                    XauXatTapToPreview(
                         onReveal: {},
                         onHide: {},
                         protectedContent: {
@@ -208,7 +208,7 @@ private struct XauXatCodeLockedTextView: View {
                                 prefix: prefix
                             )
                         },
-                        placeholder: { protectedPlaceholder("Press and hold to view") }
+                        placeholder: { protectedPlaceholder("Tap to view") }
                     )
                 } else {
                     protectedPlaceholder("Protected message unavailable")

@@ -61,7 +61,7 @@ struct CIImageView: View {
             case .sent: "One-time photo"
             case .sentPressToView: "Press-to-view photo"
             case .unopened: "Tap to view"
-            case .pressToView: "Press and hold to view"
+            case .pressToView: "Tap to open"
             case .consumed: "Photo expired"
             }
         }
@@ -71,7 +71,7 @@ struct CIImageView: View {
             case .sent: "One-time photo sent"
             case .sentPressToView: "Press-to-view photo sent"
             case .unopened: "One-time photo. Tap to view"
-            case .pressToView: "One-time photo. Press and hold to view"
+            case .pressToView: "Press-to-view photo. Tap to open"
             case .consumed: "One-time photo expired"
             }
         }
@@ -114,17 +114,23 @@ struct CIImageView: View {
                 oneTimePlaceholder(state: .consumed)
             } else if receivedOneTime, let uiImage = getLoadedXauXatImage(chatItem) {
                 if pressToViewPhoto {
-                    XauXatPressToPreview(
-                        onReveal: {
+                    oneTimePlaceholder(state: .pressToView)
+                        .fullScreenCover(isPresented: $showFullScreenImage, onDismiss: {
+                            oneTimeRevealing = false
+                        }) {
+                            XauXatHoldToViewImage(
+                                image: uiImage,
+                                caption: xauxatImageCaption,
+                                showView: $showFullScreenImage,
+                                onReveal: { xauxatMarkOneTimePhotoConsumed(chatItem) },
+                                onRelease: consumeOneTimePhoto
+                            )
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
                             oneTimeRevealing = true
-                            xauxatMarkOneTimePhotoConsumed(chatItem)
-                        },
-                        onHide: {
-                            if oneTimeRevealing { consumeOneTimePhoto() }
-                        },
-                        protectedContent: { imageView(uiImage) },
-                        placeholder: { oneTimePlaceholder(state: .pressToView) }
-                    )
+                            showFullScreenImage = true
+                        }
                 } else {
                     oneTimePlaceholder(state: .unopened)
                         .fullScreenCover(isPresented: $showFullScreenImage, onDismiss: consumeOneTimePhoto) {
@@ -183,6 +189,14 @@ struct CIImageView: View {
                 showFullScreenImage = false
             }
         }
+    }
+
+    private var xauxatImageCaption: String? {
+        guard case let .xauXatImage(text, _, _) = chatItem.content.msgContent,
+              !text.isEmpty,
+              !XauXatCodeLockedEnvelope.isFileWireText(text)
+        else { return nil }
+        return text
     }
 
     @ViewBuilder private func codeLockedPhotoView(file: CIFile?, receivedOneTime: Bool, consumed: Bool) -> some View {
@@ -398,6 +412,7 @@ private struct XauXatCodeLockedImageView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var session: XauXatCodeLockedSession
     @State private var showUnlock = false
+    @State private var showPreview = false
     @State private var revealed = false
 
     let maxWidth: CGFloat
@@ -428,26 +443,21 @@ private struct XauXatCodeLockedImageView: View {
             case let .unlocked(payload):
                 if payload.kind == .image, let image = decodedImage(payload.body) {
                     VStack(alignment: .leading, spacing: 8) {
-                        XauXatPressToPreview(
-                            onReveal: {
-                                revealed = true
-                                onReveal()
-                            },
-                            onHide: finishReveal,
-                            protectedContent: {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    protectedImage(image)
-                                    if let caption = payload.caption, !caption.isEmpty {
-                                        Text(caption)
-                                            .font(.body)
-                                            .foregroundColor(.primary)
-                                            .padding(.horizontal, 10)
-                                            .padding(.bottom, 4)
-                                    }
-                                }
-                            },
-                            placeholder: { protectedPlaceholder("Press and hold to view", icon: "hand.tap") }
-                        )
+                        protectedPlaceholder("Tap to open photo", icon: "arrow.up.left.and.arrow.down.right")
+                            .contentShape(Rectangle())
+                            .onTapGesture { showPreview = true }
+                            .fullScreenCover(isPresented: $showPreview) {
+                                XauXatHoldToViewImage(
+                                    image: image,
+                                    caption: payload.caption,
+                                    showView: $showPreview,
+                                    onReveal: {
+                                        revealed = true
+                                        onReveal()
+                                    },
+                                    onRelease: finishReveal
+                                )
+                            }
                         if allowExport {
                             HStack(spacing: 20) {
                                 Button {
@@ -498,12 +508,18 @@ private struct XauXatCodeLockedImageView: View {
         .onChange(of: scenePhase) { phase in
             if phase != .active {
                 finishReveal()
+                showPreview = false
                 session.lock()
             }
         }
         .onDisappear {
-            finishReveal()
-            session.lock()
+            // A full-screen cover can temporarily remove the chat cell from
+            // the hierarchy. Keep the unlocked session alive while its
+            // protected preview is presented.
+            if !showPreview {
+                finishReveal()
+                session.lock()
+            }
         }
     }
 
@@ -520,21 +536,6 @@ private struct XauXatCodeLockedImageView: View {
         }
         .frame(width: maxWidth, height: maxWidth * 0.75)
         .clipped()
-    }
-
-    @ViewBuilder private func protectedImage(_ image: UIImage) -> some View {
-        let width = image.size.width <= image.size.height ? maxWidth * 0.75 : maxWidth
-        if image.imageData == nil {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: width, height: width * heightRatio(image.size))
-                .clipped()
-        } else {
-            SwiftyGif(image: image, contentMode: .scaleAspectFill)
-                .frame(width: width, height: width * heightRatio(image.size))
-                .clipped()
-        }
     }
 
     private func decodedImage(_ data: Data) -> UIImage? {
