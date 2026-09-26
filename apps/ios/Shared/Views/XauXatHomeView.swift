@@ -140,18 +140,18 @@ struct XauXatWelcomeView: View {
     }
 
     private var onboardingHeader: some View {
-        HStack {
-            Group {
+        ZStack {
+            HStack {
                 if step > 0 && !isCompleting {
                     Button {
                         focusedField = nil
                         step -= 1
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 5) {
                             Image(systemName: "arrow.left")
-                                .font(.system(size: 15, weight: .medium))
+                                .font(.system(size: 14, weight: .medium))
                             Text("Back")
-                                .font(.custom("Courier", size: 13))
+                                .font(.system(size: 12, weight: .regular, design: .default))
                         }
                         .foregroundStyle(palette.muted)
                         .frame(minWidth: 82, minHeight: 44, alignment: .leading)
@@ -161,148 +161,217 @@ struct XauXatWelcomeView: View {
                 } else {
                     Color.clear.frame(width: 82, height: 44)
                 }
+
+                Spacer()
             }
 
-            Spacer(minLength: 0)
-
-            VStack(spacing: 0) {
-                Text(verbatim: "xauxat")
-                    .font(.custom("Courier", size: 17).weight(.bold))
-                    .tracking(2)
-                Text(verbatim: "X -- X")
-                    .font(.custom("Courier", size: 15).weight(.bold))
-                    .tracking(1.8)
+            HStack(spacing: 6) {
+                ForEach(0..<3, id: \.self) { index in
+                    Capsule(style: .continuous)
+                        .fill(index == step ? palette.ink : palette.line)
+                        .frame(width: index == step ? 18 : 5, height: 5)
+                }
             }
-            .foregroundStyle(palette.ink)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("XauXat")
-
-            Spacer(minLength: 0)
-
-            Text("\(step + 1) / 3")
-                .font(.custom("Courier", size: 12))
-                .foregroundStyle(palette.muted)
-                .frame(width: 82, alignment: .trailing)
-                .frame(minHeight: 44)
-                .accessibilityLabel("Step \(step + 1) of 3")
+            .accessibilityLabel("Step \(step + 1) of 3")
         }
-        .frame(height: 76)
+        .frame(height: 58)
         .padding(.horizontal, 22)
     }
 
     private func welcomeStep(_ geometry: GeometryProxy) -> some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 3) {
+        let compact = geometry.size.height < 700
+
+        return VStack(spacing: 0) {
+            Spacer()
+                .frame(height: compact ? 42 : 72)
+
+            VStack(spacing: 14) {
+                Image("xauxat-mask")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(palette.ink)
+                    .frame(width: compact ? 96 : 112,
+                           height: compact ? 76 : 88)
+                    .accessibilityHidden(true)
+
                 Text(verbatim: "xauxat")
-                    .font(.custom("Courier", size: 33).weight(.bold))
-                    .tracking(3.3)
-                Text(verbatim: "X -- X")
-                    .font(.custom("Courier", size: 22).weight(.bold))
+                    .font(.custom("Courier", size: compact ? 24 : 27).weight(.bold))
                     .tracking(2.7)
+                    .foregroundStyle(palette.ink)
+                    .accessibilityLabel("XauXat")
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            HStack(spacing: 0) {
+                Text("This is ")
+                    .font(.system(size: compact ? 21 : 23, weight: .medium))
+
+                Text("your")
+                    .font(.system(size: compact ? 21 : 23, weight: .bold))
+                    .italic()
+
+                Text(" space.")
+                    .font(.system(size: compact ? 21 : 23, weight: .medium))
             }
             .foregroundStyle(palette.ink)
-            .padding(.top, geometry.size.height < 700 ? 7 : max(28, geometry.size.height * 0.1))
-            .accessibilityHidden(true)
-
-            (Text("This is ") + Text("your").italic() + Text(" space."))
-                .font(.custom("Courier", size: geometry.size.height < 700 ? 18 : 20))
-                .tracking(2.4)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(palette.ink)
-                .padding(.top, geometry.size.height < 700 ? 43 : 78)
+            .padding(.top, compact ? 38 : 50)
 
             Text("No phone number.\nNo email.\nNo global identity.")
-                .font(.custom("Courier", size: geometry.size.height < 700 ? 11 : 12))
-                .tracking(1.6)
-                .lineSpacing(geometry.size.height < 700 ? 8 : 10)
+                .font(.system(size: compact ? 13 : 14, weight: .regular, design: .default))
+                .lineSpacing(compact ? 7 : 9)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(palette.muted)
-                .padding(.top, geometry.size.height < 700 ? 22 : 35)
+                .padding(.top, compact ? 20 : 26)
 
-            Spacer(minLength: 20)
+            Spacer(minLength: 26)
 
-            Text("PRIVATE MESSAGING\nBY DESIGN")
-                .font(.custom("Courier", size: 8).weight(.bold))
-                .tracking(2.7)
-                .lineSpacing(4)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(palette.muted)
-                .padding(.bottom, geometry.size.height < 700 ? 31 : 46)
+            VStack(spacing: compact ? 14 : 16) {
+                Text("PRIVATE BY DEFAULT")
+                    .font(.system(size: 10, weight: .semibold, design: .default))
+                    .tracking(1.2)
+                    .foregroundStyle(palette.muted)
 
-            primaryButton("CONTINUE PRIVATELY", enabled: true) {
-                step = 1
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    focusedField = .displayName
+                primaryButton("CONTINUE PRIVATELY", enabled: true) {
+                    step = 1
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        focusedField = .displayName
+                    }
                 }
             }
         }
         .padding(.horizontal, 22)
-        .padding(.bottom, 22)
+        .padding(.bottom, 71)
     }
 
     private func nameStep(_ geometry: GeometryProxy) -> some View {
-        VStack(spacing: 0) {
-            (Text("What should\npeople call ") + Text("you").italic() + Text("?"))
-                .font(.custom("Courier", size: geometry.size.height < 700 ? 22 : 25))
-                .tracking(3.2)
-                .lineSpacing(5)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(palette.ink)
-                .padding(.top, geometry.size.height < 700 ? 24 : min(120, geometry.size.height * 0.18))
+        let compact = geometry.size.height < 700
+
+        return VStack(spacing: 0) {
+            Spacer()
+                .frame(height: compact ? 48 : 78)
+
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    Text("What should")
+                        .font(.system(size: compact ? 24 : 27, weight: .medium))
+
+                    Text("")
+                }
+
+                HStack(spacing: 0) {
+                    Text("people call")
+                        .font(.system(size: compact ? 24 : 27, weight: .medium))
+
+                    Text("you")
+                        .font(.system(size: compact ? 24 : 27, weight: .bold))
+                        .italic()
+                        .padding(.leading, 8)
+
+                    Text("?")
+                        .font(.system(size: compact ? 24 : 27, weight: .medium))
+                }
+            }
+            .foregroundStyle(palette.ink)
+            .multilineTextAlignment(.center)
 
             TextField("Display name", text: $displayName)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .focused($focusedField, equals: .displayName)
-                .font(.custom("Courier", size: 14))
+                .font(.system(size: 16, weight: .regular))
                 .foregroundStyle(palette.ink)
-                .tint(palette.ivory)
-                .padding(.horizontal, 20)
-                .frame(height: 54)
+                .tint(palette.ink)
+                .padding(.horizontal, 18)
+                .frame(height: compact ? 54 : 58)
+                .background(
+                    palette.surface.opacity(0.55),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                )
                 .overlay {
-                    RoundedRectangle(cornerRadius: 21, style: .continuous)
-                        .stroke(validName || displayName.isEmpty ? palette.muted : palette.danger, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(
+                            validName || displayName.isEmpty
+                                ? palette.line
+                                : palette.danger,
+                            lineWidth: 1
+                        )
                 }
-                .padding(.top, geometry.size.height < 700 ? 30 : 51)
+                .padding(.top, compact ? 30 : 38)
                 .submitLabel(.continue)
-                .onSubmit { if validName { advanceToPIN() } }
+                .onSubmit {
+                    if validName {
+                        advanceToPIN()
+                    }
+                }
                 .accessibilityLabel("Display name")
 
-            Text(validName || displayName.isEmpty ? "This doesn’t identify you.\nChange it whenever you want." : "Use a name without unsupported characters.")
-                .font(.custom("Courier", size: geometry.size.height < 700 ? 10.5 : 12))
-                .tracking(1.1)
-                .lineSpacing(5)
+            Text(
+                validName || displayName.isEmpty
+                    ? "This doesn’t identify you.\nChange it whenever you want."
+                    : "Use a name without unsupported characters."
+            )
+                .font(.system(size: compact ? 12 : 13, weight: .regular))
+                .lineSpacing(4)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(validName || displayName.isEmpty ? palette.muted : palette.danger)
-                .padding(.top, geometry.size.height < 700 ? 24 : 44)
+                .foregroundStyle(
+                    validName || displayName.isEmpty
+                        ? palette.muted
+                        : palette.danger
+                )
+                .padding(.top, compact ? 20 : 24)
 
-            Spacer(minLength: 20)
+            Spacer(minLength: 24)
 
-            primaryButton("Continue", enabled: validName, action: advanceToPIN)
+            primaryButton(
+                "Continue",
+                enabled: validName,
+                action: advanceToPIN
+            )
         }
         .padding(.horizontal, 22)
-        .padding(.bottom, 21)
+        .padding(.bottom, 71)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                EmptyView()
+            }
+        }
     }
 
     private func pinStep(_ geometry: GeometryProxy) -> some View {
         let compact = geometry.size.height < 700
 
         return VStack(spacing: 0) {
-            Text("Create your\nPIN")
-                .font(.custom("Courier", size: compact ? 22 : 26))
-                .tracking(3.2)
-                .lineSpacing(3)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(palette.ink)
-                .padding(.top, compact ? 12 : min(80, geometry.size.height * 0.1))
+            HStack(spacing: 0) {
+                Text("Create ")
+                    .font(.system(size: compact ? 24 : 27, weight: .medium))
 
-            Text("This will protect your XauXat\non this device.")
-                .font(.custom("Courier", size: compact ? 10.5 : 12))
-                .tracking(1.1)
-                .lineSpacing(5)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(palette.muted)
-                .padding(.top, compact ? 24 : 44)
+                Text("your")
+                    .font(.system(size: compact ? 24 : 27, weight: .bold))
+                    .italic()
+
+                Text(" PIN")
+                    .font(.system(size: compact ? 24 : 27, weight: .medium))
+            }
+            .foregroundStyle(palette.ink)
+            .padding(.top, compact ? 48 : 78)
+
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    Text("This will protect your")
+                        .font(.system(size: compact ? 13 : 14, weight: .regular))
+
+                    Text(verbatim: "xauxat")
+                        .font(.custom("Courier", size: compact ? 13 : 14).weight(.bold))
+                }
+
+                Text("on this device.")
+                    .font(.system(size: compact ? 13 : 14, weight: .regular))
+            }
+            .multilineTextAlignment(.center)
+            .foregroundStyle(palette.muted)
+            .padding(.top, compact ? 24 : 44)
 
             ZStack {
                 HStack(spacing: compact ? 16 : 20) {
@@ -337,18 +406,24 @@ struct XauXatWelcomeView: View {
 
             VStack(spacing: 0) {
                 Image(systemName: "lock")
-                    .font(.system(size: 24, weight: .light))
-                    .foregroundStyle(palette.ivory)
+                    .font(.system(size: 22, weight: .light))
+                    .foregroundStyle(palette.ink)
 
-                Text("Your PIN. Your responsibility.\nIt never leaves your device.\nWe can’t recover it.")
-                    .font(.custom("Courier", size: compact ? 10.5 : 12))
-                    .tracking(1.1)
-                    .lineSpacing(5)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(palette.muted)
-                    .padding(.top, compact ? 7 : 13)
+                VStack(spacing: 5) {
+                    Text("Your PIN. Your responsibility.")
+                        .font(.system(size: compact ? 12 : 13, weight: .semibold))
+
+                    Text("It never leaves your device.")
+                        .font(.system(size: compact ? 12 : 13, weight: .regular))
+
+                    Text("We can’t recover it.")
+                        .font(.system(size: compact ? 12 : 13, weight: .regular))
+                }
+                .multilineTextAlignment(.center)
+                .foregroundStyle(palette.muted)
+                .padding(.top, compact ? 10 : 14)
             }
-            .padding(.top, compact ? 31 : 77)
+            .padding(.top, compact ? 31 : 48)
 
             Spacer(minLength: 18)
 
@@ -358,18 +433,10 @@ struct XauXatWelcomeView: View {
                 action: finishOnboarding
             )
 
-            HStack(spacing: 9) {
-                ForEach(0..<3, id: \.self) { index in
-                    Circle()
-                        .fill(index == step ? palette.ivory : palette.line)
-                        .frame(width: 8, height: 8)
-                }
-            }
-            .padding(.top, 20)
-            .accessibilityHidden(true)
+
         }
         .padding(.horizontal, 22)
-        .padding(.bottom, 21)
+        .padding(.bottom, 71)
         .contentShape(Rectangle())
         .onTapGesture { focusedField = .pin }
     }
@@ -377,8 +444,8 @@ struct XauXatWelcomeView: View {
     private func primaryButton(_ label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.custom("Courier", size: label == "CONTINUE PRIVATELY" ? 13 : 16).weight(.bold))
-                .tracking(0.6)
+                .font(.system(size: label == "CONTINUE PRIVATELY" ? 13 : 16, weight: .semibold, design: .default))
+                .tracking(0.2)
                 .foregroundStyle(enabled ? palette.ivoryInk : palette.faint)
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .background(enabled ? palette.ivory : palette.surface)
@@ -584,33 +651,23 @@ private struct XauXatHeader: View {
     let action: (() -> Void)?
 
     var body: some View {
-        ZStack {
-            VStack(spacing: -2) {
-                Text(verbatim: "xauxat")
-                    .font(.custom("Courier", size: 18).weight(.bold))
-                Text(verbatim: "X -- X")
-                    .font(.custom("Courier", size: 9).weight(.bold))
-                    .tracking(1.1)
-            }
-            .foregroundStyle(palette.ink)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("XauXat")
+        HStack {
+            Spacer()
 
-            HStack {
-                Spacer()
-                if let action {
-                    Button(action: action) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(palette.ivoryInk)
-                            .frame(width: 38, height: 38)
-                            .background(palette.ivory, in: Circle())
-                    }
-                    .accessibilityLabel("New conversation")
+            if let action {
+                Button(action: action) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(palette.ivoryInk)
+                        .frame(width: 32, height: 32)
+                        .background(palette.ivory, in: Circle())
                 }
+                .buttonStyle(.plain)
+                .offset(y: 7)
+                .accessibilityLabel("New conversation")
             }
         }
-        .frame(height: 60)
+        .frame(height: 38)
         .padding(.horizontal, 22)
         .background(palette.background)
     }
@@ -621,38 +678,102 @@ private struct XauXatChatsView: View {
     let palette: XauXatPalette
     @Binding var parentSheet: SomeSheet<AnyView>?
     @Binding var showNewChatSheet: Bool
+    @State private var searchText = ""
 
     private var chats: [Chat] {
-        chatModel.chats.filter {
+        let availableChats = chatModel.chats.filter {
             !$0.chatInfo.chatDeleted && !$0.chatInfo.contactCard && !xauXatIsChatHidden($0.id)
+        }
+
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !query.isEmpty else {
+            return availableChats
+        }
+
+        return availableChats.filter {
+            $0.chatInfo.chatViewName.localizedCaseInsensitiveContains(query)
         }
     }
 
     var body: some View {
-        if chats.isEmpty {
-            XauXatEmptyState(
-                palette: palette,
-                title: "No conversations yet.",
-                subtitle: "Your private space starts here.",
-                action: { showNewChatSheet = true }
-            )
-        } else {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(chats, id: \.viewId) { chat in
-                        XauXatChatDestination(
-                            chat: chat,
-                            palette: palette,
-                            parentSheet: $parentSheet,
-                            contactStyle: false
-                        )
-                    }
-                }
+        VStack(spacing: 0) {
+            Text("Chats")
+                .font(.system(size: 32, weight: .bold))
+                .foregroundStyle(palette.ink)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 22)
-                .padding(.top, 8)
+                .padding(.top, 4)
+                .padding(.bottom, 18)
+
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(palette.muted)
+
+                TextField("Search conversations", text: $searchText)
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(palette.ink)
+                    .tint(palette.ink)
+                    .autocorrectionDisabled()
+
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(palette.muted)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
             }
-            .refreshable {
-                try? await reconnectAllServers()
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(
+                palette.surface,
+                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+            )
+            .padding(.horizontal, 22)
+            .padding(.bottom, 12)
+
+            if chats.isEmpty && searchText.isEmpty {
+                XauXatEmptyState(
+                    palette: palette,
+                    title: "No conversations yet.",
+                    subtitle: "Your private space starts here.",
+                    action: { showNewChatSheet = true }
+                )
+            } else if chats.isEmpty {
+                VStack(spacing: 8) {
+                    Text("No results")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(palette.ink)
+
+                    Text("No conversations match your search.")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(palette.muted)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 42)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(chats, id: \.viewId) { chat in
+                            XauXatChatDestination(
+                                chat: chat,
+                                palette: palette,
+                                parentSheet: $parentSheet,
+                                contactStyle: false
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 22)
+                }
+                .refreshable {
+                    try? await reconnectAllServers()
+                }
             }
         }
     }
@@ -685,7 +806,7 @@ private struct XauXatContactsView: View {
                     .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(palette.faint)
                 TextField("Search contacts", text: $searchText)
-                    .font(.custom("Courier", size: 15))
+                    .font(.system(size: 15, weight: .regular, design: .default))
                     .foregroundStyle(palette.ink)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -774,19 +895,19 @@ private struct XauXatChatRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 13) {
-            ChatInfoImage(chat: chat, size: 48, color: palette.raised)
+        HStack(spacing: 14) {
+            ChatInfoImage(chat: chat, size: 46, color: palette.raised)
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(chat.chatInfo.chatViewName)
-                        .font(.custom("Courier", size: 16).weight(.bold))
+                        .font(.system(size: 16, weight: .semibold, design: .default))
                         .foregroundStyle(palette.ink)
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     if !contactStyle {
                         formatTimestampText(timestamp)
-                            .font(.custom("Courier", size: 11))
+                            .font(.system(size: 12, weight: .regular, design: .default))
                             .foregroundStyle(palette.muted)
                     }
                 }
@@ -798,7 +919,7 @@ private struct XauXatChatRow: View {
                             .foregroundStyle(palette.muted)
                     }
                     Text(detail)
-                        .font(.custom("Courier", size: 13))
+                        .font(.system(size: 14, weight: .regular, design: .default))
                         .foregroundStyle(palette.muted)
                         .lineLimit(1)
                         .privacySensitive(!contactStyle)
@@ -809,7 +930,7 @@ private struct XauXatChatRow: View {
                             .foregroundStyle(palette.ivory)
                     } else if chat.chatStats.unreadCount > 0 {
                         Text(verbatim: "\(chat.chatStats.unreadCount)")
-                            .font(.custom("Courier", size: 11).weight(.bold))
+                            .font(.system(size: 11, weight: .bold, design: .default))
                             .foregroundStyle(palette.ivoryInk)
                             .frame(minWidth: 21, minHeight: 21)
                             .background(palette.ivory, in: Circle())
@@ -817,13 +938,13 @@ private struct XauXatChatRow: View {
                 }
             }
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .contentShape(Rectangle())
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(palette.line)
-                .frame(height: 1)
-                .padding(.leading, 61)
+                .frame(height: 0.5)
+                .padding(.leading, 60)
         }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens this conversation")
@@ -839,16 +960,16 @@ private struct XauXatEmptyState: View {
     var body: some View {
         VStack(spacing: 9) {
             Text(title)
-                .font(.custom("Courier", size: 18).weight(.bold))
+                .font(.system(size: 18, weight: .bold, design: .default))
                 .foregroundStyle(palette.ink)
             Text(subtitle)
-                .font(.custom("Courier", size: 14))
+                .font(.system(size: 14, weight: .regular, design: .default))
                 .foregroundStyle(palette.muted)
                 .multilineTextAlignment(.center)
             if let action {
                 Button(action: action) {
                     Text("Start a conversation")
-                        .font(.custom("Courier", size: 14).weight(.bold))
+                        .font(.system(size: 14, weight: .bold, design: .default))
                         .foregroundStyle(palette.ivoryInk)
                         .frame(maxWidth: 250, minHeight: 52)
                         .background(palette.ivory)
@@ -877,11 +998,11 @@ private struct XauXatSettingsHome: View {
                             ProfileImage(imageStr: user.image, size: 64, color: palette.raised)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(user.displayName)
-                                    .font(.custom("Courier", size: 18).weight(.bold))
+                                    .font(.system(size: 18, weight: .bold, design: .default))
                                     .foregroundStyle(palette.ink)
                                     .lineLimit(1)
                                 Text(user.shortDescr?.nonEmpty ?? "Your private identity")
-                                    .font(.custom("Courier", size: 13))
+                                    .font(.system(size: 13, weight: .regular, design: .default))
                                     .foregroundStyle(palette.muted)
                                     .lineLimit(1)
                             }
@@ -1042,12 +1163,12 @@ private struct XauXatHelpDestination: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Help with XauXat")
-                    .font(.custom("Courier", size: 26).weight(.bold))
+                    .font(.system(size: 26, weight: .bold, design: .default))
                     .foregroundStyle(palette.ink)
                     .padding(.bottom, 8)
 
                 Text("Create private connections, exchange messages and keep your local data under your control.")
-                    .font(.custom("Courier", size: 13))
+                    .font(.system(size: 13, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 30)
@@ -1086,7 +1207,7 @@ private struct XauXatHelpDestination: View {
                     .padding(.top, 28)
                 XauXatHelpCard(palette: palette) {
                     Text("For beta support, open XauXat in TestFlight and choose Send Beta Feedback.")
-                        .font(.custom("Courier", size: 13))
+                        .font(.system(size: 13, weight: .regular, design: .default))
                         .foregroundStyle(palette.ink)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(16)
@@ -1121,16 +1242,16 @@ private struct XauXatHelpStep: View {
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             Text(number)
-                .font(.custom("Courier", size: 12).weight(.bold))
+                .font(.system(size: 12, weight: .bold, design: .default))
                 .foregroundStyle(palette.muted)
                 .frame(width: 24, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(title)
-                    .font(.custom("Courier", size: 14).weight(.bold))
+                    .font(.system(size: 14, weight: .bold, design: .default))
                     .foregroundStyle(palette.ink)
                 Text(detail)
-                    .font(.custom("Courier", size: 12))
+                    .font(.system(size: 12, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1234,7 +1355,7 @@ private struct XauXatPrivacyView: View {
                 }
 
                 Text("XauXat always hides its content in the App Switcher. Your security settings stay on this device.")
-                    .font(.custom("Courier", size: 11))
+                    .font(.system(size: 11, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 5)
@@ -1272,7 +1393,7 @@ private struct XauXatHiddenChatsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if chats.isEmpty {
                     Text("No hidden conversations.")
-                        .font(.custom("Courier", size: 14))
+                        .font(.system(size: 14, weight: .regular, design: .default))
                         .foregroundStyle(palette.muted)
                         .frame(maxWidth: .infinity, minHeight: 160)
                 } else {
@@ -1286,12 +1407,12 @@ private struct XauXatHiddenChatsView: View {
                                 HStack(spacing: 13) {
                                     ChatInfoImage(chat: chat, size: 42, color: palette.raised)
                                     Text(chat.chatInfo.chatViewName)
-                                        .font(.custom("Courier", size: 14).weight(.bold))
+                                        .font(.system(size: 14, weight: .bold, design: .default))
                                         .foregroundStyle(palette.ink)
                                         .lineLimit(1)
                                     Spacer(minLength: 12)
                                     Text("Show")
-                                        .font(.custom("Courier", size: 12).weight(.bold))
+                                        .font(.system(size: 12, weight: .bold, design: .default))
                                         .foregroundStyle(palette.muted)
                                 }
                                 .padding(.horizontal, 16)
@@ -1303,7 +1424,7 @@ private struct XauXatHiddenChatsView: View {
                     }
 
                     Text("Showing a conversation returns it to the normal list without deleting messages or changing the contact.")
-                        .font(.custom("Courier", size: 11))
+                        .font(.system(size: 11, weight: .regular, design: .default))
                         .foregroundStyle(palette.muted)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 5)
@@ -1346,14 +1467,14 @@ private struct XauXatNotificationsView: View {
                 }
 
                 Text("Notification content remains end-to-end encrypted. You can control lock-screen previews in iOS Settings.")
-                    .font(.custom("Courier", size: 11))
+                    .font(.system(size: 11, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 5)
                     .padding(.top, 18)
 
                 Text(registrationStatus)
-                    .font(.custom("Courier", size: 11))
+                    .font(.system(size: 11, weight: .regular, design: .default))
                     .foregroundStyle(errorMessage == nil ? palette.muted : palette.danger)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 5)
@@ -1458,7 +1579,7 @@ private struct XauXatAppearanceView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                                 Text(mode.label)
-                                    .font(.custom("Courier", size: 10))
+                                    .font(.system(size: 10, weight: .regular, design: .default))
                                     .foregroundStyle(palette.ink)
                             }
                             .padding(7)
@@ -1475,7 +1596,7 @@ private struct XauXatAppearanceView: View {
                 }
 
                 Text("XauXat keeps the same private, low-contrast palette across light and dark mode.")
-                    .font(.custom("Courier", size: 11))
+                    .font(.system(size: 11, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 5)
@@ -1513,7 +1634,7 @@ private struct XauXatAboutView: View {
                         .font(.custom("Courier", size: 27).weight(.bold))
                         .tracking(2.7)
                     Text(verbatim: "X -- X")
-                        .font(.custom("Courier", size: 16).weight(.bold))
+                        .font(.system(size: 16, weight: .bold, design: .default))
                         .tracking(2)
                 }
                 .foregroundStyle(palette.ink)
@@ -1548,7 +1669,7 @@ private struct XauXatSectionTitle: View {
 
     var body: some View {
         Text(title)
-            .font(.custom("Courier", size: 11).weight(.bold))
+            .font(.system(size: 11, weight: .bold, design: .default))
             .foregroundStyle(palette.muted)
             .padding(.leading, 5)
             .padding(.bottom, 8)
@@ -1579,12 +1700,12 @@ private struct XauXatSettingsRow: View {
                 .foregroundStyle(palette.muted)
                 .frame(width: 24)
             Text(title)
-                .font(.custom("Courier", size: 14))
+                .font(.system(size: 14, weight: .regular, design: .default))
                 .foregroundStyle(palette.ink)
             Spacer()
             if let value {
                 Text(value)
-                    .font(.custom("Courier", size: 11))
+                    .font(.system(size: 11, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
             }
             Image(systemName: "chevron.right")
@@ -1619,11 +1740,11 @@ private struct XauXatToggleRow: View {
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.custom("Courier", size: 14))
+                        .font(.system(size: 14, weight: .regular, design: .default))
                         .foregroundStyle(palette.ink)
                     if let subtitle {
                         Text(subtitle)
-                            .font(.custom("Courier", size: 10))
+                            .font(.system(size: 10, weight: .regular, design: .default))
                             .foregroundStyle(palette.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -1650,10 +1771,10 @@ private struct XauXatSelectionRow: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.custom("Courier", size: 14))
+                    .font(.system(size: 14, weight: .regular, design: .default))
                     .foregroundStyle(palette.ink)
                 Text(subtitle)
-                    .font(.custom("Courier", size: 10))
+                    .font(.system(size: 10, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
             }
             Spacer(minLength: 12)
@@ -1678,11 +1799,11 @@ private struct XauXatValueRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Text(title)
-                .font(.custom("Courier", size: 14))
+                .font(.system(size: 14, weight: .regular, design: .default))
                 .foregroundStyle(palette.ink)
             Spacer(minLength: 12)
             Text(value)
-                .font(.custom("Courier", size: 12).weight(.bold))
+                .font(.system(size: 12, weight: .bold, design: .default))
                 .foregroundStyle(palette.muted)
                 .lineLimit(1)
         }
@@ -1701,25 +1822,44 @@ private struct XauXatBottomNavigation: View {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(XauXatTab.allCases) { tab in
-                Button { selection = tab } label: {
+                Button {
+                    selection = tab
+                } label: {
                     let selected = selection == tab
-                    VStack(spacing: 6) {
+
+                    VStack(spacing: 4) {
                         Image(systemName: tab.symbol)
-                            .font(.system(size: 23, weight: selected ? .medium : .light))
+                            .font(.system(
+                                size: 22,
+                                weight: selected ? .semibold : .regular
+                            ))
+                            .frame(height: 25)
+
                         Text(tab.title)
-                            .font(.custom("Courier", size: 10).weight(selected ? .bold : .regular))
+                            .font(.system(
+                                size: 11,
+                                weight: selected ? .semibold : .regular
+                            ))
                     }
-                    .foregroundStyle(selected ? palette.ivory : palette.muted)
-                    .frame(maxWidth: .infinity, minHeight: 64)
+                    .foregroundStyle(
+                        selected ? palette.ink : palette.muted
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 58)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel(tab.title)
-                .accessibilityAddTraits(selection == tab ? .isSelected : [])
+                .accessibilityAddTraits(
+                    selection == tab ? .isSelected : []
+                )
             }
         }
-        .padding(.top, 4)
+        .padding(.top, 3)
         .background(palette.background)
         .overlay(alignment: .top) {
-            Rectangle().fill(palette.line).frame(height: 1)
+            Rectangle()
+                .fill(palette.line.opacity(0.65))
+                .frame(height: 0.5)
         }
     }
 }
@@ -1804,7 +1944,7 @@ struct XauXatTorDiagnosticsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 Text("Tor is built into XauXat. Messages stay disabled until its local route is ready.")
-                    .font(.custom("Courier", size: 15))
+                    .font(.system(size: 15, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -1822,7 +1962,7 @@ struct XauXatTorDiagnosticsView: View {
                             ProgressView().tint(palette.ivoryInk)
                         }
                             Text(verification == .checking ? "Checking through Tor" : "Verify Tor route")
-                            .font(.custom("Courier", size: 14).weight(.bold))
+                            .font(.system(size: 14, weight: .bold, design: .default))
                     }
                     .foregroundStyle(palette.ivoryInk)
                     .frame(maxWidth: .infinity, minHeight: 52)
@@ -1833,13 +1973,13 @@ struct XauXatTorDiagnosticsView: View {
 
                 if case let .failed(message) = verification {
                     Text(message)
-                        .font(.custom("Courier", size: 12))
+                        .font(.system(size: 12, weight: .regular, design: .default))
                         .foregroundStyle(palette.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text("This check sends no chat data. It opens a fresh SOCKS5 tunnel through the same local Tor endpoint and confirms that Tor Project is reachable through it. It does not request, display or store an exit IP.")
-                    .font(.custom("Courier", size: 12))
+                    .font(.system(size: 12, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1853,11 +1993,11 @@ struct XauXatTorDiagnosticsView: View {
     private func statusRow(_ title: LocalizedStringKey, value: String) -> some View {
         HStack(spacing: 12) {
             Text(title)
-                .font(.custom("Courier", size: 14))
+                .font(.system(size: 14, weight: .regular, design: .default))
                 .foregroundStyle(palette.ink)
             Spacer()
             Text(value)
-                .font(.custom("Courier", size: 12).weight(.bold))
+                .font(.system(size: 12, weight: .bold, design: .default))
                 .foregroundStyle(value == "Ready" || value == "Forced through Tor" || value == "Passed" ? palette.success : palette.muted)
         }
         .padding(.horizontal, 16)
