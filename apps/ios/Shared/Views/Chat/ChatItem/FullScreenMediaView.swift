@@ -12,6 +12,100 @@ import SimpleXChat
 import SwiftyGif
 import AVKit
 
+struct XauXatHoldToViewImage: View {
+    @Environment(\.scenePhase) private var scenePhase
+    let image: UIImage
+    let caption: String?
+    @Binding var showView: Bool
+    let onReveal: () -> Void
+    let onRelease: () -> Void
+    @State private var didReveal = false
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            XauXatPressToPreview(
+                onReveal: {
+                    didReveal = true
+                    onReveal()
+                },
+                onHide: finishReveal,
+                protectedContent: {
+                    ZStack(alignment: .bottom) {
+                        protectedImage
+                        if let caption, !caption.isEmpty {
+                            Text(caption)
+                                .font(.body)
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .background(Color.black.opacity(0.72))
+                        }
+                    }
+                },
+                placeholder: {
+                    VStack(spacing: 14) {
+                        Image(systemName: "hand.tap.fill")
+                            .font(.system(size: 34, weight: .medium))
+                        Text("Press and hold to view")
+                            .font(.headline)
+                        Text("Release to close")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityElement(children: .combine)
+                }
+            )
+        }
+        .overlay(alignment: .topLeading) {
+            Button {
+                showView = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .padding(.top, 8)
+            .padding(.leading, 8)
+            .accessibilityLabel("Close protected photo")
+        }
+        .privacySensitive()
+        .onChange(of: scenePhase) { phase in
+            if phase != .active {
+                finishReveal()
+                showView = false
+            }
+        }
+        .onDisappear { finishReveal() }
+    }
+
+    @ViewBuilder private var protectedImage: some View {
+        if image.imageData == nil {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            SwiftyGif(image: image)
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func finishReveal() {
+        guard didReveal else { return }
+        didReveal = false
+        onRelease()
+        showView = false
+    }
+}
+
 // Spec: spec/client/chat-view.md#FullScreenMediaView
 struct FullScreenMediaView: View {
     @EnvironmentObject var m: ChatModel
