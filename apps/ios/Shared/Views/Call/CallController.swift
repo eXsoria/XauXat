@@ -8,6 +8,7 @@
 // Spec: spec/services/calls.md
 
 import Foundation
+import SwiftUI
 import CallKit
 import StoreKit
 import PushKit
@@ -359,7 +360,24 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
             )
             return
         }
+
         let media = XauXatProductPolicy.callMedia(media)
+        let useRelay = UserDefaults.standard.bool(forKey: DEFAULT_WEBRTC_POLICY_RELAY)
+        let privacyMessage: LocalizedStringKey = useRelay
+            ? "Call audio does not use Tor. It is end-to-end encrypted and routed through a call relay, which hides your IP address from the contact. The relay can see your IP address and the call duration."
+            : "Call audio does not use Tor. It is end-to-end encrypted, but it may connect directly and expose your IP address to the contact. If a call relay is used, the relay can see your IP address and the call duration."
+
+        AlertManager.shared.showAlert(Alert(
+            title: Text("Before this call"),
+            message: Text(privacyMessage),
+            primaryButton: .default(Text("Continue call")) { [weak self] in
+                self?.startCallAfterPrivacyConfirmation(contact, media)
+            },
+            secondaryButton: .cancel()
+        ))
+    }
+
+    private func startCallAfterPrivacyConfirmation(_ contact: Contact, _ media: CallMediaType) {
         let callUUID = callManager.newOutgoingCall(contact, media)
         guard let uuid = UUID(uuidString: callUUID) else {
             return
