@@ -1580,7 +1580,7 @@ enum NotificationsMode: String, Decodable, SelectableItem {
 
     var label: LocalizedStringKey {
         switch self {
-        case .off: "No push server"
+        case .off: "Off"
         case .periodic: "Periodic"
         case .instant: "Instant"
         }

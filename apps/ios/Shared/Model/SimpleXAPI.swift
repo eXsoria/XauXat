@@ -715,6 +715,34 @@ func xauXatMigrateNotificationModeIntentIfNeeded(_ actualMode: NotificationsMode
     }
 }
 
+@MainActor
+func xauXatApplyNotificationMode(_ mode: NotificationsMode, completion: @escaping (Bool) -> Void = { _ in }) {
+    let applyMode = {
+        let m = ChatModel.shared
+        xauXatSetNotificationModeIntent(mode)
+        m.notificationMode = mode
+        m.notificationRegistrationError = nil
+        if mode != .off {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+        reconcileXauXatNotificationRegistration(token: m.deviceToken)
+        completion(true)
+    }
+
+    if mode == .off {
+        applyMode()
+    } else {
+        NtfManager.shared.requestAuthorization(
+            onDeny: {
+                DispatchQueue.main.async { completion(false) }
+            },
+            onAuthorized: {
+                DispatchQueue.main.async { applyMode() }
+            }
+        )
+    }
+}
+
 func apiGetNtfToken() -> (DeviceToken?, NtfTknStatus?, NotificationsMode, String?) {
     let r: APIResult<ChatResponse2> = chatApiSendCmdSync(.apiGetNtfToken)
     switch r {

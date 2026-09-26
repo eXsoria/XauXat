@@ -224,20 +224,27 @@ class NtfManager: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
             case .denied:
                 denied?()
                 whenDone?()
-            case .authorized:
+            case .authorized, .provisional, .ephemeral:
                 self.granted = true
                 authorized?()
                 whenDone?()
-            default:
+            case .notDetermined:
                 center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
                     if let error = error {
                         logger.error("NtfManager.requestAuthorization error \(error.localizedDescription)")
-                    } else {
-                        self.granted = granted
+                        denied?()
+                    } else if granted {
+                        self.granted = true
                         authorized?()
+                    } else {
+                        self.granted = false
+                        denied?()
                     }
                     whenDone?()
                 }
+            @unknown default:
+                denied?()
+                whenDone?()
             }
         }
     }

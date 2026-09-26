@@ -264,8 +264,13 @@ struct ContentView: View {
                 // the app (scene .inactive), which kills an in-flight connect and makes
                 // getTopViewController() nil. Deferring keeps the URL until the app is active again.
                 let openingViaLink = pendingConnectUrl != nil
-                requestNtfAuthorization(showDeniedAlert: !openingViaLink) {
+                let notificationMode = xauXatNotificationModeIntent() ?? chatModel.notificationMode
+                if notificationMode == .off {
                     connectViaUrl()
+                } else {
+                    requestNtfAuthorization(showDeniedAlert: !openingViaLink) {
+                        connectViaUrl()
+                    }
                 }
                 if !openingViaLink {
                     // Local Authentication notice is to be shown on next start after onboarding is complete
@@ -392,7 +397,12 @@ struct ContentView: View {
                     alertManager.showAlert(notificationAlert())
                 }
             },
-            onAuthorized: { notificationAlertShown = false },
+            onAuthorized: {
+                notificationAlertShown = false
+                DispatchQueue.main.async {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            },
             whenDone: { if let whenDone { DispatchQueue.main.async(execute: whenDone) } }
         )
     }

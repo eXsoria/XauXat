@@ -117,8 +117,10 @@ claimed as covered until verified:
 
 Calls and unverified network features stay disabled in the first Tor beta. The
 fork has separate Apple identifiers and cannot use SimpleX Chat's APNs signing
-credentials. Instant iOS notifications are a later milestone with XauXat App
-IDs, entitlements, APNs credentials and a compatible notification service.
+credentials. Instant iOS notifications are staged behind explicit opt-in with
+XauXat App IDs and the approved Notification Filtering entitlement. APNs
+credentials, the public notification service and the physical-device matrix
+remain release requirements.
 
 ## Acceptance evidence
 

@@ -46,6 +46,12 @@ The notification system has three modes of operation, allowing users to choose t
 | **Periodic** | Background fetch every ~20 minutes | `BGAppRefreshTask` wakes app, checks for new messages |
 | **Off** | No notifications | User must open app to see messages |
 
+XauXat defaults new installations to **Off**. Selecting Instant or Periodic
+shows a mode-specific privacy notice before iOS permission is requested or the
+APNs token is registered with the XauXat notification server. APNs delivery is
+outside Tor. The NSE's later SMP/XFTP retrieval uses its isolated embedded Tor
+client and fails closed when Tor is unavailable.
+
 ### Configuration
 
 Notification mode is set via:
