@@ -13,6 +13,7 @@ import SimpleXChat
 private enum XauXatTab: String, CaseIterable, Identifiable {
     case chats
     case contacts
+    case notes
     case settings
 
     var id: Self { self }
@@ -21,6 +22,7 @@ private enum XauXatTab: String, CaseIterable, Identifiable {
         switch self {
         case .chats: "Chats"
         case .contacts: "Contacts"
+        case .notes: "Notes"
         case .settings: "Settings"
         }
     }
@@ -29,6 +31,7 @@ private enum XauXatTab: String, CaseIterable, Identifiable {
         switch self {
         case .chats: "bubble.left"
         case .contacts: "person.2"
+        case .notes: "note.text"
         case .settings: "gearshape"
         }
     }
@@ -583,7 +586,9 @@ struct XauXatHomeView: View {
             VStack(spacing: 0) {
                 XauXatHeader(
                     palette: palette,
-                    action: tab == .settings ? nil : { showNewChatSheet = true }
+                    action: (tab == .settings || tab == .notes)
+                        ? nil
+                        : { showNewChatSheet = true }
                 )
 
                 Group {
@@ -599,6 +604,10 @@ struct XauXatHomeView: View {
                             palette: palette,
                             parentSheet: $parentSheet,
                             showNewChatSheet: $showNewChatSheet
+                        )
+                    case .notes:
+                        XauXatNotesView(
+                            palette: palette
                         )
                     case .settings:
                         XauXatSettingsHome(
@@ -678,11 +687,24 @@ private struct XauXatChatsView: View {
     let palette: XauXatPalette
     @Binding var parentSheet: SomeSheet<AnyView>?
     @Binding var showNewChatSheet: Bool
+
     @State private var searchText = ""
+    @State private var searchRevealed = false
+    @State private var pullDistance: CGFloat = 0
 
     private var chats: [Chat] {
-        let availableChats = chatModel.chats.filter {
-            !$0.chatInfo.chatDeleted && !$0.chatInfo.contactCard && !xauXatIsChatHidden($0.id)
+        let availableChats = chatModel.chats.filter { chat in
+            guard !chat.chatInfo.chatDeleted,
+                  !chat.chatInfo.contactCard,
+                  !xauXatIsChatHidden(chat.id) else {
+                return false
+            }
+
+            if case .local = chat.chatInfo {
+                return false
+            }
+
+            return true
         }
 
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -696,6 +718,40 @@ private struct XauXatChatsView: View {
         }
     }
 
+    private var searchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(palette.muted)
+
+            TextField("Search conversations", text: $searchText)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(palette.ink)
+                .tint(palette.ink)
+                .autocorrectionDisabled()
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(palette.muted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 40)
+        .background(
+            palette.surface,
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .padding(.horizontal, 22)
+        .padding(.bottom, 12)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Text("Chats")
@@ -704,39 +760,17 @@ private struct XauXatChatsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 22)
                 .padding(.top, 4)
-                .padding(.bottom, 18)
+                .padding(.bottom, searchRevealed ? 18 : 6)
 
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(palette.muted)
-
-                TextField("Search conversations", text: $searchText)
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(palette.ink)
-                    .tint(palette.ink)
-                    .autocorrectionDisabled()
-
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(palette.muted)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Clear search")
-                }
+            if searchRevealed {
+                searchBar
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .top).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        )
+                    )
             }
-            .padding(.horizontal, 14)
-            .frame(height: 44)
-            .background(
-                palette.surface,
-                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-            )
-            .padding(.horizontal, 22)
-            .padding(.bottom, 12)
 
             if chats.isEmpty && searchText.isEmpty {
                 XauXatEmptyState(
@@ -745,6 +779,8 @@ private struct XauXatChatsView: View {
                     subtitle: "Your private space starts here.",
                     action: { showNewChatSheet = true }
                 )
+                .contentShape(Rectangle())
+                .gesture(pullGesture)
             } else if chats.isEmpty {
                 VStack(spacing: 8) {
                     Text("No results")
@@ -771,9 +807,107 @@ private struct XauXatChatsView: View {
                     }
                     .padding(.horizontal, 22)
                 }
+                .simultaneousGesture(pullGesture)
                 .refreshable {
                     try? await reconnectAllServers()
                 }
+            }
+        }
+    }
+
+    private var pullGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                guard !searchRevealed else { return }
+
+                pullDistance = max(0, value.translation.height)
+
+                if pullDistance >= 38 {
+                    withAnimation(.easeOut(duration: 0.20)) {
+                        searchRevealed = true
+                    }
+                }
+            }
+            .onEnded { _ in
+                pullDistance = 0
+            }
+    }
+}
+
+private struct XauXatNotesView: View {
+    @EnvironmentObject private var chatModel: ChatModel
+    let palette: XauXatPalette
+
+    private var privateNotes: Chat? {
+        chatModel.chats.first { chat in
+            guard !chat.chatInfo.chatDeleted else { return false }
+            if case let .local(noteFolder) = chat.chatInfo {
+                return noteFolder.ready
+            }
+            return false
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Notes")
+                .font(.system(size: 32, weight: .bold))
+                .foregroundStyle(palette.ink)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.top, 4)
+                .padding(.bottom, 18)
+
+            if let privateNotes {
+                Button {
+                    ItemsModel.shared.loadOpenChat(privateNotes.id)
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "lock.doc")
+                            .font(.system(size: 19, weight: .medium))
+                            .foregroundStyle(palette.ivoryInk)
+                            .frame(width: 50, height: 50)
+                            .background(palette.ivory, in: Circle())
+
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Private notes")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(palette.ink)
+
+                            Text("Only you can access these notes.")
+                                .font(.system(size: 13.5, weight: .regular))
+                                .foregroundStyle(palette.muted)
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(palette.faint)
+                    }
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(chatModel.chatRunning != true)
+                .padding(.horizontal, 22)
+
+                Spacer()
+            } else {
+                VStack(spacing: 10) {
+                    Image(systemName: "lock.doc")
+                        .font(.system(size: 28, weight: .regular))
+                        .foregroundStyle(palette.muted)
+
+                    Text("Private notes unavailable")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(palette.ink)
+
+                    Text("Your private notes are not ready yet.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(palette.muted)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -896,55 +1030,66 @@ private struct XauXatChatRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            ChatInfoImage(chat: chat, size: 46, color: palette.raised)
+            ChatInfoImage(
+                chat: chat,
+                size: 50,
+                color: palette.raised,
+                radiusOverride: 50
+            )
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(chat.chatInfo.chatViewName)
-                        .font(.system(size: 16, weight: .semibold, design: .default))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(palette.ink)
                         .lineLimit(1)
-                    Spacer(minLength: 8)
+
+                    Spacer(minLength: 10)
+
                     if !contactStyle {
                         formatTimestampText(timestamp)
-                            .font(.system(size: 12, weight: .regular, design: .default))
-                            .foregroundStyle(palette.muted)
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(palette.faint)
                     }
                 }
 
-                HStack(spacing: 8) {
+                HStack(spacing: 7) {
                     if xauXatIsChatLocked(chat.id) {
                         Image(systemName: "lock.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(palette.muted)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(palette.faint)
                     }
+
                     Text(detail)
-                        .font(.system(size: 14, weight: .regular, design: .default))
+                        .font(.system(size: 13.5, weight: .regular))
                         .foregroundStyle(palette.muted)
                         .lineLimit(1)
                         .privacySensitive(!contactStyle)
+
                     Spacer(minLength: 8)
+
                     if contactStyle {
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 15, weight: .regular))
-                            .foregroundStyle(palette.ivory)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(palette.faint)
                     } else if chat.chatStats.unreadCount > 0 {
                         Text(verbatim: "\(chat.chatStats.unreadCount)")
-                            .font(.system(size: 11, weight: .bold, design: .default))
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(palette.ivoryInk)
                             .frame(minWidth: 21, minHeight: 21)
                             .background(palette.ivory, in: Circle())
                     }
                 }
             }
+            .offset(y: 1)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(palette.line)
+                .fill(palette.line.opacity(0.40))
                 .frame(height: 0.5)
-                .padding(.leading, 60)
+                .padding(.leading, 64)
         }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens this conversation")

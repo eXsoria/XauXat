@@ -17,11 +17,17 @@ struct ProfileImage: View {
     var color = Color(uiColor: .tertiarySystemGroupedBackground)
     var backgroundColor: Color? = nil
     var blurred = false
+    var radiusOverride: Double? = nil
     @AppStorage(DEFAULT_PROFILE_IMAGE_CORNER_RADIUS) private var radius = defaultProfileImageCorner
 
     var body: some View {
         if let uiImage = imageFromBase64(imageStr) {
-            clipProfileImage(Image(uiImage: uiImage), size: size, radius: radius, blurred: blurred)
+            clipProfileImage(
+                Image(uiImage: uiImage),
+                size: size,
+                radius: radiusOverride ?? radius,
+                blurred: blurred
+            )
         } else {
             let c = color.asAnotherColorFromSecondaryVariant(theme)
             Image(systemName: iconName)

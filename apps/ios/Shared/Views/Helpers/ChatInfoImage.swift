@@ -14,6 +14,7 @@ struct ChatInfoImage: View {
     @ObservedObject var chat: Chat
     var size: CGFloat
     var color = Color(uiColor: .tertiarySystemGroupedBackground)
+    var radiusOverride: Double? = nil
 
     var body: some View {
         let iconColor = if case .local = chat.chatInfo {
@@ -27,7 +28,8 @@ struct ChatInfoImage: View {
             imageStr: chat.chatInfo.image,
             iconName: chatIconName(chat.chatInfo),
             size: size,
-            color: iconColor
+            color: iconColor,
+            radiusOverride: radiusOverride
         )
     }
 }

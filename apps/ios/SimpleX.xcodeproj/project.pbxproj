@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		07113667F6F254AEA14B37DF /* Pods_SimpleX__iOS_.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B5D5FB384075FF4C67AA7A2A /* Pods_SimpleX__iOS_.framework */; };
+		0F07C29C30675AB200E30185 /* XauXatAvatarEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F07C29B30675AB200E30185 /* XauXatAvatarEditor.swift */; };
 		184152CEF68D2336FC2EBCB0 /* CallViewRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18415B08031E8FB0F7FC27F9 /* CallViewRenderers.swift */; };
 		1841538E296606C74533367C /* UserPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18415835CBD939A9ABDC108A /* UserPicker.swift */; };
 		1841560FD1CD447955474C1D /* UserProfilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18415845648CA4F5A8BCA272 /* UserProfilesView.swift */; };
@@ -15,7 +16,6 @@
 		1841594C978674A7B42EF0C0 /* AnimatedImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1841511920742C6E152E469F /* AnimatedImageView.swift */; };
 		18415B0585EB5A9A0A7CA8CD /* PressedButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18415A7F0F189D87DEFEABCA /* PressedButtonStyle.swift */; };
 		18415C6C56DBCEC2CBBD2F11 /* WebRTCClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18415323A4082FC92887F906 /* WebRTCClient.swift */; };
-		A11E000533D2000200000005 /* XauXatRealtimeAudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000433D2000200000004 /* XauXatRealtimeAudioDevice.swift */; };
 		18415F9A2D551F9757DA4654 /* CIVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18415FD2E36F13F596A45BB4 /* CIVideoView.swift */; };
 		18415FEFE153C5920BFB7828 /* GroupWelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1841516F0CE5992B0EDFB377 /* GroupWelcomeView.swift */; };
 		3CDBCF4227FAE51000354CDD /* ComposeLinkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CDBCF4127FAE51000354CDD /* ComposeLinkView.swift */; };
@@ -225,8 +225,9 @@
 		8CE848A32C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */; };
 		A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000133D1000100000001 /* EmbeddedTorManager.swift */; };
 		A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000333D2000100000003 /* XauXatHomeView.swift */; };
-		A11E001233D3000100000012 /* NSEEmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */; };
+		A11E000533D2000200000005 /* XauXatRealtimeAudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000433D2000200000004 /* XauXatRealtimeAudioDevice.swift */; };
 		A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */; };
+		A11E001233D3000100000012 /* NSEEmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */; };
 		A11E002233D4000100000022 /* XauXatGroupAccessRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E002133D4000100000021 /* XauXatGroupAccessRules.swift */; };
 		A11E002333D4000100000023 /* XauXatGroupAccessRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E002133D4000100000021 /* XauXatGroupAccessRules.swift */; };
 		A11E003233D5000100000032 /* XauXatPINAttemptPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E003133D5000100000031 /* XauXatPINAttemptPolicy.swift */; };
@@ -351,10 +352,10 @@
 
 /* Begin PBXFileReference section */
 		0B6ADA0DF7B5CEA9A9452020 /* Pods-SimpleX (iOS).release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SimpleX (iOS).release.xcconfig"; path = "Target Support Files/Pods-SimpleX (iOS)/Pods-SimpleX (iOS).release.xcconfig"; sourceTree = "<group>"; };
+		0F07C29B30675AB200E30185 /* XauXatAvatarEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatAvatarEditor.swift; sourceTree = "<group>"; };
 		1841511920742C6E152E469F /* AnimatedImageView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AnimatedImageView.swift; sourceTree = "<group>"; };
 		1841516F0CE5992B0EDFB377 /* GroupWelcomeView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GroupWelcomeView.swift; sourceTree = "<group>"; };
 		18415323A4082FC92887F906 /* WebRTCClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = WebRTCClient.swift; sourceTree = "<group>"; };
-		A11E000433D2000200000004 /* XauXatRealtimeAudioDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatRealtimeAudioDevice.swift; sourceTree = "<group>"; };
 		18415835CBD939A9ABDC108A /* UserPicker.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UserPicker.swift; sourceTree = "<group>"; };
 		18415845648CA4F5A8BCA272 /* UserProfilesView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = UserProfilesView.swift; sourceTree = "<group>"; };
 		18415A7F0F189D87DEFEABCA /* PressedButtonStyle.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PressedButtonStyle.swift; sourceTree = "<group>"; };
@@ -618,11 +619,12 @@
 		8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableChatItemToolbars.swift; sourceTree = "<group>"; };
 		A11E000133D1000100000001 /* EmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedTorManager.swift; sourceTree = "<group>"; };
 		A11E000333D2000100000003 /* XauXatHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatHomeView.swift; sourceTree = "<group>"; };
-		A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEEmbeddedTorManager.swift; sourceTree = "<group>"; };
-		B3B79D8F8E95FE108F604F0D /* Pods-SimpleX NSE.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SimpleX NSE.debug.xcconfig"; path = "Target Support Files/Pods-SimpleX NSE/Pods-SimpleX NSE.debug.xcconfig"; sourceTree = "<group>"; };
+		A11E000433D2000200000004 /* XauXatRealtimeAudioDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatRealtimeAudioDevice.swift; sourceTree = "<group>"; };
 		A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatCodeLockedContent.swift; sourceTree = "<group>"; };
+		A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEEmbeddedTorManager.swift; sourceTree = "<group>"; };
 		A11E002133D4000100000021 /* XauXatGroupAccessRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatGroupAccessRules.swift; sourceTree = "<group>"; };
 		A11E003133D5000100000031 /* XauXatPINAttemptPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatPINAttemptPolicy.swift; sourceTree = "<group>"; };
+		B3B79D8F8E95FE108F604F0D /* Pods-SimpleX NSE.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SimpleX NSE.debug.xcconfig"; path = "Target Support Files/Pods-SimpleX NSE/Pods-SimpleX NSE.debug.xcconfig"; sourceTree = "<group>"; };
 		B5D5FB384075FF4C67AA7A2A /* Pods_SimpleX__iOS_.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_SimpleX__iOS_.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B70A39722D24090D00E80A5F /* TagListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagListView.swift; sourceTree = "<group>"; };
 		B70CE9E52D4BE5930080F36D /* GroupMentions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupMentions.swift; sourceTree = "<group>"; };
@@ -894,6 +896,7 @@
 		5C971E1F27AEBF7000C8A3CE /* Helpers */ = {
 			isa = PBXGroup;
 			children = (
+				0F07C29B30675AB200E30185 /* XauXatAvatarEditor.swift */,
 				5C971E2027AEBF8300C8A3CE /* ChatInfoImage.swift */,
 				5C7505A427B679EE00BE3227 /* NavLinkPlain.swift */,
 				5CC1C99427A6CF7F000D9FF6 /* ShareSheet.swift */,
@@ -1266,7 +1269,6 @@
 				B3B79D8F8E95FE108F604F0D /* Pods-SimpleX NSE.debug.xcconfig */,
 				73B98082CBF1462E69FD8A68 /* Pods-SimpleX NSE.release.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -1571,9 +1573,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-SimpleX (iOS)/Pods-SimpleX (iOS)-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-SimpleX (iOS)/Pods-SimpleX (iOS)-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -1772,6 +1778,7 @@
 				8CAEF1502D11A6A000240F00 /* ChatItemsLoader.swift in Sources */,
 				5C9C2DA52894777E00CC63B1 /* GroupProfileView.swift in Sources */,
 				5CEACCED27DEA495000BD591 /* MsgContentView.swift in Sources */,
+				0F07C29C30675AB200E30185 /* XauXatAvatarEditor.swift in Sources */,
 				8C81482C2BD91CD4002CBEC3 /* AudioDevicePicker.swift in Sources */,
 				5CCB939C297EFCB100399E78 /* NavStackCompat.swift in Sources */,
 				5C764E89279CBCB3000C6508 /* ChatModel.swift in Sources */,
@@ -2367,7 +2374,7 @@
 				);
 				LLVM_LTO = YES;
 				MARKETING_VERSION = 0.0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat.notification-service;
+				PRODUCT_BUNDLE_IDENTIFIER = "pt.exsoria.xauxat.notification-service";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
@@ -2404,7 +2411,7 @@
 				);
 				LLVM_LTO = YES;
 				MARKETING_VERSION = 0.0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = pt.exsoria.xauxat.notification-service;
+				PRODUCT_BUNDLE_IDENTIFIER = "pt.exsoria.xauxat.notification-service";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
