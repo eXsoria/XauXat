@@ -169,15 +169,56 @@ class ItemsModel: ObservableObject {
     }
 
     private func authorizeChatOpen(_ chatId: ChatId, open: @escaping () -> Void) {
-        guard xauXatIsChatLocked(chatId) || xauXatIsChatHidden(chatId) else {
+        let isPrivateNotes: Bool = {
+            guard let chat = ChatModel.shared.getChat(chatId) else {
+                return false
+            }
+
+            if case .local = chat.chatInfo {
+                return true
+            }
+
+            return false
+        }()
+
+        let isHidden = xauXatIsChatHidden(chatId)
+        let isLocked = xauXatIsChatLocked(chatId)
+
+        guard isPrivateNotes || isLocked || isHidden else {
             open()
             return
         }
+
+        let title: LocalizedStringKey
+        let reason: String
+
+        if isPrivateNotes {
+            title = "Private notes"
+            reason = NSLocalizedString(
+                "Authenticate to open your private notes",
+                comment: "private notes authentication"
+            )
+        } else if isHidden {
+            title = "Hidden conversation"
+            reason = NSLocalizedString(
+                "Authenticate to open this conversation",
+                comment: "protected conversation"
+            )
+        } else {
+            title = "Locked conversation"
+            reason = NSLocalizedString(
+                "Authenticate to open this conversation",
+                comment: "protected conversation"
+            )
+        }
+
         authenticate(
-            title: xauXatIsChatHidden(chatId) ? "Hidden conversation" : "Locked conversation",
-            reason: NSLocalizedString("Authenticate to open this conversation", comment: "protected conversation")
+            title: title,
+            reason: reason
         ) { result in
-            if case .success = result { open() }
+            if case .success = result {
+                open()
+            }
         }
     }
 

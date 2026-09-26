@@ -78,6 +78,7 @@ struct ServerSettings {
 
 struct UserPickerSheetView: View {
     let sheet: UserPickerSheet
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @StateObject private var ss = SaveableSettings()
@@ -104,7 +105,9 @@ struct UserPickerSheetView: View {
                             title: "XauXat identities"
                         )
                     case .currentProfile:
-                        UserProfile()
+                        UserProfile {
+                            dismiss()
+                        }
                     case .useFromDesktop:
                         ConnectDesktopView()
                     case .settings:

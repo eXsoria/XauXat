@@ -10,7 +10,7 @@ import SwiftUI
 import SimpleXChat
 
 struct UserProfile: View {
-    @Environment(\.dismiss) private var dismiss
+    var onSaved: () -> Void = {}
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var theme: AppTheme
     @EnvironmentObject var ss: SaveableSettings
@@ -25,6 +25,8 @@ struct UserProfile: View {
     @State private var showImagePicker = false
     @State private var showTakePhoto = false
     @State private var chosenImage: UIImage? = nil
+    @State private var imageToEdit: UIImage? = nil
+    @State private var showAvatarEditor = false
     @State private var alert: UserProfileAlert?
     @FocusState private var focusDisplayName
 
@@ -79,7 +81,7 @@ struct UserProfile: View {
                     (profile.description ?? "") == description.trimmingCharacters(in: .whitespacesAndNewlines)
                 )
                 Button(action: saveProfile) {
-                    Text("Save (and notify contacts)")
+                    Text("Save")
                 }
                 .disabled(!canSaveProfile)
             }
@@ -94,13 +96,23 @@ struct UserProfile: View {
         }
         .onChange(of: editSnapshot) { _ in updateProfileSaver() }
         .onChange(of: chosenImage) { image in
-            Task {
-                let resized: String? = if let image {
-                    await resizeImageToStrSize(cropToSquare(image), maxDataSize: 12500)
-                } else {
-                    nil
-                }
-                await MainActor.run { profile.image = resized }
+            guard let image else { return }
+            imageToEdit = image
+
+            if showImagePicker {
+                showImagePicker = false
+            } else if !showTakePhoto {
+                showAvatarEditor = true
+            }
+        }
+        .onChange(of: showImagePicker) { isPresented in
+            if !isPresented, imageToEdit != nil {
+                showAvatarEditor = true
+            }
+        }
+        .onChange(of: showTakePhoto) { isPresented in
+            if !isPresented, imageToEdit != nil {
+                showAvatarEditor = true
             }
         }
         // Modals
@@ -124,10 +136,39 @@ struct UserProfile: View {
             }
         }
         .sheet(isPresented: $showImagePicker) {
-            LibraryImagePicker(image: $chosenImage) { _ in
-                await MainActor.run {
-                    showImagePicker = false
+            LibraryImagePicker(image: $chosenImage) { didSelectImage in
+                if !didSelectImage {
+                    await MainActor.run {
+                        showImagePicker = false
+                    }
                 }
+            }
+        }
+        .fullScreenCover(isPresented: $showAvatarEditor) {
+            if let imageToEdit {
+                XauXatAvatarEditor(
+                    image: imageToEdit,
+                    onCancel: {
+                        showAvatarEditor = false
+                        chosenImage = nil
+                        self.imageToEdit = nil
+                    },
+                    onConfirm: { croppedImage in
+                        showAvatarEditor = false
+                        chosenImage = nil
+                        self.imageToEdit = nil
+
+                        Task {
+                            let resized = await resizeImageToStrSize(
+                                croppedImage,
+                                maxDataSize: 12500
+                            )
+                            await MainActor.run {
+                                profile.image = resized
+                            }
+                        }
+                    }
+                )
             }
         }
         .alert(item: $alert) { a in userProfileAlert(a, $profile.displayName) }
@@ -166,7 +207,7 @@ struct UserProfile: View {
                         getCurrentProfile()
                         // onChange(editSnapshot) won't fire when saved values equal typed, so clear the pending dismiss-save here
                         ss.profileSave = nil
-                        dismiss()
+                        onSaved()
                     }
                 } else {
                     alert = .duplicateUserError
@@ -226,15 +267,24 @@ struct EditProfileImage: View {
             if profileImage != nil {
                 ZStack(alignment: .bottomTrailing) {
                     ZStack(alignment: .topTrailing) {
-                        ProfileImage(imageStr: profileImage, size: 160)
-                            .onTapGesture { showChooseSource = true }
+                        ProfileImage(
+                            imageStr: profileImage,
+                            size: 160,
+                            radiusOverride: 50
+                        )
+                        .onTapGesture { showChooseSource = true }
                         overlayButton("multiply", edge: .top) { profileImage = nil }
                     }
                     overlayButton("camera", edge: .bottom) { showChooseSource = true }
                 }
             } else {
                 ZStack(alignment: .center) {
-                    ProfileImage(imageStr: profileImage, iconName: iconName, size: 160)
+                    ProfileImage(
+                        imageStr: profileImage,
+                        iconName: iconName,
+                        size: 160,
+                        radiusOverride: 50
+                    )
                     editImageButton { showChooseSource = true }
                 }
             }
