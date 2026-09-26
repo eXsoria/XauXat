@@ -104,6 +104,11 @@
 **Enforced by:** `chat_close_store` / `chat_reopen_store` FFI calls; NSE uses short-lived database sessions.
 **Spec:** [spec/architecture.md](../spec/architecture.md)
 
+### RULE-17: Push notifications require informed opt-in
+**Rule:** New installations MUST start with notifications Off. XauXat MUST explain the APNs, notification-server metadata and Tor boundaries before requesting iOS notification permission or sharing the APNs token with the XauXat notification server.
+**Enforced by:** `XauXatWelcomeView` applies `.off`; `XauXatNotificationsView` presents the privacy notice; `AppDelegate` does not register for remote notifications at launch; `xauXatApplyNotificationMode` requests permission and registers only after consent.
+**Spec:** [iOS notification privacy](../../../docs/xauxat/IOS_NOTIFICATION_PRIVACY.md)
+
 ---
 
 ## Channel Integrity
