@@ -44,6 +44,7 @@ struct SendMessageView: View {
     @State private var teFont: Font = .body
     @State private var sendButtonSize: CGFloat = 29
     @State private var sendButtonOpacity: CGFloat = 1
+    @ScaledMetric(relativeTo: .caption) private var progressTrailingContentInset: CGFloat = 112
     @State private var showCustomDisappearingMessageDialogue = false
     @State private var showCustomTimePicker = false
     @State private var selectedDisappearingMessageTime: Int? = customDisappearingMessageTimeDefault.get()
@@ -52,6 +53,7 @@ struct SendMessageView: View {
 
     var body: some View {
         let composeShape = RoundedRectangle(cornerSize: CGSize(width: 20, height: 20))
+        let trailingContentInset: CGFloat = composeState.progressByTimeout ? progressTrailingContentInset : 32
         ZStack(alignment: .leading) {
             if case .voicePreview = composeState.preview {
                 Text("Voice message…")
@@ -60,7 +62,7 @@ struct SendMessageView: View {
                     .foregroundColor(theme.colors.secondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
-                    .padding(.trailing, 32)
+                    .padding(.trailing, trailingContentInset)
                     .frame(maxWidth: .infinity)
             } else {
                 NativeTextEditor(
@@ -73,7 +75,7 @@ struct SendMessageView: View {
                     selectedRange: $selectedRange,
                     onImagesAdded: onMediaAdded
                 )
-                .padding(.trailing, 32)
+                .padding(.trailing, trailingContentInset)
                 .allowsTightening(false)
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -85,10 +87,14 @@ struct SendMessageView: View {
         })
         .overlay(alignment: .bottomTrailing) {
             if composeState.progressByTimeout {
-                ProgressView()
-                    .scaleEffect(1.4)
-                    .frame(width: 31, height: 31, alignment: .center)
+                Text("Encrypting…")
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(theme.colors.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(height: 31, alignment: .center)
                     .padding([.bottom, .trailing], 4)
+                    .accessibilityLabel("Encrypting message")
             } else {
                 composeActionButtons()
                 // required for intercepting clicks

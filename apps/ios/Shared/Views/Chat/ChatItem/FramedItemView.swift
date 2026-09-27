@@ -93,7 +93,6 @@ struct FramedItemView: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 6)
                 .overlay(DetermineWidth())
-                .accessibilityLabel("")
             }
         }
             .background { chatItemFrameColorMaybeImageOrVideo(chatItem, theme).modifier(ChatTailPadding()) }

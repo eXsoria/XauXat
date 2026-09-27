@@ -50,7 +50,15 @@ let seSubscriber = seMessageSubscriber {
 
 func suspendChat() {
     suspendLockQueue.sync {
-        _suspendChat(timeout: appSuspendTimeout)
+        let deliveryManager = OutboundDeliveryManager.shared
+        let timeout = deliveryManager.suspendTimeout(
+            defaultTimeout: appSuspendTimeout,
+            backgroundTimeRemaining: UIApplication.shared.backgroundTimeRemaining
+        )
+        logger.notice(
+            "Suspending chat with \(timeout, privacy: .public)s delivery window for \(deliveryManager.pendingMessageCount, privacy: .public) pending message(s)"
+        )
+        _suspendChat(timeout: timeout)
     }
 }
 

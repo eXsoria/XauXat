@@ -160,4 +160,54 @@ class Tests_iOS: XCTestCase {
         XCTAssertEqual(destructiveState.recordFailure(policy: .destroy, now: now, uptime: 902), .destroy)
         XCTAssertNotNil(destructiveState.lockRemaining(now: now, uptime: 902))
     }
+
+    func testOutboundDeliveryKeepsDefaultSuspendWindowWithoutPendingMessages() {
+        XCTAssertEqual(
+            XauXatOutboundDeliveryPolicy.suspendTimeout(
+                defaultTimeout: 15,
+                backgroundTimeRemaining: 40,
+                hasPendingDelivery: false
+            ),
+            15
+        )
+    }
+
+    func testOutboundDeliveryUsesAvailableBackgroundTimeWithSafetyMargin() {
+        XCTAssertEqual(
+            XauXatOutboundDeliveryPolicy.suspendTimeout(
+                defaultTimeout: 15,
+                backgroundTimeRemaining: 31,
+                hasPendingDelivery: true
+            ),
+            26
+        )
+        XCTAssertEqual(
+            XauXatOutboundDeliveryPolicy.suspendTimeout(
+                defaultTimeout: 15,
+                backgroundTimeRemaining: 4,
+                hasPendingDelivery: true
+            ),
+            1
+        )
+        XCTAssertEqual(
+            XauXatOutboundDeliveryPolicy.suspendTimeout(
+                defaultTimeout: 15,
+                backgroundTimeRemaining: 120,
+                hasPendingDelivery: true
+            ),
+            60
+        )
+    }
+
+    func testOutboundDeliveryUsesFallbackWhenBackgroundBudgetIsUnavailable() {
+        XCTAssertEqual(
+            XauXatOutboundDeliveryPolicy.suspendTimeout(
+                defaultTimeout: 15,
+                backgroundTimeRemaining: .infinity,
+                hasPendingDelivery: true
+            ),
+            25
+        )
+    }
+
 }
