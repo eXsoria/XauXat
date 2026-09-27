@@ -36,13 +36,15 @@ registration reconciler.
 
 ## Apple capability
 
-The Notification Service Extension target carries
-`com.apple.developer.usernotifications.filtering`. This managed entitlement is
-scoped to `pt.exsoria.xauxat.notification-service`; it allows the extension to
-return empty notification content for suppressed events. The temporary generic
-fallback used while Apple approval was pending is no longer active.
+Apple has not yet granted `com.apple.developer.usernotifications.filtering` to
+`pt.exsoria.xauxat.notification-service`, so the Release target does not request
+that managed entitlement. Until the provisioning profile includes it, events
+that would otherwise be silently suppressed use generic `XauXat` / `new
+activity` wording and incoming calls stay in the ordinary notification path
+instead of CallKit. No contact, profile, group or message content is exposed by
+this fallback.
 
-Approval and source configuration are not production proof. Release signing
-must embed a provisioning profile that grants this entitlement. APNs delivery,
-silent filtering, CallKit behaviour and the fail-closed Tor route remain gated
-by the two-iPhone matrix in `IOS_NOTIFICATION_TEST_MATRIX.md`.
+Once Apple approves the capability, the entitlement and silent-filtering paths
+can be enabled together and validated with a newly signed archive. APNs
+delivery, silent filtering, CallKit behaviour and the fail-closed Tor route
+remain gated by the two-iPhone matrix in `IOS_NOTIFICATION_TEST_MATRIX.md`.
