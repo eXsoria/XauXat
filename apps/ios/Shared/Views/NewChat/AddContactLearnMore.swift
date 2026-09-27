@@ -9,7 +9,10 @@
 import SwiftUI
 
 struct AddContactLearnMore: View {
+    @Environment(\.dismiss) private var dismiss
+
     var showTitle: Bool
+    var showCloseButton: Bool = false
 
     var body: some View {
         List {
@@ -32,6 +35,30 @@ struct AddContactLearnMore: View {
             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
         }
         .modifier(ThemedBackground(grouped: true))
+        .overlay(alignment: .topTrailing) {
+            if showCloseButton {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(
+                            Color(
+                                red: 222 / 255,
+                                green: 206 / 255,
+                                blue: 175 / 255
+                            )
+                        )
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 12)
+                .padding(.trailing, 16)
+                .accessibilityLabel("Close")
+                .zIndex(100)
+            }
+        }
     }
 }
 

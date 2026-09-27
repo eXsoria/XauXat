@@ -79,6 +79,7 @@ struct ServerSettings {
 struct UserPickerSheetView: View {
     let sheet: UserPickerSheet
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @StateObject private var ss = SaveableSettings()
@@ -118,7 +119,51 @@ struct UserPickerSheetView: View {
             }
             .navigationTitle(sheet.navigationTitle)
             .navigationBarTitleDisplayMode(.large)
-            .modifier(ThemedBackground(grouped: true))
+            .if(sheet == .currentProfile) { view in
+                view.toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .foregroundStyle(
+                                    colorScheme == .dark
+                                        ? Color(
+                                            red: 222 / 255,
+                                            green: 206 / 255,
+                                            blue: 175 / 255
+                                        )
+                                        : Color(
+                                            red: 23 / 255,
+                                            green: 19 / 255,
+                                            blue: 14 / 255
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .if(sheet != .currentProfile) { view in
+                view.modifier(ThemedBackground(grouped: true))
+            }
+            .if(sheet == .currentProfile) { view in
+                view.background(
+                    (colorScheme == .dark
+                        ? Color(
+                            red: 29 / 255,
+                            green: 29 / 255,
+                            blue: 30 / 255
+                        )
+                        : Color(
+                            red: 244 / 255,
+                            green: 240 / 255,
+                            blue: 232 / 255
+                        )
+                    )
+                    .ignoresSafeArea()
+                )
+            }
         }
         .overlay {
             if let la = chatModel.laRequest {
