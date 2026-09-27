@@ -531,8 +531,8 @@ struct XauXatWelcomeView: View {
     }
 
     private func applyDefaultNotificationMode() {
-        xauXatSetNotificationModeIntent(.instant)
-        chatModel.notificationMode = .instant
+        xauXatSetNotificationModeIntent(.off)
+        chatModel.notificationMode = .off
         reconcileXauXatNotificationRegistration(token: chatModel.deviceToken)
     }
 }
@@ -1589,9 +1589,10 @@ private struct XauXatNotificationsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var mode = ChatModel.shared.notificationMode
     @State private var errorMessage: String?
+    @State private var proposedMode: NotificationsMode?
 
     private var palette: XauXatPalette { XauXatPalette(colorScheme) }
-    private let modes: [NotificationsMode] = [.instant, .periodic, .off]
+    private let modes: [NotificationsMode] = [.off, .instant, .periodic]
 
     var body: some View {
         ScrollView {
@@ -1599,7 +1600,7 @@ private struct XauXatNotificationsView: View {
                 XauXatSectionTitle("DELIVERY", palette: palette)
                 XauXatSettingsCard(palette: palette) {
                     ForEach(modes, id: \.self) { candidate in
-                        Button { update(candidate) } label: {
+                        Button { select(candidate) } label: {
                             XauXatSelectionRow(
                                 palette: palette,
                                 title: candidate.label,
@@ -1611,7 +1612,7 @@ private struct XauXatNotificationsView: View {
                     }
                 }
 
-                Text("Notification content remains end-to-end encrypted. You can control lock-screen previews in iOS Settings.")
+                Text("Notifications are off by default. Enabling them uses Apple Push Notification service, even though message content stays encrypted.")
                     .font(.system(size: 11, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1657,16 +1658,41 @@ private struct XauXatNotificationsView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .sheet(item: $proposedMode) { candidate in
+            XauXatNotificationPrivacyNotice(
+                mode: candidate,
+                onCancel: { proposedMode = nil },
+                onEnable: {
+                    proposedMode = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        enable(candidate)
+                    }
+                }
+            )
+        }
     }
 
-    private func update(_ newMode: NotificationsMode) {
+    private func select(_ newMode: NotificationsMode) {
         guard newMode != mode else { return }
-        xauXatSetNotificationModeIntent(newMode)
-        mode = newMode
-        chatModel.notificationMode = newMode
-        chatModel.notificationRegistrationError = nil
-        errorMessage = nil
-        reconcileXauXatNotificationRegistration(token: chatModel.deviceToken)
+        if newMode == .off {
+            xauXatApplyNotificationMode(.off) { _ in mode = .off }
+        } else if !xauXatNotificationServerConfigured {
+            errorMessage = "This build has no XauXat notification server. No third-party server will be used as a fallback."
+        } else {
+            proposedMode = newMode
+        }
+    }
+
+    private func enable(_ newMode: NotificationsMode) {
+        xauXatApplyNotificationMode(newMode) { enabled in
+            if enabled {
+                mode = newMode
+                errorMessage = nil
+            } else {
+                mode = xauXatNotificationModeIntent() ?? chatModel.notificationMode
+                errorMessage = "The notification mode was not changed. Allow notifications in iOS Settings, then try again in XauXat."
+            }
+        }
     }
 
     private var registrationStatus: String {
@@ -1676,6 +1702,81 @@ private struct XauXatNotificationsView: View {
         if chatModel.deviceToken == nil { return "Waiting for an APNs token from iOS. This choice will be applied automatically." }
         if let status = chatModel.tokenStatus { return "APNs token status: \(status.text)." }
         return "Waiting for notification registration."
+    }
+}
+
+private struct XauXatNotificationPrivacyNotice: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+
+    let mode: NotificationsMode
+    let onCancel: () -> Void
+    let onEnable: () -> Void
+
+    private var palette: XauXatPalette { XauXatPalette(colorScheme) }
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    Text("Before you enable notifications")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(palette.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(mode == .instant ? "Faster alerts add metadata and Apple infrastructure to the delivery path." : "Periodic checks share less activity data, but still rely on Apple infrastructure.")
+                        .font(.system(size: 17))
+                        .foregroundStyle(palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    VStack(alignment: .leading, spacing: 20) {
+                        ForEach(Array(notificationPrivacyPoints(mode).enumerated()), id: \.offset) { index, point in
+                            HStack(alignment: .top, spacing: 14) {
+                                Text("\(index + 1)")
+                                    .font(.custom("Courier", size: 13).weight(.bold))
+                                    .foregroundStyle(palette.muted)
+                                    .frame(width: 20, alignment: .leading)
+
+                                Text(point)
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(palette.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+
+                    Text("You can turn notifications off again at any time. XauXat will then remove its registered push token.")
+                        .font(.custom("Courier", size: 11))
+                        .foregroundStyle(palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        dismiss()
+                        onEnable()
+                    } label: {
+                        Text("I understand, enable \(mode == .instant ? "instant" : "periodic") notifications")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(palette.ivoryInk)
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .background(palette.ivory)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
+                }
+                .padding(22)
+            }
+            .background(palette.background.ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Not now") {
+                        dismiss()
+                        onCancel()
+                    }
+                    .foregroundStyle(palette.ink)
+                }
+            }
+        }
     }
 }
 

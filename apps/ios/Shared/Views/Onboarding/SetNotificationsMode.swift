@@ -14,6 +14,7 @@ struct SetNotificationsMode: View {
     @Environment(\.dismiss) var dismiss
     @Binding var notificationMode: NotificationsMode
     @State private var showInfo = false
+    @State private var proposedMode: NotificationsMode?
 
     var body: some View {
         GeometryReader { g in
@@ -34,7 +35,13 @@ struct SetNotificationsMode: View {
                     Spacer()
 
                     ForEach(NotificationsMode.values) { mode in
-                        NtfModeSelector(mode: mode, selection: $notificationMode)
+                        NtfModeSelector(mode: mode, selection: $notificationMode) {
+                            if mode == .off {
+                                notificationMode = .off
+                            } else {
+                                proposedMode = mode
+                            }
+                        }
                     }
 
                     Spacer()
@@ -57,6 +64,16 @@ struct SetNotificationsMode: View {
         .sheet(isPresented: $showInfo) {
             NotificationsInfoView()
         }
+        .alert(item: $proposedMode) { mode in
+            Alert(
+                title: Text("Before you enable notifications"),
+                message: Text(notificationPrivacySummary(mode)),
+                primaryButton: .default(Text("I understand, enable")) {
+                    notificationMode = mode
+                },
+                secondaryButton: .cancel(Text("Not now"))
+            )
+        }
     }
 }
 
@@ -64,6 +81,7 @@ struct NtfModeSelector: View {
     @EnvironmentObject var theme: AppTheme
     var mode: NotificationsMode
     @Binding var selection: NotificationsMode
+    var onSelect: (() -> Void)? = nil
     @State private var tapped = false
 
     var body: some View {
@@ -97,7 +115,13 @@ struct NtfModeSelector: View {
         )
         ._onButtonGesture { down in
             tapped = down
-            if down { selection = mode }
+            if down {
+                if let onSelect {
+                    onSelect()
+                } else {
+                    selection = mode
+                }
+            }
         } perform: {}
     }
 }
@@ -135,6 +159,6 @@ struct NotificationsInfoView: View {
 
 struct NotificationsModeView_Previews: PreviewProvider {
     static var previews: some View {
-        SetNotificationsMode(notificationMode: .constant(.instant))
+        SetNotificationsMode(notificationMode: .constant(.off))
     }
 }

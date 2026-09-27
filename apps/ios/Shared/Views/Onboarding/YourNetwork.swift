@@ -26,7 +26,7 @@ struct YourNetworkView: View {
     @Environment(\.colorScheme) var colorScheme: ColorScheme
     @State private var serverOperators: [ServerOperator] = []
     @State private var selectedOperatorIds = Set<Int64>()
-    @State private var notificationMode: NotificationsMode = .instant
+    @State private var notificationMode: NotificationsMode = .off
     @State private var sheetItem: YourNetworkSheet? = nil
     @State private var nextStepNavLinkActive = false
     @State private var justOpened = true
@@ -165,26 +165,12 @@ struct YourNetworkView: View {
     }
 
     private func applyNotificationMode() {
-        let m = ChatModel.shared
-        if let token = m.deviceToken {
-            switch notificationMode {
-            case .off:
-                m.tokenStatus = .new
-                m.notificationMode = .off
-            default:
-                Task {
-                    do {
-                        let status = try await apiRegisterToken(token: token, notificationMode: notificationMode)
-                        await MainActor.run {
-                            m.tokenStatus = status
-                            m.notificationMode = notificationMode
-                        }
-                    } catch let error {
-                        await MainActor.run {
-                            showErrorAlert(error, NSLocalizedString("Error enabling notifications", comment: ""))
-                        }
-                    }
-                }
+        xauXatApplyNotificationMode(notificationMode) { enabled in
+            if !enabled {
+                showAlert(
+                    NSLocalizedString("Notifications remain off", comment: "notification permission denied title"),
+                    message: NSLocalizedString("You can enable notifications later in XauXat Settings after allowing them in iOS Settings.", comment: "notification permission denied message")
+                )
             }
         }
     }

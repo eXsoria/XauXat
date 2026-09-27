@@ -25,7 +25,7 @@ struct NotificationsView: View {
                 ProgressView().scaleEffect(2)
             }
         }
-        .alert(item: $ntfAlert) { alert in notificationAlert(alert, m.deviceToken) }
+        .alert(item: $ntfAlert) { alert in notificationAlert(alert) }
     }
 
     private func viewBody() -> some View {
@@ -35,9 +35,9 @@ struct NotificationsView: View {
                     List {
                         Section {
                             SelectionListView(list: NotificationsMode.values, selection: $notificationMode) { mode in
-                                if mode == .instant && !xauXatNotificationServerConfigured {
+                                if mode != .off && !xauXatNotificationServerConfigured {
                                     ntfAlert = .error(
-                                        title: "Instant notifications unavailable",
+                                        title: "Push notifications unavailable",
                                         error: "This build has no XauXat notification server. No third-party server will be used as a fallback."
                                     )
                                 } else {
@@ -78,7 +78,7 @@ struct NotificationsView: View {
                         .font(.callout)
                         .padding(.top, 1)
                 } else if !xauXatNotificationServerConfigured {
-                    Text("Instant notifications are unavailable in this build. XauXat will not use a third-party notification server as a fallback.")
+                    Text("Push notifications are unavailable in this build. XauXat will not use a third-party notification server as a fallback.")
                         .foregroundColor(theme.colors.secondary)
                         .font(.callout)
                         .padding(.top, 1)
@@ -91,15 +91,14 @@ struct NotificationsView: View {
         }
     }
 
-    private func notificationAlert(_ alert: NotificationAlert, _ token: DeviceToken?) -> Alert {
+    private func notificationAlert(_ alert: NotificationAlert) -> Alert {
         switch alert {
         case let .setMode(mode):
-            guard let token else { return Alert(title: Text("No device token!")) }
             return Alert(
                 title: Text(ntfModeAlertTitle(mode)),
-                message: Text(ntfModeDescription(mode)),
-                primaryButton: .default(Text(mode == .off ? "Turn off" : "Enable")) {
-                    setNotificationsMode(token, mode)
+                message: Text(notificationPrivacySummary(mode)),
+                primaryButton: .default(Text(mode == .off ? "Turn off" : "I understand, enable")) {
+                    setNotificationsMode(mode)
                 },
                 secondaryButton: .cancel() {
                     notificationMode = m.notificationMode
@@ -123,44 +122,17 @@ struct NotificationsView: View {
         }
     }
 
-    private func setNotificationsMode(_ token: DeviceToken, _ mode: NotificationsMode) {
-        Task {
-            switch mode {
-            case .off:
-                do {
-                    try await apiDeleteToken(token: token)
-                    await MainActor.run {
-                        m.tokenStatus = .new
-                        notificationMode = .off
-                        m.notificationMode = .off
-                        m.notificationServer = nil
-                        testedSuccess = nil
-                    }
-                } catch let error {
-                    await MainActor.run {
-                        let err = responseError(error)
-                        logger.error("apiDeleteToken error: \(err)")
-                        ntfAlert = .error(title: "Error deleting token", error: err)
-                    }
-                }
-            default:
-                do {
-                    let _ = try await apiRegisterToken(token: token, notificationMode: mode)
-                    let (_, tknStatus, ntfMode, ntfServer) = apiGetNtfToken()
-                    await MainActor.run {
-                        m.tokenStatus = tknStatus
-                        notificationMode = ntfMode
-                        m.notificationMode = ntfMode
-                        m.notificationServer = ntfServer
-                        testedSuccess = nil
-                    }
-                } catch let error {
-                    await MainActor.run {
-                        let err = responseError(error)
-                        logger.error("apiRegisterToken error: \(err)")
-                        ntfAlert = .error(title: "Error enabling notifications", error: err)
-                    }
-                }
+    private func setNotificationsMode(_ mode: NotificationsMode) {
+        xauXatApplyNotificationMode(mode) { enabled in
+            if enabled {
+                notificationMode = mode
+                testedSuccess = nil
+            } else {
+                notificationMode = m.notificationMode
+                ntfAlert = .error(
+                    title: "Notifications remain off",
+                    error: "Allow notifications in iOS Settings before enabling them in XauXat."
+                )
             }
         }
     }
@@ -253,17 +225,42 @@ struct NotificationsView: View {
 
 func ntfModeDescription(_ mode: NotificationsMode) -> LocalizedStringKey {
     switch mode {
-    case .off: return "**Most private**: do not use the XauXat push service. The app will check messages in background, when the system allows it, depending on how often you use the app."
-    case .periodic: return "**More private**: check new messages every 20 minutes. Only device token is shared with our push server. It doesn't see how many contacts you have, or any message metadata."
-    case .instant: return "**Recommended**: device token and end-to-end encrypted notifications are sent to the XauXat push service, but it does not see the message content, size or who it is from."
+    case .off: return "**Most private**: no APNs token is shared with the XauXat push service. Open XauXat to check for new messages."
+    case .periodic: return "Periodic checks use Apple Push Notification service to wake XauXat. The XauXat push service receives the device token, but not subscriptions to individual message queues."
+    case .instant: return "Instant alerts use Apple Push Notification service and the XauXat push service. Notification metadata is encrypted and does not contain message text or contact identity."
     }
 }
 
 func ntfModeShortDescription(_ mode: NotificationsMode) -> LocalizedStringKey {
     switch mode {
-    case .off: return "Check messages when allowed."
+    case .off: return "No background alerts."
     case .periodic: return "Check messages every 20 min."
     case .instant: return "E2E encrypted notifications."
+    }
+}
+
+func notificationPrivacySummary(_ mode: NotificationsMode) -> String {
+    notificationPrivacyPoints(mode).joined(separator: "\n\n")
+}
+
+func notificationPrivacyPoints(_ mode: NotificationsMode) -> [String] {
+    switch mode {
+    case .off:
+        return [String(localized: "No APNs token is shared with the XauXat push service. Open XauXat to check for new messages.")]
+    case .periodic:
+        return [
+            String(localized: "Apple Push Notification service periodically wakes XauXat. This Apple delivery is outside Tor."),
+            String(localized: "Apple can observe that this device receives pushes and their timing. The payload contains no message text or contact identity."),
+            String(localized: "The XauXat push service receives the device APNs token, but not subscriptions to individual message queues."),
+            String(localized: "Message retrieval uses XauXat's embedded Tor connection. Periodic checks can arrive late because iOS controls background timing.")
+        ]
+    case .instant:
+        return [
+            String(localized: "Apple Push Notification service delivers an encrypted wake-up signal. This Apple delivery is outside Tor."),
+            String(localized: "Apple can observe that this device receives pushes and their timing. The payload contains no message text or contact identity."),
+            String(localized: "The XauXat push service receives the device APNs token and separate notification queue subscriptions. It can infer how many queues have notifications enabled and approximate activity, but it does not receive message queue addresses."),
+            String(localized: "When the extension wakes, message retrieval uses its own embedded Tor connection and fails closed if Tor is unavailable.")
+        ]
     }
 }
 
