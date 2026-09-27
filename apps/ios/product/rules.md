@@ -146,3 +146,8 @@
 **Rule:** CallKit MUST be disabled in regions where it is restricted (China). The app uses in-app call UI as fallback.
 **Enforced by:** `CallController.swift` checks `useCallKit()` based on region; `ActiveCallView.swift` provides fallback UI.
 **Spec:** [spec/services/calls.md](../spec/services/calls.md)
+
+### RULE-24: Outgoing call privacy confirmation
+**Rule:** Before creating outgoing call state, the app MUST explain that call audio is E2EE but does not use Tor, describe the metadata exposed by the current WebRTC relay policy, and require the user to continue or cancel.
+**Enforced by:** `CallController.startCall` presents the policy-specific confirmation; only `startCallAfterPrivacyConfirmation` creates the outgoing call.
+**Spec:** [product/flows/calling.md](flows/calling.md)

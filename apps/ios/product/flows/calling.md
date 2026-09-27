@@ -19,18 +19,23 @@ WebRTC-based audio and video calling in SimpleX Chat iOS. Calls are end-to-end e
 
 1. User opens a direct chat in `ChatView`.
 2. Taps the audio or video call button in the navigation bar.
-3. `CallController` determines call type: `CallType(media: .audio/.video, capabilities: CallCapabilities(encryption: true))`.
-4. If CallKit is enabled (`CallController.useCallKit()`):
+3. `CallController` verifies that the contact invite permits calls.
+4. Shows a privacy confirmation before creating any call state:
+   - call audio is end-to-end encrypted but does not use Tor;
+   - with the default relay-only policy, the relay hides the caller's IP from the contact but can observe the caller's IP and call duration;
+   - if relay-only mode is disabled, the warning explains that a direct connection may expose the caller's IP to the contact;
+   - cancelling leaves the app without an active outgoing call.
+5. After confirmation, `CallController` determines the effective call type and creates the outgoing call.
+6. If CallKit is enabled (`CallController.useCallKit()`):
    - `CXStartCallAction` is requested via `CXCallController`.
    - CallKit reports the outgoing call.
    - `provider(perform: CXStartCallAction)` fulfills and reports `reportOutgoingCall(startedConnectingAt:)`.
-5. Calls `apiSendCallInvitation(contact:callType:)`:
+7. Calls `apiSendCallInvitation(contact:callType:)`:
    ```swift
    func apiSendCallInvitation(_ contact: Contact, _ callType: CallType) async throws
    ```
-6. Sends `ChatCommand.apiSendCallInvitation(contact:callType:)`.
-7. Core sends the call invitation to the contact via SMP.
-8. `ChatModel.shared.activeCall` is set with the call state.
+8. Sends `ChatCommand.apiSendCallInvitation(contact:callType:)`.
+9. Core sends the call invitation to the contact via SMP.
 
 ### 2. Receive Call
 
