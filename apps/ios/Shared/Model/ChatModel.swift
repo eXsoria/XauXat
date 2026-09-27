@@ -507,8 +507,6 @@ final class ChatModel: ObservableObject {
     // usage conditions
     @Published var conditions: ServerOperatorConditions = .empty
 
-    var messageDelivery: Dictionary<Int64, () -> Void> = [:]
-
     var filesToDelete: Set<URL> = []
 
     static let shared = ChatModel()

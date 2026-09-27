@@ -69,6 +69,31 @@ struct CIMetaView: View {
     }
 }
 
+func xauXatDeliveryStatusText(_ status: CIStatus) -> String? {
+    switch status {
+    case .sndNew:
+        NSLocalizedString("Sending via Tor", comment: "outbound message delivery status")
+    case let .sndSent(sndProgress):
+        sndProgress == .complete
+            ? NSLocalizedString("Sent to relay", comment: "outbound message delivery status")
+            : NSLocalizedString("Sending to relays", comment: "outbound message delivery status")
+    case let .sndRcvd(msgRcptStatus, sndProgress):
+        if msgRcptStatus == .badMsgHash {
+            NSLocalizedString("Receipt mismatch", comment: "outbound message delivery status")
+        } else if sndProgress == .complete {
+            NSLocalizedString("Delivered", comment: "outbound message delivery status")
+        } else {
+            NSLocalizedString("Partly delivered", comment: "outbound message delivery status")
+        }
+    case .sndWarning:
+        NSLocalizedString("Retrying delivery", comment: "outbound message delivery status")
+    case .sndErrorAuth, .sndError:
+        NSLocalizedString("Delivery failed", comment: "outbound message delivery status")
+    case .rcvNew, .rcvRead, .invalid:
+        nil
+    }
+}
+
 enum MetaColorMode {
     // Renders provided colours
     case normal
@@ -124,7 +149,13 @@ func ciMetaText(
         }
     }
     let resolved = colorMode.resolve(color)
+    if showStatus, let deliveryStatusText = xauXatDeliveryStatusText(meta.itemStatus) {
+        let statusColor = onlyOverrides ? Color.clear : resolved
+        r = r + colored(Text(deliveryStatusText), statusColor)
+        space = textSpace
+    }
     if showEdited, meta.itemEdited {
+        appendSpace()
         r = r + statusIconText("pencil", resolved)
     }
     if meta.disappearing {

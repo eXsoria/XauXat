@@ -50,27 +50,208 @@ enum TerminalItem: Identifiable {
     }
 }
 
-// Spec: spec/architecture.md#beginBGTask
-func beginBGTask(_ handler: (() -> Void)? = nil) -> (() -> Void) {
-    var id: UIBackgroundTaskIdentifier!
-    var running = true
-    let endTask = {
-//        logger.debug("beginBGTask: endTask \(id.rawValue)")
-        if running {
-            running = false
-            if let h = handler {
-//                logger.debug("beginBGTask: user handler")
-                h()
-            }
+private final class XauXatBackgroundTaskState {
+    private let lock = NSLock()
+    private var id: UIBackgroundTaskIdentifier = .invalid
+    private var ended = false
+    private let onFinish: (Bool) -> Void
+
+    init(onFinish: @escaping (Bool) -> Void) {
+        self.onFinish = onFinish
+    }
+
+    func install(_ id: UIBackgroundTaskIdentifier) {
+        lock.lock()
+        if ended {
+            lock.unlock()
             if id != .invalid {
                 UIApplication.shared.endBackgroundTask(id)
-                id = .invalid
             }
+        } else {
+            self.id = id
+            lock.unlock()
         }
     }
-    id = UIApplication.shared.beginBackgroundTask(expirationHandler: endTask)
-//    logger.debug("beginBGTask: \(id.rawValue)")
-    return endTask
+
+    func finish(expired: Bool) {
+        lock.lock()
+        guard !ended else {
+            lock.unlock()
+            return
+        }
+        ended = true
+        let taskId = id
+        id = .invalid
+        lock.unlock()
+
+        onFinish(expired)
+        if taskId != .invalid {
+            UIApplication.shared.endBackgroundTask(taskId)
+        }
+    }
+}
+
+private func beginTrackedBGTask(
+    name: String? = nil,
+    onFinish: @escaping (Bool) -> Void = { _ in }
+) -> (() -> Void) {
+    let state = XauXatBackgroundTaskState(onFinish: onFinish)
+    let id = UIApplication.shared.beginBackgroundTask(withName: name) {
+        state.finish(expired: true)
+    }
+    state.install(id)
+    return {
+        state.finish(expired: false)
+    }
+}
+
+// Spec: spec/architecture.md#beginBGTask
+func beginBGTask(_ handler: (() -> Void)? = nil) -> (() -> Void) {
+    beginTrackedBGTask { _ in handler?() }
+}
+
+final class OutboundDeliveryManager {
+    static let shared = OutboundDeliveryManager()
+
+    private struct Delivery {
+        var itemIds: Set<Int64> = []
+        var endTask: (() -> Void)?
+    }
+
+    private let lock = NSLock()
+    private var deliveries: [UUID: Delivery] = [:]
+    private var deliveryByItemId: [Int64: UUID] = [:]
+    private var recentlyFinished: [Int64: Date] = [:]
+
+    private let finishedRetention: TimeInterval = 30
+    private init() {}
+
+    func beginSend() -> UUID {
+        let token = UUID()
+        lock.lock()
+        deliveries[token] = Delivery()
+        lock.unlock()
+
+        let endTask = beginTrackedBGTask(name: "XauXat outbound delivery") { [weak self] expired in
+            if expired {
+                self?.expire(token)
+            }
+        }
+
+        lock.lock()
+        if var delivery = deliveries[token] {
+            delivery.endTask = endTask
+            deliveries[token] = delivery
+            lock.unlock()
+        } else {
+            lock.unlock()
+            endTask()
+        }
+        logger.notice("Outbound delivery started")
+        return token
+    }
+
+    func register(_ token: UUID, itemIds: [Int64]) {
+        let uniqueItemIds = Set(itemIds)
+        var taskToEnd: (() -> Void)?
+        var trackedCount = 0
+
+        lock.lock()
+        pruneRecentlyFinished(now: Date())
+        if var delivery = deliveries[token] {
+            delivery.itemIds = uniqueItemIds.filter { recentlyFinished.removeValue(forKey: $0) == nil }
+            if delivery.itemIds.isEmpty {
+                deliveries.removeValue(forKey: token)
+                taskToEnd = delivery.endTask
+            } else {
+                for itemId in delivery.itemIds {
+                    deliveryByItemId[itemId] = token
+                }
+                trackedCount = delivery.itemIds.count
+                deliveries[token] = delivery
+            }
+        }
+        lock.unlock()
+
+        taskToEnd?()
+        if trackedCount > 0 {
+            logger.notice("Outbound delivery tracking \(trackedCount, privacy: .public) message(s)")
+        }
+    }
+
+    func commandFailed(_ token: UUID) {
+        finish(token, reason: "command failed")
+    }
+
+    func statusReachedTerminalState(itemId: Int64) {
+        var taskToEnd: (() -> Void)?
+        var remaining = 0
+
+        lock.lock()
+        pruneRecentlyFinished(now: Date())
+        if let token = deliveryByItemId.removeValue(forKey: itemId), var delivery = deliveries[token] {
+            delivery.itemIds.remove(itemId)
+            remaining = delivery.itemIds.count
+            if delivery.itemIds.isEmpty {
+                deliveries.removeValue(forKey: token)
+                taskToEnd = delivery.endTask
+            } else {
+                deliveries[token] = delivery
+            }
+        } else {
+            // A delivery event can race the API response that registers its item IDs.
+            recentlyFinished[itemId] = Date()
+        }
+        lock.unlock()
+
+        taskToEnd?()
+        logger.notice("Outbound delivery reached terminal state; \(remaining, privacy: .public) message(s) remain in this send")
+    }
+
+    var pendingMessageCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return deliveries.values.reduce(0) { count, delivery in
+            count + max(1, delivery.itemIds.count)
+        }
+    }
+
+    func suspendTimeout(defaultTimeout: Int, backgroundTimeRemaining: TimeInterval) -> Int {
+        XauXatOutboundDeliveryPolicy.suspendTimeout(
+            defaultTimeout: defaultTimeout,
+            backgroundTimeRemaining: backgroundTimeRemaining,
+            hasPendingDelivery: pendingMessageCount > 0
+        )
+    }
+
+    private func finish(_ token: UUID, reason: String) {
+        var taskToEnd: (() -> Void)?
+        lock.lock()
+        if let delivery = deliveries.removeValue(forKey: token) {
+            for itemId in delivery.itemIds {
+                deliveryByItemId.removeValue(forKey: itemId)
+            }
+            taskToEnd = delivery.endTask
+        }
+        lock.unlock()
+        taskToEnd?()
+        logger.notice("Outbound delivery ended: \(reason, privacy: .public)")
+    }
+
+    private func expire(_ token: UUID) {
+        lock.lock()
+        if let delivery = deliveries.removeValue(forKey: token) {
+            for itemId in delivery.itemIds {
+                deliveryByItemId.removeValue(forKey: itemId)
+            }
+        }
+        lock.unlock()
+        logger.error("Outbound delivery background time expired; the SimpleX outbox remains pending")
+    }
+
+    private func pruneRecentlyFinished(now: Date) {
+        recentlyFinished = recentlyFinished.filter { now.timeIntervalSince($0.value) < finishedRetention }
+    }
 }
 
 let msgDelay: Double = 7.5
@@ -579,41 +760,21 @@ func apiSendMessages(type: ChatType, id: Int64, scope: GroupChatScope?, sendAsGr
 }
 
 private func processSendMessageCmd(toChatType: ChatType, cmd: ChatCommand) async -> [ChatItem]? {
-    let chatModel = ChatModel.shared
-    let r: APIResult<ChatResponse1>
-    if toChatType == .direct {
-        var cItem: ChatItem? = nil
-        let endTask = beginBGTask({
-            if let cItem = cItem {
-                DispatchQueue.main.async {
-                    chatModel.messageDelivery.removeValue(forKey: cItem.id)
-                }
-            }
-        })
-        r = await chatApiSendCmd(cmd, bgTask: false)
-        if case let .result(.newChatItems(_, aChatItems)) = r {
-            let cItems = aChatItems.map { $0.chatItem }
-            if let cItemLast = cItems.last {
-                cItem = cItemLast
-                chatModel.messageDelivery[cItemLast.id] = endTask
-            }
-            return cItems
-        }
-        if let networkErrorAlert = networkErrorAlert(r) {
-            await MainActor.run { showAlert(networkErrorAlert) }
-        } else {
-            sendMessageErrorAlert(r.unexpected)
-        }
-        endTask()
-        return nil
-    } else {
-        r = await chatApiSendCmd(cmd, bgDelay: msgDelay)
-        if case let .result(.newChatItems(_, aChatItems)) = r {
-            return aChatItems.map { $0.chatItem }
-        }
-        sendMessageErrorAlert(r.unexpected)
-        return nil
+    let deliveryToken = OutboundDeliveryManager.shared.beginSend()
+    let r: APIResult<ChatResponse1> = await chatApiSendCmd(cmd, bgTask: false)
+    if case let .result(.newChatItems(_, aChatItems)) = r {
+        let cItems = aChatItems.map { $0.chatItem }
+        OutboundDeliveryManager.shared.register(deliveryToken, itemIds: cItems.map(\.id))
+        return cItems
     }
+
+    OutboundDeliveryManager.shared.commandFailed(deliveryToken)
+    if toChatType == .direct, let networkErrorAlert = networkErrorAlert(r) {
+        await MainActor.run { showAlert(networkErrorAlert) }
+    } else {
+        sendMessageErrorAlert(r.unexpected)
+    }
+    return nil
 }
 
 func apiCreateChatItems(noteFolderId: Int64, composedMessages: [ComposedMessage]) async -> [ChatItem]? {
@@ -2775,18 +2936,11 @@ func processReceivedMsg(_ res: ChatEvent) async {
             if !cItem.isDeletedContent && active(user) {
                 _ = await MainActor.run { m.upsertChatItem(cInfo, cItem) }
             }
-            if let endTask = m.messageDelivery[cItem.id] {
-                switch cItem.meta.itemStatus {
-                case .sndNew: ()
-                case .sndSent: endTask()
-                case .sndRcvd: endTask()
-                case .sndErrorAuth: endTask()
-                case .sndError: endTask()
-                case .sndWarning: endTask()
-                case .rcvNew: ()
-                case .rcvRead: ()
-                case .invalid: ()
-                }
+            switch cItem.meta.itemStatus {
+            case .sndNew: ()
+            case .sndSent, .sndRcvd, .sndErrorAuth, .sndError, .sndWarning:
+                OutboundDeliveryManager.shared.statusReachedTerminalState(itemId: cItem.id)
+            case .rcvNew, .rcvRead, .invalid: ()
             }
         }
     case let .chatItemUpdated(user, aChatItem):
