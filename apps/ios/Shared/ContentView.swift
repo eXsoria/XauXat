@@ -528,7 +528,6 @@ private struct XauXatOpeningView: View {
     @State private var animationTask: Task<Void, Never>?
 
     @State private var loadingMessageIndex = 0
-    @State private var loadingMessageOpacity = 1.0
     @State private var messageTask: Task<Void, Never>?
 
     private let champagne = Color(
@@ -672,7 +671,6 @@ private struct XauXatOpeningView: View {
                         )
                         .lineLimit(2)
                         .minimumScaleFactor(0.92)
-                        .opacity(loadingMessageOpacity)
                 }
                 .frame(height: 78, alignment: .top)
                 .padding(.top, 4)
@@ -726,26 +724,14 @@ private struct XauXatOpeningView: View {
         messageTask?.cancel()
 
         loadingMessageIndex = 0
-        loadingMessageOpacity = 1
 
         messageTask = Task { @MainActor in
             // Num arranque rápido só aparece o estado da ligação Tor.
             try? await Task.sleep(nanoseconds: 3_000_000_000)
 
             while !Task.isCancelled {
-                withAnimation(.easeOut(duration: 0.28)) {
-                    loadingMessageOpacity = 0
-                }
-
-                try? await Task.sleep(nanoseconds: 320_000_000)
-                if Task.isCancelled { break }
-
                 loadingMessageIndex =
                     (loadingMessageIndex + 1) % loadingMessages.count
-
-                withAnimation(.easeIn(duration: 0.32)) {
-                    loadingMessageOpacity = 1
-                }
 
                 // Tempo para ler antes da próxima mensagem.
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
@@ -850,4 +836,3 @@ private struct XauXatOpeningView: View {
         try? await Task.sleep(nanoseconds: 90_000_000)
     }
 }
-
