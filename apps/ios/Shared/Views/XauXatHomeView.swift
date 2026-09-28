@@ -194,7 +194,7 @@ struct XauXatWelcomeView: View {
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
-                    .foregroundStyle(palette.ink)
+                    .foregroundStyle(colorScheme == .dark ? palette.ivory : palette.ink)
                     .frame(width: compact ? 96 : 112,
                            height: compact ? 76 : 88)
                     .accessibilityHidden(true)
@@ -202,7 +202,8 @@ struct XauXatWelcomeView: View {
                 Text(verbatim: "xauxat")
                     .font(.custom("Courier", size: compact ? 24 : 27).weight(.bold))
                     .tracking(2.7)
-                    .foregroundStyle(palette.ink)
+                    .foregroundStyle(colorScheme == .dark ? palette.ivory : palette.ink)
+                    .offset(x: 2)
                     .accessibilityLabel("XauXat")
             }
             .frame(maxWidth: .infinity, alignment: .center)
@@ -569,6 +570,7 @@ struct XauXatHomeView: View {
 
     @State private var tab: XauXatTab = .chats
     @State private var showNewChatSheet = false
+    @State private var showQRScanner = false
     @State private var parentSheet: SomeSheet<AnyView>?
     @State private var scrollToItemId: ChatItem.ID?
     @StateObject private var chatTagsModel = ChatTagsModel.shared
@@ -588,7 +590,10 @@ struct XauXatHomeView: View {
                     palette: palette,
                     action: (tab == .settings || tab == .notes)
                         ? nil
-                        : { showNewChatSheet = true }
+                        : { showNewChatSheet = true },
+                    qrAction: (tab == .settings || tab == .notes)
+                        ? nil
+                        : { showQRScanner = true }
                 )
 
                 Group {
@@ -623,8 +628,20 @@ struct XauXatHomeView: View {
             .background(palette.background.ignoresSafeArea())
             .navigationBarHidden(true)
         }
+        .tint(palette.ink)
+        .accentColor(palette.ink)
         .appSheet(isPresented: $showNewChatSheet) {
             XauXatNewChatSheet(palette: palette)
+        }
+        .appSheet(isPresented: $showQRScanner) {
+            NavigationView {
+                NewChatView(
+                    selection: .connect,
+                    showQRCodeScanner: true,
+                    xauXatStyle: true
+                )
+                .modifier(ThemedBackground(grouped: true))
+            }
         }
         .appSheet(
             item: $activeUserPickerSheet,
@@ -658,23 +675,37 @@ struct XauXatHomeView: View {
 private struct XauXatHeader: View {
     let palette: XauXatPalette
     let action: (() -> Void)?
+    let qrAction: (() -> Void)?
 
     var body: some View {
         HStack {
             Spacer()
 
-            if let action {
-                Button(action: action) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(palette.ivoryInk)
-                        .frame(width: 32, height: 32)
-                        .background(palette.ivory, in: Circle())
+            HStack(spacing: 14) {
+                if let qrAction {
+                    Button(action: qrAction) {
+                        Image(systemName: "qrcode.viewfinder")
+                            .font(.system(size: 23, weight: .medium))
+                            .foregroundStyle(palette.ink)
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Scan QR code")
                 }
-                .buttonStyle(.plain)
-                .offset(y: 7)
-                .accessibilityLabel("New conversation")
+
+                if let action {
+                    Button(action: action) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(palette.ivoryInk)
+                            .frame(width: 32, height: 32)
+                            .background(palette.ivory, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("New conversation")
+                }
             }
+            .offset(y: 7)
         }
         .frame(height: 38)
         .padding(.horizontal, 22)
@@ -781,28 +812,30 @@ private struct XauXatChatsView: View {
                 )
                 .contentShape(Rectangle())
                 .gesture(pullGesture)
-            } else if chats.isEmpty {
-                VStack(spacing: 8) {
-                    Text("No results")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(palette.ink)
-
-                    Text("No conversations match your search.")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(palette.muted)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 42)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(chats, id: \.viewId) { chat in
-                            XauXatChatDestination(
-                                chat: chat,
-                                palette: palette,
-                                parentSheet: $parentSheet,
-                                contactStyle: false
-                            )
+                        if chats.isEmpty {
+                            VStack(spacing: 8) {
+                                Text("No results")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(palette.ink)
+
+                                Text("No conversations match your search.")
+                                    .font(.system(size: 14, weight: .regular))
+                                    .foregroundStyle(palette.muted)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 30)
+                        } else {
+                            ForEach(chats, id: \.viewId) { chat in
+                                XauXatChatDestination(
+                                    chat: chat,
+                                    palette: palette,
+                                    parentSheet: $parentSheet,
+                                    contactStyle: false
+                                )
+                            }
                         }
                     }
                     .padding(.horizontal, 22)
@@ -818,14 +851,30 @@ private struct XauXatChatsView: View {
     private var pullGesture: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
-                guard !searchRevealed else { return }
+                let vertical = value.translation.height
 
-                pullDistance = max(0, value.translation.height)
+                if !searchRevealed {
+                    pullDistance = max(0, vertical)
 
-                if pullDistance >= 38 {
-                    withAnimation(.easeOut(duration: 0.20)) {
-                        searchRevealed = true
+                    if pullDistance >= 38 {
+                        withAnimation(.easeOut(duration: 0.20)) {
+                            searchRevealed = true
+                        }
+                        pullDistance = 0
                     }
+
+                    return
+                }
+
+                guard searchText.isEmpty else {
+                    return
+                }
+
+                if vertical <= -28 {
+                    withAnimation(.easeOut(duration: 0.20)) {
+                        searchRevealed = false
+                    }
+                    pullDistance = 0
                 }
             }
             .onEnded { _ in
@@ -950,7 +999,7 @@ private struct XauXatContactsView: View {
             .background(palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .padding(.horizontal, 22)
-            .padding(.top, 8)
+            .padding(.top, 10)
 
             if contacts.isEmpty {
                 XauXatEmptyState(
@@ -959,6 +1008,9 @@ private struct XauXatContactsView: View {
                     subtitle: searchText.isEmpty ? "Create a private link to connect." : "Try a different name.",
                     action: searchText.isEmpty ? { showNewChatSheet = true } : nil
                 )
+                // Keep the Contacts empty state optically aligned
+                // with the Chats empty state.
+                .offset(y: -5)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -1175,7 +1227,8 @@ private struct XauXatSettingsHome: View {
                             palette: palette,
                             symbol: "plus.circle",
                             title: "XauXat Plus",
-                            value: plusStatusLabel
+                            value: plusStatusLabel,
+                            showSeparator: false
                         )
                     }
                     .accessibilityHint("View subscription details, subscribe, or restore purchases")
@@ -1233,7 +1286,12 @@ private struct XauXatSettingsHome: View {
                         XauXatSettingsRow(palette: palette, symbol: "paintpalette", title: "Appearance")
                     }
                     Button { activeUserPickerSheet = .useFromDesktop } label: {
-                        XauXatSettingsRow(palette: palette, symbol: "desktopcomputer", title: "Devices")
+                        XauXatSettingsRow(
+                            palette: palette,
+                            symbol: "desktopcomputer",
+                            title: "Devices",
+                            showSeparator: false
+                        )
                     }
                 }
 
@@ -1247,7 +1305,8 @@ private struct XauXatSettingsHome: View {
                             palette: palette,
                             symbol: "network",
                             title: "Private connection",
-                            value: isXauXatManagedTorConfig(getNetCfg()) ? "Tor active" : "Checking"
+                            value: isXauXatManagedTorConfig(getNetCfg()) ? "Tor active" : "Checking",
+                            showSeparator: false
                         )
                     }
                 }
@@ -1269,7 +1328,8 @@ private struct XauXatSettingsHome: View {
                             palette: palette,
                             symbol: "info.circle",
                             title: "About XauXat",
-                            value: appVersion.map { "v\($0)" }
+                            value: appVersion.map { "v\($0)" },
+                            showSeparator: false
                         )
                     }
                 }
@@ -1480,7 +1540,8 @@ private struct XauXatPrivacyView: View {
                             XauXatSettingsRow(
                                 palette: palette,
                                 symbol: "person.crop.circle.badge.checkmark",
-                                title: "Protected profiles"
+                                title: "Protected profiles",
+                                showSeparator: false
                             )
                         }
                     } else {
@@ -1493,7 +1554,8 @@ private struct XauXatPrivacyView: View {
                                 palette: palette,
                                 symbol: "person.crop.circle.badge.checkmark",
                                 title: "Protected profiles",
-                                value: "Plus"
+                                value: "Plus",
+                                showSeparator: false
                             )
                         }
                     }
@@ -1797,44 +1859,38 @@ private enum XauXatThemeMode: String, CaseIterable, Identifiable {
     }
 }
 
+private enum XauXatAppIconMode: String, CaseIterable, Identifiable {
+    case dark
+    case light
+    case system
+
+    var id: Self { self }
+    var label: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+}
+
 private struct XauXatAppearanceView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var selection = XauXatThemeMode.current
+    @State private var iconSelection: XauXatAppIconMode = {
+        switch UserDefaults.standard.string(forKey: "xauxat.appIconMode") {
+        case "light": return .light
+        case "system": return .system
+        default: return .dark
+        }
+    }()
 
     private var palette: XauXatPalette { XauXatPalette(colorScheme) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+
                 XauXatSectionTitle("THEME", palette: palette)
+
                 HStack(spacing: 8) {
                     ForEach(XauXatThemeMode.allCases) { mode in
                         Button { apply(mode) } label: {
-                            VStack(spacing: 8) {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Capsule()
-                                        .fill(mode == .light ? Color(red: 200 / 255, green: 195 / 255, blue: 187 / 255) : Color(red: 52 / 255, green: 52 / 255, blue: 52 / 255))
-                                        .frame(width: 54, height: 10)
-                                    Capsule()
-                                        .fill(mode == .light ? Color(red: 217 / 255, green: 212 / 255, blue: 204 / 255) : Color(red: 32 / 255, green: 32 / 255, blue: 32 / 255))
-                                        .frame(width: 42, height: 10)
-                                }
-                                .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
-                                .padding(9)
-                                .background(mode == .light ? Color(red: 238 / 255, green: 234 / 255, blue: 227 / 255) : .black)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                                Text(mode.label)
-                                    .font(.system(size: 10, weight: .regular, design: .default))
-                                    .foregroundStyle(palette.ink)
-                            }
-                            .padding(7)
-                            .background(palette.surface)
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                                    .stroke(selection == mode ? palette.ivory : palette.line, lineWidth: selection == mode ? 2 : 1)
-                            }
-                            .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                            themeCard(mode)
                         }
                         .accessibilityLabel("\(mode.label) theme")
                         .accessibilityAddTraits(selection == mode ? .isSelected : [])
@@ -1842,6 +1898,26 @@ private struct XauXatAppearanceView: View {
                 }
 
                 Text("XauXat keeps the same private, low-contrast palette across light and dark mode.")
+                    .font(.system(size: 11, weight: .regular, design: .default))
+                    .foregroundStyle(palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 5)
+                    .padding(.top, 18)
+
+                XauXatSectionTitle("APP ICON", palette: palette)
+                    .padding(.top, 34)
+
+                HStack(spacing: 8) {
+                    ForEach(XauXatAppIconMode.allCases) { mode in
+                        Button { applyIcon(mode) } label: {
+                            iconCard(mode)
+                        }
+                        .accessibilityLabel("\(mode.label) app icon")
+                        .accessibilityAddTraits(iconSelection == mode ? .isSelected : [])
+                    }
+                }
+
+                Text("Choose whether the XauXat icon stays dark, stays light, or follows the system appearance.")
                     .font(.system(size: 11, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1856,12 +1932,145 @@ private struct XauXatAppearanceView: View {
         .buttonStyle(.plain)
     }
 
+    private func themeCard(_ mode: XauXatThemeMode) -> some View {
+        VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                Capsule()
+                    .fill(mode == .light
+                          ? Color(red: 200 / 255, green: 195 / 255, blue: 187 / 255)
+                          : Color(red: 52 / 255, green: 52 / 255, blue: 52 / 255))
+                    .frame(width: 54, height: 10)
+
+                Capsule()
+                    .fill(mode == .light
+                          ? Color(red: 217 / 255, green: 212 / 255, blue: 204 / 255)
+                          : Color(red: 32 / 255, green: 32 / 255, blue: 32 / 255))
+                    .frame(width: 42, height: 10)
+            }
+            .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+            .padding(9)
+            .background(mode == .light
+                        ? Color(red: 238 / 255, green: 234 / 255, blue: 227 / 255)
+                        : .black)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Text(mode.label)
+                .font(.system(size: 10, weight: .regular))
+                .foregroundStyle(palette.ink)
+        }
+        .padding(7)
+        .background(palette.surface)
+        .overlay {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(
+                    selection == mode ? palette.ivory : palette.line,
+                    lineWidth: selection == mode ? 2 : 1
+                )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+    }
+
+    private func iconCard(_ mode: XauXatAppIconMode) -> some View {
+        VStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(palette.surface)
+
+                if mode == .system {
+                    HStack(spacing: 0) {
+                        iconPreview(light: true)
+                            .frame(maxWidth: .infinity)
+
+                        iconPreview(light: false)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                } else {
+                    iconPreview(light: mode == .light)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 90, maxHeight: 90)
+
+            Text(mode.label)
+                .font(.system(size: 10, weight: .regular))
+                .foregroundStyle(palette.ink)
+        }
+        .padding(7)
+        .background(palette.surface)
+        .overlay {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(
+                    iconSelection == mode ? palette.ivory : palette.line,
+                    lineWidth: iconSelection == mode ? 2 : 1
+                )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+    }
+
+    private func iconPreview(light: Bool) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    light
+                    ? Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+                    : Color.black
+                )
+
+            Image("xauxat-mask")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(
+                    light
+                    ? Color.black
+                    : Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+                )
+                .frame(width: 46, height: 46)
+        }
+    }
+
     private func apply(_ mode: XauXatThemeMode) {
         selection = mode
+
         switch mode {
-        case .system: ThemeManager.applyTheme(DefaultTheme.SYSTEM_THEME_NAME)
-        case .light: ThemeManager.applyTheme(DefaultTheme.LIGHT.themeName)
-        case .dark: ThemeManager.applyTheme(DefaultTheme.BLACK.themeName)
+        case .system:
+            ThemeManager.applyTheme(DefaultTheme.SYSTEM_THEME_NAME)
+        case .light:
+            ThemeManager.applyTheme(DefaultTheme.LIGHT.themeName)
+        case .dark:
+            ThemeManager.applyTheme(DefaultTheme.BLACK.themeName)
+        }
+    }
+
+    private func applyIcon(_ mode: XauXatAppIconMode) {
+        iconSelection = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: "xauxat.appIconMode")
+
+        switch mode {
+        case .light:
+            UIApplication.shared.setAlternateIconName("LightAppIcon") { error in
+                if let error {
+                    logger.error("XauXat light icon: \(error.localizedDescription)")
+                }
+            }
+
+        case .dark:
+            UIApplication.shared.setAlternateIconName("DarkAppIcon") { error in
+                if let error {
+                    logger.error("XauXat dark icon: \(error.localizedDescription)")
+                }
+            }
+
+        case .system:
+            /*
+             AppIcon contains light + dark luminosity appearances.
+             Returning to the primary icon lets iOS follow the system.
+            */
+            UIApplication.shared.setAlternateIconName(nil) { error in
+                if let error {
+                    logger.error("XauXat system icon: \(error.localizedDescription)")
+                }
+            }
         }
     }
 }
@@ -1875,17 +2084,9 @@ private struct XauXatAboutView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(spacing: 3) {
-                    Text(verbatim: "xauxat")
-                        .font(.custom("Courier", size: 27).weight(.bold))
-                        .tracking(2.7)
-                    Text(verbatim: "X -- X")
-                        .font(.system(size: 16, weight: .bold, design: .default))
-                        .tracking(2)
-                }
-                .foregroundStyle(palette.ink)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 42)
+                XauXatAboutAnimatedLogo()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 34)
 
                 XauXatSettingsCard(palette: palette) {
                     XauXatValueRow(palette: palette, title: "App version", value: appVersion.map { "v\($0)" } ?? "Unknown")
@@ -1901,6 +2102,169 @@ private struct XauXatAboutView: View {
         .navigationTitle("About XauXat")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { coreVersion = try? apiGetVersion() }
+    }
+}
+
+private struct XauXatAboutAnimatedLogo: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    @State private var gazeX: CGFloat = 0
+    @State private var gazeY: CGFloat = 0
+    @State private var blinking = false
+    @State private var animationTask: Task<Void, Never>?
+
+    private let champagne = Color(
+        red: 222 / 255,
+        green: 206 / 255,
+        blue: 175 / 255
+    )
+
+    private var accent: Color {
+        colorScheme == .dark
+            ? champagne
+            : Color(
+                red: 23 / 255,
+                green: 19 / 255,
+                blue: 14 / 255
+            )
+    }
+
+    private var eyeColor: Color {
+        colorScheme == .dark
+            ? Color.white
+            : Color(
+                red: 23 / 255,
+                green: 19 / 255,
+                blue: 14 / 255
+            )
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                HStack(spacing: 39) {
+                    eye
+                        .offset(
+                            x: adjustedLeftEyeX,
+                            y: gazeY
+                        )
+
+                    eye
+                        .offset(
+                            x: adjustedRightEyeX,
+                            y: gazeY
+                        )
+                }
+                .offset(y: -2)
+
+                Image("xauxat-mask")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(accent)
+                    .frame(width: 132, height: 104)
+            }
+            .frame(width: 150, height: 116)
+
+            Text(verbatim: "xauxat")
+                .font(.custom("Courier", size: 25).weight(.bold))
+                .tracking(2.7)
+                .foregroundStyle(accent)
+                .offset(x: 2)
+        }
+        .onAppear {
+            startEyeAnimation()
+        }
+        .onDisappear {
+            animationTask?.cancel()
+            animationTask = nil
+        }
+    }
+
+    private var eye: some View {
+        Capsule()
+            .fill(eyeColor)
+            .frame(
+                width: 9,
+                height: blinking ? 2 : 9
+            )
+    }
+
+    private var adjustedLeftEyeX: CGFloat {
+        gazeX > 0 ? gazeX * 0.72 : gazeX
+    }
+
+    private var adjustedRightEyeX: CGFloat {
+        gazeX < 0 ? gazeX * 0.72 : gazeX
+    }
+
+    private func startEyeAnimation() {
+        animationTask?.cancel()
+
+        gazeX = 0
+        gazeY = 0
+        blinking = false
+
+        animationTask = Task { @MainActor in
+            var startsLeft = true
+
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                if Task.isCancelled { break }
+
+                await blink()
+                if Task.isCancelled { break }
+
+                try? await Task.sleep(nanoseconds: 1_250_000_000)
+                if Task.isCancelled { break }
+
+                let firstX: CGFloat = startsLeft ? -4.5 : 4.5
+                let secondX: CGFloat = startsLeft ? 4.5 : -4.5
+
+                withAnimation(.easeInOut(duration: 0.42)) {
+                    gazeX = firstX
+                    gazeY = 0
+                }
+
+                try? await Task.sleep(nanoseconds: 1_050_000_000)
+                if Task.isCancelled { break }
+
+                withAnimation(.easeInOut(duration: 0.50)) {
+                    gazeX = secondX
+                    gazeY = 0
+                }
+
+                try? await Task.sleep(nanoseconds: 1_150_000_000)
+                if Task.isCancelled { break }
+
+                withAnimation(.easeInOut(duration: 0.42)) {
+                    gazeX = 0
+                    gazeY = 0
+                }
+
+                try? await Task.sleep(nanoseconds: 650_000_000)
+                if Task.isCancelled { break }
+
+                await blink()
+                startsLeft.toggle()
+
+                try? await Task.sleep(nanoseconds: 1_600_000_000)
+            }
+        }
+    }
+
+    @MainActor
+    private func blink() async {
+        withAnimation(.easeIn(duration: 0.08)) {
+            blinking = true
+        }
+
+        try? await Task.sleep(nanoseconds: 115_000_000)
+        if Task.isCancelled { return }
+
+        withAnimation(.easeOut(duration: 0.10)) {
+            blinking = false
+        }
     }
 }
 
@@ -1938,6 +2302,7 @@ private struct XauXatSettingsRow: View {
     let symbol: String
     let title: LocalizedStringKey
     var value: String? = nil
+    var showSeparator: Bool = true
 
     var body: some View {
         HStack(spacing: 14) {
@@ -1961,10 +2326,12 @@ private struct XauXatSettingsRow: View {
         .padding(.horizontal, 16)
         .frame(minHeight: 59)
         .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(palette.line)
-                .frame(height: 1)
-                .padding(.leading, 54)
+            if showSeparator {
+                Rectangle()
+                    .fill(palette.line)
+                    .frame(height: 1)
+                    .padding(.leading, 54)
+            }
         }
         .contentShape(Rectangle())
     }
@@ -1976,6 +2343,7 @@ private struct XauXatToggleRow: View {
     let title: LocalizedStringKey
     let subtitle: LocalizedStringKey?
     @Binding var isOn: Bool
+    var showSeparator: Bool = true
 
     var body: some View {
         Toggle(isOn: $isOn) {
@@ -2002,7 +2370,9 @@ private struct XauXatToggleRow: View {
         .padding(.horizontal, 16)
         .frame(minHeight: 66)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(palette.line).frame(height: 1).padding(.leading, 54)
+            if showSeparator {
+                Rectangle().fill(palette.line).frame(height: 1).padding(.leading, 54)
+            }
         }
     }
 }
@@ -2012,6 +2382,7 @@ private struct XauXatSelectionRow: View {
     let title: LocalizedStringKey
     let subtitle: LocalizedStringKey
     let selected: Bool
+    var showSeparator: Bool = true
 
     var body: some View {
         HStack(spacing: 14) {
@@ -2032,7 +2403,9 @@ private struct XauXatSelectionRow: View {
         .frame(minHeight: 66)
         .contentShape(Rectangle())
         .overlay(alignment: .bottom) {
-            Rectangle().fill(palette.line).frame(height: 1).padding(.leading, 16)
+            if showSeparator {
+                Rectangle().fill(palette.line).frame(height: 1).padding(.leading, 16)
+            }
         }
     }
 }
@@ -2041,6 +2414,7 @@ private struct XauXatValueRow: View {
     let palette: XauXatPalette
     let title: LocalizedStringKey
     let value: String
+    var showSeparator: Bool = true
 
     var body: some View {
         HStack(spacing: 12) {
@@ -2056,7 +2430,9 @@ private struct XauXatValueRow: View {
         .padding(.horizontal, 16)
         .frame(minHeight: 59)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(palette.line).frame(height: 1).padding(.leading, 16)
+            if showSeparator {
+                Rectangle().fill(palette.line).frame(height: 1).padding(.leading, 16)
+            }
         }
     }
 }
@@ -2114,61 +2490,114 @@ private struct XauXatNewChatSheet: View {
     @Environment(\.dismiss) private var dismiss
     let palette: XauXatPalette
 
+    @State private var destination: Destination?
+
+    enum Destination: Int, Identifiable {
+        case conversation
+        case privateLink
+        case qrCode
+
+        var id: Int { rawValue }
+    }
+
     var body: some View {
-        NavigationView {
-            VStack {
-                Spacer(minLength: 20)
-                XauXatSettingsCard(palette: palette) {
-                    NavigationLink {
-                        NewChatView(selection: .connect)
-                            .modifier(ThemedBackground(grouped: true))
-                    } label: {
-                        XauXatSettingsRow(
-                            palette: palette,
-                            symbol: "bubble.left",
-                            title: "New conversation",
-                            value: "Private chat"
-                        )
+        ZStack {
+            NavigationView {
+                VStack(spacing: 0) {
+                    XauXatSettingsCard(palette: palette) {
+                        Button {
+                            destination = .conversation
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "bubble.left",
+                                title: "New conversation",
+                                value: "Private chat"
+                            )
+                        }
+
+                        Button {
+                            destination = .privateLink
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "link",
+                                title: "Create private link",
+                                value: "Share to connect"
+                            )
+                        }
+
+                        Button {
+                            destination = .qrCode
+                        } label: {
+                            XauXatSettingsRow(
+                                palette: palette,
+                                symbol: "qrcode.viewfinder",
+                                title: "Scan QR code",
+                                value: "Connect instantly",
+                                showSeparator: false
+                            )
+                        }
                     }
-                    NavigationLink {
-                        NewChatView(selection: .invite)
-                            .modifier(ThemedBackground(grouped: true))
-                    } label: {
-                        XauXatSettingsRow(
-                            palette: palette,
-                            symbol: "link",
-                            title: "Create private link",
-                            value: "Share to connect"
-                        )
-                    }
-                    NavigationLink {
-                        NewChatView(selection: .connect, showQRCodeScanner: true)
-                            .modifier(ThemedBackground(grouped: true))
-                    } label: {
-                        XauXatSettingsRow(
-                            palette: palette,
-                            symbol: "qrcode.viewfinder",
-                            title: "Scan QR code",
-                            value: "Connect instantly"
-                        )
-                    }
+
+                    Spacer()
                 }
-                Spacer()
-            }
-            .padding(.horizontal, 22)
-            .background(palette.background.ignoresSafeArea())
-            .navigationTitle("New conversation")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .foregroundStyle(palette.ink)
+                .padding(.top, 88)
+                .padding(.horizontal, 22)
+                .background(palette.background.ignoresSafeArea())
+                .navigationTitle("New conversation")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark")
+                                .foregroundStyle(palette.ink)
+                        }
+                        .accessibilityLabel("Close")
                     }
-                    .accessibilityLabel("Close")
                 }
             }
         }
+        .fullScreenCover(item: $destination) { destination in
+            XauXatNewChatDestination(
+                destination: destination,
+                palette: palette
+            )
+        }
+    }
+}
+
+private struct XauXatNewChatDestination: View {
+    let destination: XauXatNewChatSheet.Destination
+    let palette: XauXatPalette
+
+    var body: some View {
+        NavigationView {
+            Group {
+                switch destination {
+                case .conversation:
+                    NewChatView(
+                        selection: .connect,
+                        xauXatStyle: true
+                    )
+
+                case .privateLink:
+                    NewChatView(
+                        selection: .invite,
+                        xauXatStyle: true
+                    )
+
+                case .qrCode:
+                    NewChatView(
+                        selection: .connect,
+                        showQRCodeScanner: true,
+                        xauXatStyle: true
+                    )
+                }
+            }
+        }
+        .tint(palette.ink)
+        .accentColor(palette.ink)
     }
 }
 

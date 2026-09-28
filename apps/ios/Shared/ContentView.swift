@@ -168,6 +168,7 @@ struct ContentView: View {
         }
     }
 
+
     // Spec: spec/client/navigation.md#contentView
     @ViewBuilder private func contentView() -> some View {
         if let status = chatModel.chatDbStatus, status != .ok {
@@ -243,16 +244,7 @@ struct ContentView: View {
     }
 
     private func initializationView() -> some View {
-        VStack {
-            ProgressView().scaleEffect(2)
-            Text("Opening app…")
-                .padding()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity )
-        .background(
-            Rectangle()
-                .fill(theme.colors.background)
-        )
+        XauXatOpeningView()
     }
 
     private func mainView() -> some View {
@@ -535,3 +527,322 @@ func mkAlert(title: LocalizedStringKey, message: LocalizedStringKey? = nil) -> A
 //        ContentView(text: "Hello!")
 //    }
 //}
+
+
+private struct XauXatOpeningView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    @State private var gazeX: CGFloat = 0
+    @State private var gazeY: CGFloat = 0
+    @State private var blinking = false
+    @State private var animationTask: Task<Void, Never>?
+
+    @State private var loadingMessageIndex = 0
+    @State private var messageTask: Task<Void, Never>?
+
+    private let champagne = Color(
+        red: 222 / 255,
+        green: 206 / 255,
+        blue: 175 / 255
+    )
+
+    private var openingBackground: Color {
+        colorScheme == .dark
+            ? Color.black
+            : Color(
+                red: 244 / 255,
+                green: 240 / 255,
+                blue: 232 / 255
+            )
+    }
+
+    private var openingAccent: Color {
+        colorScheme == .dark
+            ? champagne
+            : Color(
+                red: 23 / 255,
+                green: 19 / 255,
+                blue: 14 / 255
+            )
+    }
+
+    private var openingEye: Color {
+        colorScheme == .dark
+            ? Color.white
+            : Color(
+                red: 23 / 255,
+                green: 19 / 255,
+                blue: 14 / 255
+            )
+    }
+
+    private var loadingGray: Color {
+        colorScheme == .dark
+            ? Color(
+                red: 145 / 255,
+                green: 142 / 255,
+                blue: 136 / 255
+            )
+            : Color(
+                red: 105 / 255,
+                green: 97 / 255,
+                blue: 88 / 255
+            )
+    }
+
+    private let loadingMessages: [LocalizedStringKey] = [
+        "Connecting to the Tor network…\nthis may take a few seconds.",
+
+        "Fun fact: did you know some messaging apps\nuse your data to train robots?",
+
+        "We know nothing about you.\nAnd we don't want to.",
+
+        "This is the only ad you'll see around here.",
+
+        "Like XauXat? Plus is €2.99.\nYes, this was an ad too.",
+
+        "You can do everything with Free.\nNo ads. No selling your data.",
+
+        "Your XauXat may take a little longer.\nBut it's yours.",
+
+        "Fun fact: with Plus, you can have a second PIN\nthat makes everything disappear.",
+
+        "No email. No phone number.\nWe don't know who you are either.",
+
+        "Your message doesn't need to know your name\nto reach its destination.",
+
+        "We don't have personalized ads.\nWe'd have to know you for that.",
+
+        "Plus: €2.99.\nBecause servers still don't accept privacy as currency.",
+
+        "If you're reading this, Tor is taking its time.\nAt least we gave you something to read."
+    ]
+
+    var body: some View {
+        ZStack {
+            openingBackground
+                .ignoresSafeArea()
+
+            VStack(spacing: 22) {
+                ZStack {
+                    // Os olhos são desenhados primeiro para ficarem
+                    // fisicamente atrás da máscara.
+                    HStack(spacing: 39) {
+                        // Olho do lado esquerdo do ecrã.
+                        eye
+                            .offset(
+                                x: adjustedLeftEyeX,
+                                y: gazeY
+                            )
+
+                        // Olho do lado direito do ecrã.
+                        // Movimento para dentro ligeiramente limitado
+                        // para acompanhar melhor a abertura da máscara.
+                        eye
+                            .offset(
+                                x: adjustedRightEyeX,
+                                y: gazeY
+                            )
+                    }
+                    .offset(y: -2)
+
+                    // A máscara fica à frente dos olhos.
+                    Image("xauxat-mask")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(openingAccent)
+                        .frame(width: 132, height: 104)
+                }
+                .frame(width: 150, height: 116)
+
+                Text(verbatim: "xauxat")
+                    .font(.custom("Courier", size: 25).weight(.bold))
+                    .tracking(2.7)
+                    .foregroundStyle(openingAccent)
+                    .offset(x: 2)
+
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(openingAccent)
+                        .scaleEffect(0.72)
+                        .frame(width: 20, height: 20)
+
+                    Text(loadingMessages[loadingMessageIndex])
+                        .font(.system(size: 11.5, weight: .regular))
+                        .foregroundStyle(loadingGray)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .frame(
+                            width: 330,
+                            height: 42,
+                            alignment: .top
+                        )
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.92)
+                }
+                .frame(height: 78, alignment: .top)
+                .padding(.top, 4)
+            }
+        }
+        .onAppear {
+            startEyeAnimation()
+            startLoadingMessages()
+        }
+        .onDisappear {
+            animationTask?.cancel()
+            animationTask = nil
+
+            messageTask?.cancel()
+            messageTask = nil
+        }
+    }
+
+    private var eye: some View {
+        Capsule()
+            .fill(openingEye)
+            .frame(
+                width: 9,
+                height: blinking ? 2 : 9
+            )
+    }
+
+    // As aberturas da máscara não são caixas horizontais perfeitas.
+    // Ajustamos ligeiramente cada pupila para evitar o efeito estrábico.
+    private var adjustedLeftEyeX: CGFloat {
+        if gazeX > 0 {
+            // Quando olha para a direita, este olho aproxima-se do nariz.
+            // Reduzimos ligeiramente esse movimento.
+            return gazeX * 0.72
+        }
+
+        return gazeX
+    }
+
+    private var adjustedRightEyeX: CGFloat {
+        if gazeX < 0 {
+            // Quando olha para a esquerda, este olho aproxima-se do nariz.
+            // Reduzimos ligeiramente esse movimento.
+            return gazeX * 0.72
+        }
+
+        return gazeX
+    }
+
+    private func startLoadingMessages() {
+        messageTask?.cancel()
+
+        loadingMessageIndex = 0
+
+        messageTask = Task { @MainActor in
+            // Num arranque rápido só aparece o estado da ligação Tor.
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+
+            while !Task.isCancelled {
+                loadingMessageIndex =
+                    (loadingMessageIndex + 1) % loadingMessages.count
+
+                // Tempo para ler antes da próxima mensagem.
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            }
+        }
+    }
+
+    private func startEyeAnimation() {
+        animationTask?.cancel()
+
+        gazeX = 0
+        gazeY = 0
+        blinking = false
+
+        animationTask = Task { @MainActor in
+
+            // Alterna a direção em cada ciclo.
+            var startsLeft = true
+
+            while !Task.isCancelled {
+
+                // Olhar em frente.
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                if Task.isCancelled { break }
+
+                // Blink normal no centro.
+                await blink()
+                if Task.isCancelled { break }
+
+                // Continua imóvel durante algum tempo.
+                try? await Task.sleep(nanoseconds: 1_250_000_000)
+                if Task.isCancelled { break }
+
+                // Primeiro lado deste ciclo.
+                let firstX: CGFloat = startsLeft ? -4 : 4
+                let firstY: CGFloat = startsLeft ? -0.5 : 0.4
+
+                withAnimation(.easeInOut(duration: 0.28)) {
+                    gazeX = firstX
+                    gazeY = firstY
+                }
+
+                try? await Task.sleep(nanoseconds: 620_000_000)
+                if Task.isCancelled { break }
+
+                // Cruza diretamente para o lado oposto.
+                let secondX: CGFloat = startsLeft ? 4 : -4
+                let secondY: CGFloat = startsLeft ? 0.4 : -0.5
+
+                withAnimation(.easeInOut(duration: 0.34)) {
+                    gazeX = secondX
+                    gazeY = secondY
+                }
+
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                if Task.isCancelled { break }
+
+                // Blink enquanto olha para o segundo lado.
+                await blink()
+                if Task.isCancelled { break }
+
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                if Task.isCancelled { break }
+
+                // Volta suavemente ao centro.
+                withAnimation(.easeInOut(duration: 0.28)) {
+                    gazeX = 0
+                    gazeY = 0
+                }
+
+                // Fica bastante tempo imóvel no centro.
+                try? await Task.sleep(nanoseconds: 1_450_000_000)
+                if Task.isCancelled { break }
+
+                // Novo blink no centro.
+                await blink()
+                if Task.isCancelled { break }
+
+                try? await Task.sleep(nanoseconds: 1_100_000_000)
+                if Task.isCancelled { break }
+
+                // Próximo ciclo começa pelo lado oposto.
+                startsLeft.toggle()
+            }
+        }
+    }
+
+    @MainActor
+    private func blink() async {
+        withAnimation(.easeIn(duration: 0.07)) {
+            blinking = true
+        }
+
+        try? await Task.sleep(nanoseconds: 105_000_000)
+
+        if Task.isCancelled { return }
+
+        withAnimation(.easeOut(duration: 0.09)) {
+            blinking = false
+        }
+
+        try? await Task.sleep(nanoseconds: 90_000_000)
+    }
+}

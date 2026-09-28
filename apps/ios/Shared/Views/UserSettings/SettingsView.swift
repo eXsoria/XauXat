@@ -561,77 +561,246 @@ struct XauXatPlusLockedLabel: View {
 }
 
 struct XauXatPlusView: View {
-    @EnvironmentObject var theme: AppTheme
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
 
+    private var background: Color {
+        colorScheme == .dark
+            ? .black
+            : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+    }
+
+    private var ink: Color {
+        colorScheme == .dark
+            ? Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+    }
+
+    private var muted: Color {
+        colorScheme == .dark
+            ? Color(red: 158 / 255, green: 151 / 255, blue: 140 / 255)
+            : Color(red: 111 / 255, green: 104 / 255, blue: 94 / 255)
+    }
+
+    private var surface: Color {
+        colorScheme == .dark
+            ? Color(red: 24 / 255, green: 23 / 255, blue: 21 / 255)
+            : Color(red: 235 / 255, green: 229 / 255, blue: 217 / 255)
+    }
+
+    private var separator: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.09)
+            : Color.black.opacity(0.10)
+    }
+
+    private var accent: Color {
+        colorScheme == .dark
+            ? Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+    }
+
+    private var accentForeground: Color {
+        colorScheme == .dark
+            ? Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+            : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+    }
+
     var body: some View {
-        List {
-            Section {
-                HStack {
-                    Text("Monthly plan")
-                    Spacer()
-                    Text(plusEntitlements.displayPrice)
-                        .foregroundColor(theme.colors.secondary)
-                }
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Status")
-                    Spacer()
-                    statusText
-                        .foregroundColor(theme.colors.secondary)
-                        .multilineTextAlignment(.trailing)
-                }
-            } footer: {
-                if plusEntitlements.hasIncludedAccess {
-                    Text("XauXat Plus is included automatically in this build.")
-                } else {
-                    Text("The App Store provides the localized price and cryptographically verifies access. XauXat does not unlock Plus from a local setting.")
-                }
-            }
+        ZStack {
+            background
+                .ignoresSafeArea()
 
-            if !plusEntitlements.hasIncludedAccess {
-                Section {
-                    if !plusEntitlements.hasAccess {
-                        Button {
-                            Task { await plusEntitlements.purchase() }
-                        } label: {
-                            HStack {
-                                Text("Subscribe for \(plusEntitlements.displayPrice)")
-                                Spacer()
-                                if plusEntitlements.isPurchasing { ProgressView() }
+            ScrollView {
+                VStack(spacing: 0) {
+                    // MARK: Hero
+
+                    VStack(spacing: 12) {
+                        Image("xauxat-mask")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(accent)
+                            .frame(width: 62)
+
+                        Text("XauXat Plus")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(ink)
+
+                        Text("More privacy. More control.")
+                            .font(.system(size: 15, weight: .regular))
+                            .foregroundStyle(muted)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 30)
+                    .padding(.bottom, 30)
+
+                    // MARK: Plan
+
+                    VStack(spacing: 0) {
+                        plusRow(
+                            title: "Monthly plan",
+                            value: plusEntitlements.displayPrice
+                        )
+
+                        Rectangle()
+                            .fill(separator)
+                            .frame(height: 1)
+                            .padding(.leading, 18)
+
+                        HStack(alignment: .firstTextBaseline, spacing: 16) {
+                            Text("Status")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(ink)
+
+                            Spacer(minLength: 12)
+
+                            statusText
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(muted)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        .padding(.horizontal, 18)
+                        .frame(minHeight: 58)
+                    }
+                    .background(surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(.horizontal, 22)
+
+                    // MARK: Information
+
+                    Group {
+                        if plusEntitlements.hasIncludedAccess {
+                            Text("XauXat Plus is included automatically in this build.")
+                        } else {
+                            Text("The App Store provides the localized price and cryptographically verifies access. XauXat does not unlock Plus from a local setting.")
+                        }
+                    }
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 12)
+
+                    // MARK: Purchase
+
+                    if !plusEntitlements.hasIncludedAccess {
+                        VStack(spacing: 12) {
+                            if !plusEntitlements.hasAccess {
+                                Button {
+                                    Task { await plusEntitlements.purchase() }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        if plusEntitlements.isPurchasing {
+                                            ProgressView()
+                                                .tint(accentForeground)
+                                        }
+
+                                        Text("Subscribe for \(plusEntitlements.displayPrice)")
+                                            .font(.system(size: 16, weight: .semibold))
+                                    }
+                                    .foregroundStyle(accentForeground)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 54)
+                                    .background(accent)
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(
+                                    plusEntitlements.product == nil ||
+                                    plusEntitlements.isPurchasing ||
+                                    plusEntitlements.isRestoring
+                                )
+                                .opacity(
+                                    plusEntitlements.product == nil ||
+                                    plusEntitlements.isPurchasing ||
+                                    plusEntitlements.isRestoring
+                                        ? 0.45 : 1
+                                )
                             }
+
+                            Button {
+                                Task { await plusEntitlements.restorePurchases() }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if plusEntitlements.isRestoring {
+                                        ProgressView()
+                                            .tint(ink)
+                                    }
+
+                                    Text("Restore purchases")
+                                        .font(.system(size: 15, weight: .semibold))
+                                }
+                                .foregroundStyle(ink)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 50)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(
+                                plusEntitlements.isPurchasing ||
+                                plusEntitlements.isRestoring
+                            )
+
+                            Group {
+                                if plusEntitlements.product == nil {
+                                    Text("The product is not available in this build or App Store environment. Configure \(plusEntitlements.productID) before testing purchases.")
+                                } else {
+                                    Text("Payment and subscription management are handled by Apple. Restoring may ask you to authenticate with the App Store.")
+                                }
+                            }
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(muted)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 8)
                         }
-                        .disabled(plusEntitlements.product == nil || plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
+                        .padding(.horizontal, 22)
+                        .padding(.top, 26)
                     }
 
-                    Button {
-                        Task { await plusEntitlements.restorePurchases() }
-                    } label: {
-                        HStack {
-                            Text("Restore purchases")
-                            Spacer()
-                            if plusEntitlements.isRestoring { ProgressView() }
-                        }
-                    }
-                    .disabled(plusEntitlements.isPurchasing || plusEntitlements.isRestoring)
-                } footer: {
-                    if plusEntitlements.product == nil {
-                        Text("The product is not available in this build or App Store environment. Configure \(plusEntitlements.productID) before testing purchases.")
-                    } else {
-                        Text("Payment and subscription management are handled by Apple. Restoring may ask you to authenticate with the App Store.")
-                    }
+                    Spacer(minLength: 32)
                 }
             }
         }
-        .modifier(ThemedBackground(grouped: true))
-        .task { await plusEntitlements.refresh() }
-        .alert("XauXat Plus", isPresented: Binding(
-            get: { plusEntitlements.presentedError != nil },
-            set: { if !$0 { plusEntitlements.presentedError = nil } }
-        )) {
-            Button("OK") { plusEntitlements.presentedError = nil }
+        .navigationTitle("XauXat Plus")
+        .navigationBarTitleDisplayMode(.inline)
+        .tint(ink)
+        .task {
+            await plusEntitlements.refresh()
+        }
+        .alert(
+            "XauXat Plus",
+            isPresented: Binding(
+                get: { plusEntitlements.presentedError != nil },
+                set: {
+                    if !$0 {
+                        plusEntitlements.presentedError = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK") {
+                plusEntitlements.presentedError = nil
+            }
         } message: {
             Text(plusEntitlements.presentedError ?? "")
         }
+    }
+
+    private func plusRow(title: LocalizedStringKey, value: String) -> some View {
+        HStack(spacing: 16) {
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(ink)
+
+            Spacer(minLength: 12)
+
+            Text(value)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(muted)
+        }
+        .padding(.horizontal, 18)
+        .frame(minHeight: 58)
     }
 
     @ViewBuilder
@@ -646,7 +815,11 @@ struct XauXatPlusView: View {
                 Text("Free plan")
             case let .active(expiresAt, willAutoRenew):
                 if let expiresAt {
-                    Text(willAutoRenew ? "Active, renews \(expiresAt.formatted(date: .abbreviated, time: .omitted))" : "Active until \(expiresAt.formatted(date: .abbreviated, time: .omitted)), cancelled")
+                    Text(
+                        willAutoRenew
+                            ? "Active, renews \(expiresAt.formatted(date: .abbreviated, time: .omitted))"
+                            : "Active until \(expiresAt.formatted(date: .abbreviated, time: .omitted)), cancelled"
+                    )
                 } else {
                     Text("Active")
                 }

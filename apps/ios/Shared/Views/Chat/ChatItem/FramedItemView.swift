@@ -424,14 +424,14 @@ func chatItemFrameColorMaybeImageOrVideo(_ ci: ChatItem, _ theme: AppTheme) -> C
 
 func chatItemFrameColor(_ ci: ChatItem, _ theme: AppTheme) -> Color {
     ci.chatDir.sent
-    ? theme.appColors.sentMessage
-    : theme.appColors.receivedMessage
+        ? Color(red: 225 / 255, green: 215 / 255, blue: 198 / 255)
+        : Color.white
 }
 
 func chatItemFrameContextColor(_ ci: ChatItem, _ theme: AppTheme) -> Color {
     ci.chatDir.sent
-    ? theme.appColors.sentQuote
-    : theme.appColors.receivedQuote
+        ? Color(red: 214 / 255, green: 202 / 255, blue: 181 / 255)
+        : Color(red: 246 / 255, green: 244 / 255, blue: 240 / 255)
 }
 
 struct FramedItemView_Previews: PreviewProvider {

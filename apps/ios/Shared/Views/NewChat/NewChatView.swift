@@ -75,12 +75,15 @@ func showKeepInvitationAlert() {
 
 // Spec: spec/client/navigation.md#NewChatView
 struct NewChatView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var m: ChatModel
     @EnvironmentObject var theme: AppTheme
     @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @State var selection: NewChatOption
     @State var showQRCodeScanner = false
     var onboarding: Bool = false
+    var xauXatStyle: Bool = false
     @State private var invitationUsed: Bool = false
     @State private var connLinkInvitation: CreatedConnLink = CreatedConnLink(connFullLink: "", connShortLink: nil)
     @State private var showShortLink = true
@@ -97,6 +100,12 @@ struct NewChatView: View {
     @State private var allowInviteCalls = true
     @State private var inviteMaximumUses = 1
     @State private var invitePolicy: XauXatContactInvitePolicy? = nil
+
+    private var xauXatPageBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 29 / 255, green: 29 / 255, blue: 30 / 255)
+            : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+    }
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -127,17 +136,32 @@ struct NewChatView: View {
                         }
                 }
                 if case .connect = selection {
-                    ConnectView(showQRCodeScanner: $showQRCodeScanner, pastedLink: $pastedLink, alert: $alert, onboarding: onboarding)
+                    ConnectView(
+                        showQRCodeScanner: $showQRCodeScanner,
+                        pastedLink: $pastedLink,
+                        alert: $alert,
+                        onboarding: onboarding,
+                        xauXatStyle: xauXatStyle
+                    )
                         .transition(.move(edge: .trailing))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .modifier(ThemedBackground(grouped: true))
-            .background(
-                // Rectangle is needed for swipe gesture to work on mostly empty views (creatingLinkProgressView and retryButton)
-                Rectangle()
-                    .fill(theme.base == DefaultTheme.LIGHT ? theme.colors.background.asGroupedBackground(theme.base.mode) : theme.colors.background)
-            )
+            .if(!xauXatStyle) { view in
+                view
+                    .modifier(ThemedBackground(grouped: true))
+                    .background(
+                        Rectangle()
+                            .fill(
+                                theme.base == DefaultTheme.LIGHT
+                                    ? theme.colors.background.asGroupedBackground(theme.base.mode)
+                                    : theme.colors.background
+                            )
+                    )
+            }
+            .if(xauXatStyle) { view in
+                view.background(xauXatPageBackground)
+            }
             .animation(.easeInOut(duration: 0.3333), value: selection)
             .gesture(DragGesture(minimumDistance: 20.0, coordinateSpace: .local)
                 .onChanged { value in
@@ -156,18 +180,79 @@ struct NewChatView: View {
                 including: onboarding ? .subviews : .all
             )
         }
+        .if(xauXatStyle) { view in
+            view.background(
+                xauXatPageBackground
+                    .ignoresSafeArea()
+            )
+        }
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                if !onboarding {
-                    InfoSheetButton {
-                        AddContactLearnMore(showTitle: true)
+            ToolbarItem(placement: .navigationBarLeading) {
+                Group {
+                    if xauXatStyle {
+                        InfoSheetButton {
+                            AddContactLearnMore(
+                                showTitle: true,
+                                showCloseButton: true
+                            )
+                        }
+                        .tint(
+                            Color(
+                                red: 222 / 255,
+                                green: 206 / 255,
+                                blue: 175 / 255
+                            )
+                        )
+                    } else {
+                        Color.clear
+                            .frame(width: 24, height: 24)
                     }
-                } else {
-                    Image(systemName: "info.circle").opacity(0)
+                }
+            }
+
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Group {
+                    if xauXatStyle {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .foregroundColor(
+                                    colorScheme == .dark
+                                        ? Color(
+                                            red: 222 / 255,
+                                            green: 206 / 255,
+                                            blue: 175 / 255
+                                        )
+                                        : Color(
+                                            red: 23 / 255,
+                                            green: 19 / 255,
+                                            blue: 14 / 255
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Close")
+                    } else if !onboarding {
+                        InfoSheetButton {
+                            AddContactLearnMore(showTitle: true)
+                        }
+                    } else {
+                        Image(systemName: "info.circle")
+                            .opacity(0)
+                    }
                 }
             }
         }
         .if(onboarding) { $0.navigationBarTitleDisplayMode(.inline) }
+        .if(xauXatStyle) { view in
+            view.navigationBarBackButtonHidden(true)
+        }
+        .tint(
+            xauXatStyle
+                ? Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+                : theme.colors.primary
+        )
         .modifier(ThemedBackground(grouped: true))
         .onChange(of: invitationUsed) { used in
             if used && !(m.showingInvitation?.connChatUsed ?? true) {
@@ -216,102 +301,321 @@ struct NewChatView: View {
     }
 
     private func inviteSetupView() -> some View {
-        Form {
-            if hasAdvancedContactInvites {
-                Section {
-                    Picker("Expires", selection: $inviteLifetime) {
-                        ForEach(XauXatContactInviteLifetime.allCases) { lifetime in
-                            Text(lifetime.label).tag(lifetime)
+        let background = colorScheme == .dark
+            ? Color(red: 29 / 255, green: 29 / 255, blue: 30 / 255)
+            : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+
+        let surface = colorScheme == .dark
+            ? Color(red: 44 / 255, green: 44 / 255, blue: 46 / 255)
+            : Color.white
+
+        let primary = colorScheme == .dark
+            ? Color.white
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+
+        let secondary = colorScheme == .dark
+            ? Color(red: 139 / 255, green: 135 / 255, blue: 127 / 255)
+            : Color(red: 105 / 255, green: 97 / 255, blue: 88 / 255)
+
+        let line = colorScheme == .dark
+            ? Color.white.opacity(0.09)
+            : Color.black.opacity(0.10)
+
+        let champagne = Color(
+            red: 222 / 255,
+            green: 206 / 255,
+            blue: 175 / 255
+        )
+
+        let ctaBackground = colorScheme == .dark
+            ? champagne
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+
+        let ctaForeground = colorScheme == .dark
+            ? Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+            : Color.white
+
+        return ZStack {
+            background
+                .ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if hasAdvancedContactInvites {
+
+                        // MARK: Invite lifetime
+
+                        Text("INVITE LIFETIME")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(secondary)
+                            .padding(.horizontal, 20)
+
+                        VStack(spacing: 0) {
+                            Picker("Expires", selection: $inviteLifetime) {
+                                ForEach(XauXatContactInviteLifetime.allCases) { lifetime in
+                                    Text(lifetime.label).tag(lifetime)
+                                }
+                            }
+                            .foregroundStyle(primary)
+                            .tint(colorScheme == .dark ? champagne : primary)
+                            .padding(.horizontal, 20)
+                            .frame(minHeight: 50)
+
+                            if inviteLifetime == .custom {
+                                Rectangle()
+                                    .fill(line)
+                                    .frame(height: 0.5)
+                                    .padding(.leading, 20)
+
+                                DatePicker(
+                                    "Expiry date",
+                                    selection: $customInviteExpiry,
+                                    in: Date.now...,
+                                    displayedComponents: [.date, .hourAndMinute]
+                                )
+                                .foregroundStyle(primary)
+                                .tint(colorScheme == .dark ? champagne : primary)
+                                .padding(.horizontal, 20)
+                                .frame(minHeight: 50)
+                            }
                         }
-                    }
-                    if inviteLifetime == .custom {
-                        DatePicker(
-                            "Expiry date",
-                            selection: $customInviteExpiry,
-                            in: Date.now...,
-                            displayedComponents: [.date, .hourAndMinute]
+                        .background(
+                            surface,
+                            in: RoundedRectangle(
+                                cornerRadius: 12,
+                                style: .continuous
+                            )
                         )
-                    }
-                } header: {
-                    Text("Invite lifetime")
-                } footer: {
-                    if inviteLifetime == .never {
-                        Text("The invite remains valid until it is used or revoked.")
-                    } else if inviteLifetime == .custom {
-                        Text("XauXat will permanently revoke the invite on the selected date.")
-                    } else {
-                        Text("XauXat will permanently revoke the invite when this duration ends.")
-                    }
-                }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 7)
 
-                Section {
-                    Toggle("Messages", isOn: $allowInviteMessages)
-                    Toggle("Audio calls", isOn: $allowInviteCalls)
-                } header: {
-                    Text("Contact permissions")
-                } footer: {
-                    Text("These authenticated restrictions are shown before the contact accepts the invite.")
-                }
-
-                Section {
-                    Stepper("Maximum uses: \(inviteMaximumUses)", value: $inviteMaximumUses, in: 1...5)
-                } header: {
-                    Text("Usage limit")
-                } footer: {
-                    Text(inviteMaximumUses == 1
-                         ? "The invite can create one contact."
-            : "XauXat combines independent one-time links so concurrent use cannot exceed this limit.")
-                }
-
-                Section {
-                    Button(inviteLifetime == .never ? "Create invite" : "Create expiring invite") {
-                        authorizeAndCreateInvitation()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
-            } else {
-                Section {
-                    HStack {
-                        Text("Active invites")
-                        Spacer()
-                        Text("\(activeFreeInviteCount) of \(xauXatFreeActiveInviteLimit)")
-                            .foregroundStyle(theme.colors.secondary)
-                    }
-                    if canCreateFreeInvite {
-                        Button("Create 1-time invite") {
-                            createInvitation()
+                        Group {
+                            if inviteLifetime == .never {
+                                Text("The invite remains valid until it is used or revoked.")
+                            } else if inviteLifetime == .custom {
+                                Text("XauXat will permanently revoke the invite on the selected date.")
+                            } else {
+                                Text("XauXat will permanently revoke the invite when this duration ends.")
+                            }
                         }
-                        .frame(maxWidth: .infinity, alignment: .center)
+                        .font(.system(size: 13))
+                        .foregroundStyle(secondary)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 7)
+
+                        // MARK: Contact permissions
+
+                        Text("CONTACT PERMISSIONS")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(secondary)
+                            .padding(.horizontal, 40)
+                            .padding(.top, 30)
+
+                        VStack(spacing: 0) {
+                            Toggle("Messages", isOn: $allowInviteMessages)
+                                .foregroundStyle(primary)
+                                .tint(champagne)
+                                .padding(.horizontal, 20)
+                                .frame(minHeight: 50)
+
+                            Rectangle()
+                                .fill(line)
+                                .frame(height: 0.5)
+                                .padding(.leading, 20)
+
+                            Toggle("Audio calls", isOn: $allowInviteCalls)
+                                .foregroundStyle(primary)
+                                .tint(champagne)
+                                .padding(.horizontal, 20)
+                                .frame(minHeight: 50)
+                        }
+                        .background(
+                            surface,
+                            in: RoundedRectangle(
+                                cornerRadius: 12,
+                                style: .continuous
+                            )
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.top, 7)
+
+                        Text("These authenticated restrictions are shown before the contact accepts the invite.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(secondary)
+                            .padding(.horizontal, 40)
+                            .padding(.top, 7)
+
+                        // MARK: Usage limit
+
+                        Text("USAGE LIMIT")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(secondary)
+                            .padding(.horizontal, 40)
+                            .padding(.top, 30)
+
+                        Stepper(
+                            "Maximum uses: \(inviteMaximumUses)",
+                            value: $inviteMaximumUses,
+                            in: 1...5
+                        )
+                        .foregroundStyle(primary)
+                        .tint(colorScheme == .dark ? champagne : primary)
+                        .padding(.horizontal, 20)
+                        .frame(minHeight: 50)
+                        .background(
+                            surface,
+                            in: RoundedRectangle(
+                                cornerRadius: 12,
+                                style: .continuous
+                            )
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.top, 7)
+
+                        Text(
+                            inviteMaximumUses == 1
+                                ? "The invite can create one contact."
+                                : "XauXat combines independent one-time links so concurrent use cannot exceed this limit."
+                        )
+                        .font(.system(size: 13))
+                        .foregroundStyle(secondary)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 7)
+
+                        // MARK: CTA
+
+                        Button {
+                            authorizeAndCreateInvitation()
+                        } label: {
+                            Text(
+                                inviteLifetime == .never
+                                    ? "Create invite"
+                                    : "Create expiring invite"
+                            )
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(ctaForeground)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 54)
+                            .background(
+                                ctaBackground,
+                                in: RoundedRectangle(
+                                    cornerRadius: 18,
+                                    style: .continuous
+                                )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 34)
+
                     } else {
+
+                        // MARK: Free invites
+
+                        Text("FREE INVITES")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(secondary)
+                            .padding(.horizontal, 20)
+
+                        VStack(spacing: 0) {
+                            HStack {
+                                Text("Active invites")
+                                    .foregroundStyle(primary)
+
+                                Spacer()
+
+                                Text("\(activeFreeInviteCount) of \(xauXatFreeActiveInviteLimit)")
+                                    .foregroundStyle(secondary)
+                            }
+                            .padding(.horizontal, 20)
+                            .frame(minHeight: 50)
+
+                            Rectangle()
+                                .fill(line)
+                                .frame(height: 0.5)
+                                .padding(.leading, 20)
+
+                            if canCreateFreeInvite {
+                                Button {
+                                    createInvitation()
+                                } label: {
+                                    Text("Create 1-time invite")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(primary)
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 50)
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                NavigationLink {
+                                    XauXatPlusView()
+                                        .navigationTitle("XauXat Plus")
+                                        .navigationBarTitleDisplayMode(.inline)
+                                } label: {
+                                    XauXatPlusLockedLabel(
+                                        title: "Create another invite",
+                                        systemImage: "link.badge.plus"
+                                    )
+                                    .padding(.horizontal, 20)
+                                    .frame(minHeight: 50)
+                                }
+                            }
+                        }
+                        .background(
+                            surface,
+                            in: RoundedRectangle(
+                                cornerRadius: 12,
+                                style: .continuous
+                            )
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.top, 7)
+
+                        Text(
+                            canCreateFreeInvite
+                                ? "Free includes up to three active one-time invites. A used or revoked invite frees a slot."
+                                : "All three Free invite slots are in use. Revoke an unused invite or use XauXat Plus for more."
+                        )
+                        .font(.system(size: 13))
+                        .foregroundStyle(secondary)
+                        .padding(.horizontal, 40)
+                        .padding(.top, 7)
+
                         NavigationLink {
                             XauXatPlusView()
                                 .navigationTitle("XauXat Plus")
                                 .navigationBarTitleDisplayMode(.inline)
                         } label: {
-                            XauXatPlusLockedLabel(title: "Create another invite", systemImage: "link.badge.plus")
+                            XauXatPlusLockedLabel(
+                                title: "Advanced invite controls",
+                                systemImage: "slider.horizontal.3"
+                            )
+                            .padding(.horizontal, 20)
+                            .frame(minHeight: 54)
+                            .background(
+                                surface,
+                                in: RoundedRectangle(
+                                    cornerRadius: 12,
+                                    style: .continuous
+                                )
+                            )
                         }
-                    }
-                } header: {
-                    Text("Free invites")
-                } footer: {
-                    Text(canCreateFreeInvite
-                         ? "Free includes up to three active one-time invites. A used or revoked invite frees a slot."
-                         : "All three Free invite slots are in use. Revoke an unused invite or use XauXat Plus for more.")
-                }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 30)
 
-                Section {
-                    NavigationLink {
-                        XauXatPlusView()
-                            .navigationTitle("XauXat Plus")
-                            .navigationBarTitleDisplayMode(.inline)
-                    } label: {
-                        XauXatPlusLockedLabel(title: "Advanced invite controls", systemImage: "slider.horizontal.3")
+                        Text("Expiry, custom permissions and links for multiple contacts are available with XauXat Plus.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(secondary)
+                            .padding(.horizontal, 40)
+                            .padding(.top, 7)
                     }
-                } footer: {
-                    Text("Expiry, custom permissions and links for multiple contacts are available with XauXat Plus.")
                 }
+                .padding(.top, 20)
+                .padding(.bottom, 40)
             }
         }
+        .tint(champagne)
     }
 
     private var hasAdvancedContactInvites: Bool {
@@ -972,23 +1276,124 @@ private struct ConnectView: View {
     @Binding var pastedLink: String
     @Binding var alert: NewChatViewAlert?
     var onboarding: Bool = false
+    var xauXatStyle: Bool = false
     @State var scannerPaused: Bool = false
     @State private var pasteboardHasStrings = UIPasteboard.general.hasStrings
 
-    var body: some View {
-        List {
-            Section(header: connectSectionHeader) {
-                pasteLinkView()
-            }
-            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+    private var xauXatAccent: Color {
+        colorScheme == .dark
+            ? Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+    }
 
-            Section(header: Text("Or scan QR code").foregroundColor(theme.colors.secondary)) {
-                ScannerInView(showQRCodeScanner: $showQRCodeScanner, scannerPaused: $scannerPaused, processQRCode: processQRCode)
+    private var xauXatSecondary: Color {
+        colorScheme == .dark
+            ? Color(red: 139 / 255, green: 135 / 255, blue: 127 / 255)
+            : Color(red: 105 / 255, green: 97 / 255, blue: 88 / 255)
+    }
+
+    private var xauXatBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 29 / 255, green: 29 / 255, blue: 30 / 255)
+            : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+    }
+
+    private var xauXatSurface: Color {
+        colorScheme == .dark
+            ? Color(red: 44 / 255, green: 44 / 255, blue: 46 / 255)
+            : Color.white
+    }
+
+    var body: some View {
+        Group {
+            if xauXatStyle {
+                xauXatConnectView
+            } else {
+                List {
+                    Section(header: connectSectionHeader) {
+                        pasteLinkView()
+                    }
+                    .listRowInsets(
+                        EdgeInsets(
+                            top: 0,
+                            leading: 20,
+                            bottom: 0,
+                            trailing: 20
+                        )
+                    )
+
+                    Section(
+                        header: Text("Or scan QR code")
+                            .foregroundColor(theme.colors.secondary)
+                    ) {
+                        ScannerInView(
+                            showQRCodeScanner: $showQRCodeScanner,
+                            scannerPaused: $scannerPaused,
+                            processQRCode: processQRCode
+                        )
+                    }
+                }
             }
         }
+        .tint(xauXatStyle ? xauXatAccent : theme.colors.primary)
         .onDisappear {
             connectProgressManager.cancelConnectProgress()
         }
+    }
+
+    private var xauXatConnectView: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Paste the link you received")
+                        .font(.system(size: 13, weight: .regular))
+                        .textCase(.uppercase)
+                        .foregroundStyle(xauXatSecondary)
+                        .padding(.horizontal, 25)
+
+                    pasteLinkView()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .padding(.horizontal, 18)
+                        .background(
+                            xauXatSurface,
+                            in: RoundedRectangle(
+                                cornerRadius: 12,
+                                style: .continuous
+                            )
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.top, 7)
+
+                    Text("Or scan QR code")
+                        .font(.system(size: 13, weight: .regular))
+                        .textCase(.uppercase)
+                        .foregroundStyle(xauXatSecondary)
+                        .padding(.horizontal, 25)
+                        .padding(.top, 35)
+
+                    ScannerInView(
+                        showQRCodeScanner: $showQRCodeScanner,
+                        scannerPaused: $scannerPaused,
+                        processQRCode: processQRCode,
+                        xauXatStyle: true
+                    )
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(1, contentMode: .fit)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+
+                    Spacer(minLength: 24)
+                }
+                .frame(width: geometry.size.width, alignment: .leading)
+                .padding(.top, 25)
+            }
+            .frame(width: geometry.size.width)
+        }
+        .background(
+            xauXatBackground
+                .ignoresSafeArea()
+        )
     }
 
     @ViewBuilder private func pasteLinkView() -> some View {
@@ -1017,7 +1422,8 @@ private struct ConnectView: View {
                         }
                     }
                 } label: {
-                    Text("Tap to paste link").foregroundColor(theme.colors.primary)
+                    Text("Tap to paste link")
+                        .foregroundColor(xauXatStyle ? xauXatAccent : theme.colors.primary)
                 }
                 .disabled(!pasteboardHasStrings)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -1069,7 +1475,12 @@ private struct ConnectView: View {
         }
         .padding(.bottom, 4)
         #else
-        Text("Paste the link you received").foregroundColor(theme.colors.secondary)
+        Text("Paste the link you received")
+            .foregroundColor(
+                xauXatStyle
+                    ? xauXatSecondary
+                    : theme.colors.secondary
+            )
         #endif
     }
 
@@ -1093,6 +1504,7 @@ struct ScannerInView: View {
     let processQRCode: (_ resp: Result<ScanResult, ScanError>) -> Void
     @State private var cameraAuthorizationStatus: AVAuthorizationStatus?
     var scanMode: ScanMode = .continuous
+    var xauXatStyle: Bool = false
 
     var body: some View {
         Group {
@@ -1103,7 +1515,7 @@ struct ScannerInView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                    .padding(.horizontal)
+                    .padding(.horizontal, xauXatStyle ? 0 : 16)
             } else {
                 Button {
                     switch cameraAuthorizationStatus {
@@ -1128,12 +1540,14 @@ struct ScannerInView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .padding()
+                .padding(xauXatStyle ? 0 : 16)
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                        .fill(
+                            Color(uiColor: .secondarySystemGroupedBackground)
+                        )
                 )
-                .padding(.horizontal)
+                .padding(.horizontal, xauXatStyle ? 0 : 16)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))

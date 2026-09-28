@@ -122,12 +122,7 @@ struct ChatView: View {
             if case .local = cInfo {
                 xauXatPrivateNotesBackground.ignoresSafeArea(.all)
             } else {
-                Color.clear.ignoresSafeArea(.all)
-                    .if(wallpaperImage != nil && im.secondaryIMFilter == nil) { view in
-                        view.modifier(
-                            ChatViewBackground(image: wallpaperImage!, imageType: wallpaperType, background: backgroundColor, tint: tintColor)
-                        )
-                }
+                xauXatChatBackground.ignoresSafeArea(.all)
             }
             VStack(spacing: 0) {
                 ZStack(alignment: .bottomTrailing) {
@@ -484,6 +479,12 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    private var xauXatChatBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 18 / 255, green: 18 / 255, blue: 17 / 255)
+            : Color(red: 247 / 255, green: 244 / 255, blue: 238 / 255)
     }
 
     private var xauXatPrivateNotesBackground: Color {
@@ -1018,137 +1019,105 @@ struct ChatView: View {
 
     struct ChatBannerView: View {
         @EnvironmentObject var theme: AppTheme
-        @AppStorage(DEFAULT_CHAT_ITEM_ROUNDNESS) private var roundness = defaultChatItemRoundness
         @Binding @ObservedObject var chat: Chat
 
         var body: some View {
-            let v = VStack(spacing: 8) {
-                ChatInfoImage(chat: chat, size: alertProfileImageSize)
+            HStack(spacing: 12) {
+                ChatInfoImage(
+                    chat: chat,
+                    size: 44,
+                    radiusOverride: 44
+                )
 
-                let badge = chat.chatInfo.nameBadge
-                NameWithBadge(Text(chat.chatInfo.displayName).font(.title3), badge, .title3) { if let badge { showBadgeInfoAlert(chat.chatInfo.displayName, badge) } }
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 240)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text(chat.chatInfo.displayName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(theme.colors.onBackground)
+                            .lineLimit(1)
 
-                let fullName = chat.chatInfo.fullName.trimmingCharacters(in: .whitespacesAndNewlines)
-                if fullName != "" && fullName != chat.chatInfo.displayName && fullName != chat.chatInfo.displayName.trimmingCharacters(in: .whitespacesAndNewlines) {
-                    Text(chat.chatInfo.fullName)
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 260)
-                }
-
-                ProfileDescriptionView(shortDescr: chat.chatInfo.shortDescr, description: chat.chatInfo.profileDescription)
-                    .padding(.horizontal)
-
-                switch chat.chatInfo {
-                case let .direct(contact):
-                    contactSimplexNameView(contact, verifiable: false)
-                case let .group(groupInfo, _):
-                    groupSimplexNameView(groupInfo, verifiable: false)
-                default:
-                    EmptyView()
-                }
-
-                if let chatContext {
-                    Text(chatContext)
-                        .font(.callout)
-                        .foregroundColor(theme.colors.secondary)
-                        .padding(.top, 8)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(theme.appColors.receivedMessage)
-            .clipShape(RoundedRectangle(cornerRadius: msgRectMaxRadius * roundness))
-            if let (label, connLink) = chatAddress() {
-                v.contextMenu {
-                    Button {
-                        let shareItems: [Any] = [connLink]
-                        showShareSheet(items: shareItems)
-                    } label: {
-                        Label(label, systemImage: "square.and.arrow.up")
-                    }
-                }
-                .padding(.horizontal)
-            } else {
-                v.padding(.horizontal)
-            }
-
-        }
-
-        func chatAddress() -> (label: LocalizedStringKey, connLink: String)? {
-            switch chat.chatInfo {
-            case let .direct(contact):
-                if !contact.nextConnectPrepared && !contact.nextAcceptContactRequest {
-                    let connLink: String? = if let pct = contact.preparedContact, case .con = pct.uiConnLinkType {
-                        pct.connLinkToConnect.simplexChatUri()
-                    } else {
-                        contact.profile.contactLink
-                    }
-                    if let connLink {
-                return ("XauXat address", connLink)
-                    }
-                }
-            case let .group(groupInfo, _):
-                if !groupInfo.nextConnectPrepared {
-                    if let pg = groupInfo.preparedGroup {
-                        let connLink = pg.connLinkToConnect.simplexChatUri()
-                        switch groupInfo.businessChat?.chatType {
-                        case .none: return ("Group link", connLink)
-                        case .business: return ("Business address", connLink)
-                        default: ()
+                        if let badge = chat.chatInfo.nameBadge {
+                            NameWithBadge(
+                                Text(""),
+                                badge,
+                                .caption1
+                            ) {
+                                showBadgeInfoAlert(
+                                    chat.chatInfo.displayName,
+                                    badge
+                                )
+                            }
                         }
                     }
+
+                    if let context = chatContext {
+                        Text(context)
+                            .font(.system(size: 12.5, weight: .regular))
+                            .foregroundColor(theme.colors.secondary)
+                            .lineLimit(1)
+                    }
                 }
-            default: ()
+
+                Spacer()
+
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(theme.colors.secondary.opacity(0.75))
             }
-            return nil
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(theme.colors.background.opacity(0.82))
+            )
+            .padding(.horizontal, 16)
         }
 
         var chatContext: LocalizedStringKey? {
             switch chat.chatInfo {
             case let .direct(contact):
-                if contact.nextConnectPrepared, let linkType = contact.preparedContact?.uiConnLinkType {
+                if contact.nextConnectPrepared,
+                   let linkType = contact.preparedContact?.uiConnLinkType {
                     switch linkType {
                     case .inv:
                         "Tap Connect to chat"
                     case .con:
-                        contact.isBot ? "Tap Connect to use bot" : "Tap Connect to send request"
+                        contact.isBot
+                            ? "Tap Connect to use bot"
+                            : "Tap Connect to send request"
                     }
                 } else if contact.nextAcceptContactRequest {
                     "Accept contact request"
                 } else if case .bot = contact.profile.peerType {
                     "Bot"
                 } else {
-                    "Your contact"
+                    "Private conversation"
                 }
+
             case let .group(groupInfo, _):
                 switch groupInfo.businessChat?.chatType {
                 case .none:
                     if groupInfo.nextConnectPrepared {
-                        groupInfo.useRelays ? "Tap Join channel" : "Tap Join group"
+                        groupInfo.useRelays
+                            ? "Tap Join channel"
+                            : "Tap Join group"
                     } else {
-                        switch (groupInfo.membership.memberStatus) {
-                        case .memInvited: groupInfo.useRelays ? "Join channel" : "Join group"
-                        case .memCreator: groupInfo.useRelays ? "Your channel" : "Your group"
-                        default: groupInfo.useRelays ? "Channel" : "Group"
-                        }
+                        groupInfo.useRelays
+                            ? "Private channel"
+                            : "Private group"
                     }
+
                 case .business:
-                    if groupInfo.nextConnectPrepared {
-                        "Tap Connect to chat"
-                    } else {
-                        "Business connection"
-                    }
+                    groupInfo.nextConnectPrepared
+                        ? "Tap Connect to chat"
+                        : "Business connection"
+
                 case .customer:
                     "Your business contact"
                 }
-            default: nil
+
+            default:
+                nil
             }
         }
     }

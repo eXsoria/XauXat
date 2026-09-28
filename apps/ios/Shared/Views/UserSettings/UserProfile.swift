@@ -10,6 +10,8 @@ import SwiftUI
 import SimpleXChat
 
 struct UserProfile: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var onSaved: () -> Void = {}
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var theme: AppTheme
@@ -31,61 +33,187 @@ struct UserProfile: View {
     @FocusState private var focusDisplayName
 
     var body: some View {
-        List {
-            EditProfileImage(profileImage: $profile.image, iconName: "person.crop.circle.fill", showChooseSource: $showChooseSource)
-                .padding(.top)
+        ScrollView {
+            VStack(spacing: 0) {
 
-            Section {
-                HStack {
-                    TextField("Enter your name…", text: $profile.displayName)
-                        .focused($focusDisplayName)
-                    if !validDisplayName(profile.displayName) {
-                        Button {
-                            alert = .invalidNameError(validName: mkValidName(profile.displayName))
-                        } label: {
-                            Image(systemName: "exclamationmark.circle").foregroundColor(.red)
-                        }
-                    }
-                }
-                if let user = chatModel.currentUser, showFullName(user) {
-                    TextField("Full name (optional)", text: $profile.fullName)
-                }
-                HStack {
-                    TextField("Bio", text: $shortDescr)
-                    if !bioFitsLimit() {
-                        Button {
-                            showAlert(NSLocalizedString("Bio too large", comment: "alert title"))
-                        } label: {
-                            Image(systemName: "exclamationmark.circle").foregroundColor(.red)
-                        }
-                    }
-                }
-                NavigationLink {
-                    ProfileDescriptionEditor(description: $description)
-                        .navigationTitle("Description")
-                        .modifier(ThemedBackground(grouped: true))
-                } label: {
-                    Text(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add description" : "Edit description")
-                }
-            } footer: {
-                Text("Your profile is stored on your device and shared only with your contacts. Relay servers cannot see your profile.")
-            }
+                // MARK: Profile image
 
-            Section {
-                Button(action: getCurrentProfile) {
-                    Text("Reset")
-                }
-                .disabled(
-                    currentProfileHash == profile.hashValue &&
-                    (profile.shortDescr ?? "") == shortDescr.trimmingCharacters(in: .whitespaces) &&
-                    (profile.description ?? "") == description.trimmingCharacters(in: .whitespacesAndNewlines)
+                EditProfileImage(
+                    profileImage: $profile.image,
+                    iconName: "person.crop.circle.fill",
+                    showChooseSource: $showChooseSource
                 )
-                Button(action: saveProfile) {
-                    Text("Save")
+                .padding(.top, 18)
+                .padding(.bottom, 34)
+
+                // MARK: Profile fields
+
+                VStack(spacing: 0) {
+                    HStack {
+                        TextField("Enter your name…", text: $profile.displayName)
+                            .focused($focusDisplayName)
+                            .foregroundStyle(xauXatPrimary)
+
+                        if !validDisplayName(profile.displayName) {
+                            Button {
+                                alert = .invalidNameError(
+                                    validName: mkValidName(profile.displayName)
+                                )
+                            } label: {
+                                Image(systemName: "exclamationmark.circle")
+                                    .foregroundColor(.red)
+                            }
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    .padding(.horizontal, 20)
+
+                    xauXatDivider
+
+                    if let user = chatModel.currentUser, showFullName(user) {
+                        TextField(
+                            "Full name (optional)",
+                            text: $profile.fullName
+                        )
+                        .foregroundStyle(xauXatPrimary)
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 20)
+
+                        xauXatDivider
+                    }
+
+                    HStack {
+                        TextField("Bio", text: $shortDescr)
+                            .foregroundStyle(xauXatPrimary)
+
+                        if !bioFitsLimit() {
+                            Button {
+                                showAlert(
+                                    NSLocalizedString(
+                                        "Bio too large",
+                                        comment: "alert title"
+                                    )
+                                )
+                            } label: {
+                                Image(systemName: "exclamationmark.circle")
+                                    .foregroundColor(.red)
+                            }
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    .padding(.horizontal, 20)
+
+                    xauXatDivider
+
+                    NavigationLink {
+                        ProfileDescriptionEditor(description: $description)
+                            .navigationTitle("Description")
+                            .modifier(ThemedBackground(grouped: true))
+                    } label: {
+                        HStack {
+                            Text(
+                                description
+                                    .trimmingCharacters(
+                                        in: .whitespacesAndNewlines
+                                    )
+                                    .isEmpty
+                                    ? "Add description"
+                                    : "Edit description"
+                            )
+                            .foregroundStyle(xauXatPrimary)
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(
+                                    xauXatSecondary.opacity(0.45)
+                                )
+                        }
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 20)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .disabled(!canSaveProfile)
+                .background(
+                    xauXatSurface,
+                    in: RoundedRectangle(
+                        cornerRadius: 12,
+                        style: .continuous
+                    )
+                )
+                .padding(.horizontal, 20)
+
+                Text(
+                    "Your profile is stored on your device and shared only with your contacts. Relay servers cannot see your profile."
+                )
+                .font(.footnote)
+                .foregroundStyle(xauXatSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 40)
+                .padding(.top, 8)
+
+                // MARK: Actions
+
+                VStack(spacing: 0) {
+                    Button(action: getCurrentProfile) {
+                        HStack {
+                            Text("Reset")
+                                .foregroundStyle(
+                                    resetDisabled
+                                        ? xauXatSecondary.opacity(0.45)
+                                        : xauXatAccent
+                                )
+
+                            Spacer()
+                        }
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 20)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(resetDisabled)
+
+                    xauXatDivider
+
+                    Button(action: saveProfile) {
+                        HStack {
+                            Text("Save")
+                                .foregroundStyle(
+                                    canSaveProfile
+                                        ? xauXatAccent
+                                        : xauXatSecondary.opacity(0.45)
+                                )
+
+                            Spacer()
+                        }
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 20)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSaveProfile)
+                }
+                .background(
+                    xauXatSurface,
+                    in: RoundedRectangle(
+                        cornerRadius: 12,
+                        style: .continuous
+                    )
+                )
+                .padding(.horizontal, 20)
+                .padding(.top, 30)
+
+                Spacer(minLength: 40)
             }
+            .frame(maxWidth: .infinity)
         }
+        .background(
+            xauXatBackground
+                .ignoresSafeArea()
+        )
+        .tint(xauXatAccent)
         // Lifecycle
         .onAppear {
             // load once — returning from the description editor re-fires onAppear and would discard edits
@@ -116,13 +244,19 @@ struct UserProfile: View {
             }
         }
         // Modals
-        .confirmationDialog("Profile image", isPresented: $showChooseSource, titleVisibility: .visible) {
+        .confirmationDialog(
+            "Profile image",
+            isPresented: $showChooseSource,
+            titleVisibility: .visible
+        ) {
             Button("Take picture") {
                 showTakePhoto = true
             }
+
             Button("Choose from library") {
                 showImagePicker = true
             }
+
             if UIPasteboard.general.hasImages {
                 Button("Paste image") {
                     chosenImage = UIPasteboard.general.image
@@ -171,7 +305,52 @@ struct UserProfile: View {
                 )
             }
         }
-        .alert(item: $alert) { a in userProfileAlert(a, $profile.displayName) }
+        .alert(item: $alert) { a in
+            userProfileAlert(a, $profile.displayName)
+        }
+    }
+
+    private var xauXatDivider: some View {
+        Rectangle()
+            .fill(xauXatSecondary.opacity(0.18))
+            .frame(height: 0.5)
+            .padding(.leading, 20)
+    }
+
+    private var xauXatBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 29 / 255, green: 29 / 255, blue: 30 / 255)
+            : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+    }
+
+    private var xauXatSurface: Color {
+        colorScheme == .dark
+            ? Color(red: 44 / 255, green: 44 / 255, blue: 46 / 255)
+            : Color.white
+    }
+
+    private var xauXatPrimary: Color {
+        colorScheme == .dark
+            ? Color.white
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+    }
+
+    private var xauXatSecondary: Color {
+        colorScheme == .dark
+            ? Color(red: 139 / 255, green: 135 / 255, blue: 127 / 255)
+            : Color(red: 105 / 255, green: 97 / 255, blue: 88 / 255)
+    }
+
+    private var xauXatAccent: Color {
+        colorScheme == .dark
+            ? Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+    }
+
+    private var resetDisabled: Bool {
+        currentProfileHash == profile.hashValue &&
+        (profile.shortDescr ?? "") == shortDescr.trimmingCharacters(in: .whitespaces) &&
+        (profile.description ?? "") == description.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func showFullName(_ user: User) -> Bool {
@@ -255,9 +434,25 @@ struct UserProfile: View {
     }
 }
 
+
 struct EditProfileImage: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var theme: AppTheme
     @AppStorage(DEFAULT_PROFILE_IMAGE_CORNER_RADIUS) private var radius = defaultProfileImageCorner
+
+    private var xauXatImageControlColor: Color {
+        colorScheme == .dark
+            ? Color(
+                red: 222 / 255,
+                green: 206 / 255,
+                blue: 175 / 255
+            )
+            : Color(
+                red: 23 / 255,
+                green: 19 / 255,
+                blue: 14 / 255
+            )
+    }
     @Binding var profileImage: String?
     var iconName: String
     @Binding var showChooseSource: Bool
@@ -285,7 +480,11 @@ struct EditProfileImage: View {
                         size: 160,
                         radiusOverride: 50
                     )
-                    editImageButton { showChooseSource = true }
+                    editImageButton(
+                        color: xauXatImageControlColor
+                    ) {
+                        showChooseSource = true
+                    }
                 }
             }
         }
@@ -304,7 +503,7 @@ struct EditProfileImage: View {
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(height: 12)
-            .foregroundColor(theme.colors.primary)
+            .foregroundColor(xauXatImageControlColor)
             .padding(6)
             .frame(width: 36, height: 36, alignment: .center)
             .background(radius >= 20 ? Color.clear : theme.colors.background.opacity(0.5))
@@ -315,7 +514,10 @@ struct EditProfileImage: View {
     }
 }
 
-func editImageButton(action: @escaping () -> Void) -> some View {
+func editImageButton(
+    color: Color? = nil,
+    action: @escaping () -> Void
+) -> some View {
     Button {
         action()
     } label: {
@@ -323,6 +525,9 @@ func editImageButton(action: @escaping () -> Void) -> some View {
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: 48)
+            .if(color != nil) { view in
+                view.foregroundColor(color)
+            }
     }
 }
 

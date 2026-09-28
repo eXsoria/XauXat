@@ -27,7 +27,8 @@ struct ChatInfoToolbar: View {
                 ChatInfoImage(
                     chat: chat,
                     size: imageSize,
-                    color: Color(uiColor: .tertiaryLabel)
+                    color: Color(uiColor: .tertiaryLabel),
+                    radiusOverride: imageSize
                 )
                 if chat.chatStats.reportsCount > 0 {
                     Image(systemName: "flag.circle.fill")
@@ -77,7 +78,11 @@ struct ChatInfoToolbar: View {
                     .padding(.leading, 4)
             }
         }
-        .foregroundColor(theme.colors.onBackground)
+        .foregroundColor(
+            colorScheme == .dark
+                ? Color.white
+                : Color.black
+        )
         .frame(width: 220)
     }
 
