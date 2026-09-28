@@ -110,6 +110,147 @@ func beginBGTask(_ handler: (() -> Void)? = nil) -> (() -> Void) {
     beginTrackedBGTask { _ in handler?() }
 }
 
+@MainActor
+final class XauXatConnectionRecoveryManager: ObservableObject {
+    static let shared = XauXatConnectionRecoveryManager()
+
+    enum State: Equatable {
+        case idle
+        case waiting
+        case waitingForNetwork
+        case refreshingTor
+        case reconnectingRelays
+        case monitoring
+        case delayed
+    }
+
+    @Published private(set) var state: State = .idle
+
+    private var outboundPending = false
+    private var subscriptionPending = false
+    private var attempt = 0
+    private var recoveryTask: Task<Void, Never>?
+    private var recoveryGeneration: UUID?
+
+    private init() {}
+
+    var connectionLabel: LocalizedStringKey {
+        switch state {
+        case .idle, .waiting: "Connecting"
+        case .waitingForNetwork: "Offline"
+        case .refreshingTor: "Refreshing Tor"
+        case .reconnectingRelays: "Connecting relay"
+        case .monitoring: "Waiting for relay"
+        case .delayed: "Retrying"
+        }
+    }
+
+    var outboundStatus: String {
+        switch state {
+        case .idle, .waiting: NSLocalizedString("Queued for relay", comment: "outbound message delivery status")
+        case .waitingForNetwork: NSLocalizedString("Waiting for network", comment: "outbound message delivery status")
+        case .refreshingTor: NSLocalizedString("Refreshing Tor", comment: "outbound message delivery status")
+        case .reconnectingRelays: NSLocalizedString("Connecting to relay", comment: "outbound message delivery status")
+        case .monitoring: NSLocalizedString("Waiting for relay", comment: "outbound message delivery status")
+        case .delayed: NSLocalizedString("Retrying via Tor", comment: "outbound message delivery status")
+        }
+    }
+
+    func setOutboundPending(_ pending: Bool) {
+        outboundPending = pending
+        updateRecoveryTask()
+    }
+
+    func setSubscriptionPending(_ pending: Bool) {
+        subscriptionPending = pending
+        updateRecoveryTask()
+    }
+
+    private var hasPendingWork: Bool {
+        outboundPending || subscriptionPending
+    }
+
+    private func updateRecoveryTask() {
+        if hasPendingWork {
+            startRecovery(immediately: false)
+        } else {
+            recoveryTask?.cancel()
+            recoveryTask = nil
+            recoveryGeneration = nil
+            attempt = 0
+            state = .idle
+        }
+    }
+
+    private func startRecovery(immediately: Bool) {
+        guard recoveryTask == nil else { return }
+        let generation = UUID()
+        recoveryGeneration = generation
+        recoveryTask = Task { [weak self] in
+            guard let self else { return }
+            await self.runRecoveryLoop(immediately: immediately, generation: generation)
+        }
+    }
+
+    private func runRecoveryLoop(immediately: Bool, generation: UUID) async {
+        var skipDelay = immediately
+
+        while hasPendingWork && !Task.isCancelled {
+            if !ChatModel.shared.networkInfo.online {
+                state = .waitingForNetwork
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                continue
+            }
+
+            if !skipDelay {
+                state = attempt == 0 ? .waiting : .monitoring
+                let delay = XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: attempt)
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } catch {
+                    break
+                }
+                guard hasPendingWork else { break }
+            }
+            skipDelay = false
+
+            if XauXatOutboundDeliveryPolicy.shouldRefreshTor(attempt: attempt) {
+                state = .refreshingTor
+                do {
+                    try await EmbeddedTorManager.shared.refreshCircuit()
+                } catch {
+                    // Relay reconnection is still safe and useful when Tor's
+                    // control channel cannot be refreshed. Traffic remains
+                    // pinned to the existing loopback SOCKS endpoint.
+                    logger.error("XauXat delivery recovery could not refresh Tor: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+
+            guard hasPendingWork, !Task.isCancelled else { break }
+            state = .reconnectingRelays
+            do {
+                try await reconnectAllServers()
+                logger.notice("XauXat delivery recovery reconnected relay sessions")
+                state = .monitoring
+            } catch {
+                logger.error("XauXat delivery recovery failed to reconnect relays: \(responseError(error), privacy: .public)")
+                state = .delayed
+            }
+            attempt += 1
+        }
+
+        guard recoveryGeneration == generation else { return }
+        recoveryTask = nil
+        recoveryGeneration = nil
+        if !hasPendingWork {
+            attempt = 0
+            state = .idle
+        } else {
+            startRecovery(immediately: false)
+        }
+    }
+}
+
 final class OutboundDeliveryManager {
     static let shared = OutboundDeliveryManager()
 
@@ -148,6 +289,9 @@ final class OutboundDeliveryManager {
             endTask()
         }
         logger.notice("Outbound delivery started")
+        Task { @MainActor in
+            XauXatConnectionRecoveryManager.shared.setOutboundPending(true)
+        }
         return token
     }
 
@@ -171,9 +315,13 @@ final class OutboundDeliveryManager {
                 deliveries[token] = delivery
             }
         }
+        let hasPending = !deliveries.isEmpty
         lock.unlock()
 
         taskToEnd?()
+        Task { @MainActor in
+            XauXatConnectionRecoveryManager.shared.setOutboundPending(hasPending)
+        }
         if trackedCount > 0 {
             logger.notice("Outbound delivery tracking \(trackedCount, privacy: .public) message(s)")
         }
@@ -202,9 +350,13 @@ final class OutboundDeliveryManager {
             // A delivery event can race the API response that registers its item IDs.
             recentlyFinished[itemId] = Date()
         }
+        let hasPending = !deliveries.isEmpty
         lock.unlock()
 
         taskToEnd?()
+        Task { @MainActor in
+            XauXatConnectionRecoveryManager.shared.setOutboundPending(hasPending)
+        }
         logger.notice("Outbound delivery reached terminal state; \(remaining, privacy: .public) message(s) remain in this send")
     }
 
@@ -233,19 +385,29 @@ final class OutboundDeliveryManager {
             }
             taskToEnd = delivery.endTask
         }
+        let hasPending = !deliveries.isEmpty
         lock.unlock()
         taskToEnd?()
+        Task { @MainActor in
+            XauXatConnectionRecoveryManager.shared.setOutboundPending(hasPending)
+        }
         logger.notice("Outbound delivery ended: \(reason, privacy: .public)")
     }
 
     private func expire(_ token: UUID) {
         lock.lock()
-        if let delivery = deliveries.removeValue(forKey: token) {
-            for itemId in delivery.itemIds {
-                deliveryByItemId.removeValue(forKey: itemId)
-            }
+        if var delivery = deliveries[token] {
+            // The iOS execution grant ended, not the SimpleX outbox item.
+            // Keep tracking the IDs so foreground recovery can finish and the
+            // eventual terminal status can stop the retry loop.
+            delivery.endTask = nil
+            deliveries[token] = delivery
         }
+        let hasPending = !deliveries.isEmpty
         lock.unlock()
+        Task { @MainActor in
+            XauXatConnectionRecoveryManager.shared.setOutboundPending(hasPending)
+        }
         logger.error("Outbound delivery background time expired; the SimpleX outbox remains pending")
     }
 

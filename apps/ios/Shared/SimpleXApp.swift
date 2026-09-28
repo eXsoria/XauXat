@@ -147,6 +147,12 @@ struct SimpleXApp: App {
             }
             if appState.inactive {
                 Task {
+                    do {
+                        try await reconnectAllServers()
+                        logger.notice("XauXat foreground recovery reconnected relay sessions")
+                    } catch {
+                        logger.error("XauXat foreground recovery failed: \(responseError(error), privacy: .public)")
+                    }
                     await updateChats()
                     if !chatModel.showCallView && !CallController.shared.hasActiveCalls() {
                         await updateCallInvitations()

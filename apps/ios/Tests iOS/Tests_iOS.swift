@@ -210,4 +210,13 @@ class Tests_iOS: XCTestCase {
         )
     }
 
+    func testOutboundDeliveryRecoveryBacksOffAndRefreshesTorAfterFirstAttempt() {
+        XCTAssertEqual(XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: 0), 8)
+        XCTAssertEqual(XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: 1), 20)
+        XCTAssertEqual(XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: 2), 45)
+        XCTAssertEqual(XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: 20), 90)
+        XCTAssertFalse(XauXatOutboundDeliveryPolicy.shouldRefreshTor(attempt: 0))
+        XCTAssertTrue(XauXatOutboundDeliveryPolicy.shouldRefreshTor(attempt: 1))
+    }
+
 }

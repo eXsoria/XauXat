@@ -108,12 +108,21 @@ struct ChatInfoToolbar: View {
     struct SubStatusView: View {
         @Environment(\.dynamicTypeSize) private var userFont: DynamicTypeSize
         @EnvironmentObject var theme: AppTheme
+        @ObservedObject private var recovery = XauXatConnectionRecoveryManager.shared
         var status: SubscriptionStatus
 
         var body: some View {
             switch status {
             case .active: EmptyView()
-            case .pending: ProgressView()
+            case .pending:
+                HStack(spacing: 5) {
+                    ProgressView()
+                    Text(recovery.connectionLabel)
+                        .font(.caption2)
+                        .foregroundColor(theme.colors.secondary)
+                        .lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
             case .removed: subStatusError()
             case .noSub: subStatusError()
             }
