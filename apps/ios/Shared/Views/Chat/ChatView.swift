@@ -41,6 +41,7 @@ private func shouldShowAvatar(_ current: ChatItem, _ older: ChatItem?) -> Bool {
 struct ChatView: View {
     @EnvironmentObject var chatModel: ChatModel
     @StateObject private var connectProgressManager = ConnectProgressManager.shared
+    @StateObject private var connectionRecovery = XauXatConnectionRecoveryManager.shared
     @State var revealedItems: Set<Int64> = Set()
     @State var theme: AppTheme = buildTheme()
     @Environment(\.dismiss) var dismiss
@@ -339,6 +340,7 @@ struct ChatView: View {
             selectedChatItems = nil
             revealedItems = Set()
             initChatView()
+            updateSubscriptionRecovery(chatModel.chatSubStatus)
             if im.isLoading {
                 Task {
                     try? await Task.sleep(nanoseconds: 500_000000)
@@ -403,6 +405,9 @@ struct ChatView: View {
                 dismiss()
             }
         }
+        .onChange(of: chatModel.chatSubStatus) { status in
+            updateSubscriptionRecovery(status)
+        }
         .onChange(of: chatModel.secondaryPendingInviteeChatOpened) { opened in
             if im.secondaryIMFilter != nil && !opened {
                 Task {
@@ -432,6 +437,7 @@ struct ChatView: View {
             }
         }
         .onDisappear {
+            connectionRecovery.setSubscriptionPending(false)
             ConnectProgressManager.shared.cancelConnectProgress()
             VideoPlayerView.players.removeAll()
             stopAudioPlayer()
@@ -806,6 +812,17 @@ struct ChatView: View {
             }
         }
         floatingButtonModel.updateOnListChange(scrollView.listState)
+    }
+
+    private func updateSubscriptionRecovery(_ status: SubscriptionStatus?) {
+        let pending: Bool
+        switch status {
+        case .active, .none:
+            pending = false
+        case .pending, .removed, .noSub:
+            pending = true
+        }
+        connectionRecovery.setSubscriptionPending(pending)
     }
 
     private func updateAvailableContent() {

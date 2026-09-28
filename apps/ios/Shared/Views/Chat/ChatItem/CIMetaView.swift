@@ -13,6 +13,9 @@ import SimpleXChat
 // Spec: spec/client/chat-view.md#CIMetaView
 struct CIMetaView: View {
     @ObservedObject var chat: Chat
+    @ObservedObject private var chatModel = ChatModel.shared
+    @ObservedObject private var tor = EmbeddedTorManager.shared
+    @ObservedObject private var recovery = XauXatConnectionRecoveryManager.shared
     @EnvironmentObject var theme: AppTheme
     @Environment(\.showTimestamp) var showTimestamp: Bool
     var chatItem: ChatItem
@@ -44,6 +47,7 @@ struct CIMetaView: View {
                     showEdited: showEdited,
                     showViaProxy: showSentViaProxy,
                     showTimesamp: showTimestamp,
+                    deliveryStatusOverride: deliveryStatusOverride,
                     signedFileVerified: chatItem.file?.loaded,
                     showSignature: showSignature,
                     showFileEncryption: showFileEncryption
@@ -59,6 +63,7 @@ struct CIMetaView: View {
                         showEdited: showEdited,
                         showViaProxy: showSentViaProxy,
                         showTimesamp: showTimestamp,
+                        deliveryStatusOverride: deliveryStatusOverride,
                         signedFileVerified: chatItem.file?.loaded,
                         showSignature: showSignature,
                         showFileEncryption: showFileEncryption
@@ -67,12 +72,29 @@ struct CIMetaView: View {
             }
         }
     }
+
+    private var deliveryStatusOverride: String? {
+        guard case .sndNew = chatItem.meta.itemStatus else { return nil }
+        guard chatModel.networkInfo.online else {
+            return NSLocalizedString("Waiting for network", comment: "outbound message delivery status")
+        }
+        switch tor.state {
+        case .stopped, .starting, .bootstrapping:
+            return NSLocalizedString("Connecting to Tor", comment: "outbound message delivery status")
+        case .verifying:
+            return NSLocalizedString("Verifying Tor", comment: "outbound message delivery status")
+        case .failed:
+            return NSLocalizedString("Tor unavailable", comment: "outbound message delivery status")
+        case .ready:
+            return recovery.outboundStatus
+        }
+    }
 }
 
 func xauXatDeliveryStatusText(_ status: CIStatus) -> String? {
     switch status {
     case .sndNew:
-        NSLocalizedString("Sending via Tor", comment: "outbound message delivery status")
+        NSLocalizedString("Queued for relay", comment: "outbound message delivery status")
     case let .sndSent(sndProgress):
         sndProgress == .complete
             ? NSLocalizedString("Sent to relay", comment: "outbound message delivery status")
@@ -136,6 +158,7 @@ func ciMetaText(
     showEdited: Bool = true,
     showViaProxy: Bool,
     showTimesamp: Bool,
+    deliveryStatusOverride: String? = nil,
     signedFileVerified: Bool? = nil,
     showSignature: Bool = true,
     showFileEncryption: Bool = true
@@ -149,7 +172,7 @@ func ciMetaText(
         }
     }
     let resolved = colorMode.resolve(color)
-    if showStatus, let deliveryStatusText = xauXatDeliveryStatusText(meta.itemStatus) {
+    if showStatus, let deliveryStatusText = deliveryStatusOverride ?? xauXatDeliveryStatusText(meta.itemStatus) {
         let statusColor = onlyOverrides ? Color.clear : resolved
         r = r + colored(Text(deliveryStatusText), statusColor)
         space = textSpace

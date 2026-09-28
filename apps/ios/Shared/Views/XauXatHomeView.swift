@@ -2687,6 +2687,7 @@ struct XauXatTorDiagnosticsView: View {
         case .stopped: "Stopped"
         case .starting: "Starting"
         case let .bootstrapping(progress): "\(progress)%"
+        case .verifying: "Verifying route"
         case .ready: "Ready"
         case .failed: "Failed"
         }
