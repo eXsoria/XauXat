@@ -21,6 +21,7 @@ final class EmbeddedTorManager: ObservableObject {
         case stopped
         case starting
         case bootstrapping(Int)
+        case verifying
         case ready(UInt16)
         case failed(String)
     }
@@ -48,7 +49,7 @@ final class EmbeddedTorManager: ObservableObject {
 
         callbacks.append(completion)
         switch state {
-        case .starting, .bootstrapping:
+        case .starting, .bootstrapping, .verifying:
             return
         case .stopped, .ready, .failed:
             begin()
@@ -244,9 +245,41 @@ final class EmbeddedTorManager: ObservableObject {
                     self.finish(.failure(EmbeddedTorError.invalidSocksPort), id: id)
                     return
                 }
-                self.finish(.success(port), id: id)
+                self.state = .verifying
+                await self.verifyStartupRoute(port: port, id: id)
             }
         }
+    }
+
+    private func verifyStartupRoute(port: UInt16, id: UUID) async {
+        var lastError: Error = EmbeddedTorError.checkFailed
+
+        // A Tor circuit event only proves that the embedded process built a
+        // circuit. Do not publish the SOCKS endpoint or let the chat core start
+        // until traffic has actually crossed that endpoint and reached Tor.
+        for attemptNumber in 1...3 {
+            guard attempt == id else { return }
+            do {
+                guard try await TorSOCKSProbe.run(port: port, timeout: 15) else {
+                    throw EmbeddedTorError.checkFailed
+                }
+                finish(.success(port), id: id)
+                return
+            } catch {
+                lastError = error
+                logger.error("XauXat Tor: startup route probe \(attemptNumber, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            }
+
+            if attemptNumber < 3 {
+                do {
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                } catch {
+                    return
+                }
+            }
+        }
+
+        finish(.failure(lastError), id: id)
     }
 
     private func finish(_ result: Result<UInt16, Error>, id: UUID) {

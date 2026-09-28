@@ -81,6 +81,8 @@ struct CIMetaView: View {
         switch tor.state {
         case .stopped, .starting, .bootstrapping:
             return NSLocalizedString("Connecting to Tor", comment: "outbound message delivery status")
+        case .verifying:
+            return NSLocalizedString("Verifying Tor", comment: "outbound message delivery status")
         case .failed:
             return NSLocalizedString("Tor unavailable", comment: "outbound message delivery status")
         case .ready:
