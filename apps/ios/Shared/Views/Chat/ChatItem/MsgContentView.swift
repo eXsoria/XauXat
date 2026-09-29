@@ -607,7 +607,7 @@ func messageText(
     let font = UIFont.preferredFont(forTextStyle: textStyle)
     let plain: [NSAttributedString.Key: Any] = [
         .font: font,
-        .foregroundColor: UIColor.label
+        .foregroundColor: UIColor.black
     ]
     let secretColor = backgroundColor.withAlphaComponent(1)
     var link: [NSAttributedString.Key: Any]?

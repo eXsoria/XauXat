@@ -41,6 +41,8 @@ struct CreateProfile: View {
     @State private var showImagePicker = false
     @State private var showTakePhoto = false
     @State private var chosenImage: UIImage? = nil
+    @State private var imageToEdit: UIImage? = nil
+    @State private var showAvatarEditor = false
     @State private var profileImage: String? = nil
 
     var body: some View {
@@ -103,9 +105,39 @@ struct CreateProfile: View {
                         .padding(.leading, 36)
                 }
                 Button(action: createProfile) {
-                    settingsRow("checkmark", color: theme.colors.primary) { Text("Create profile") }
+                    Text("Create profile")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(
+                            colorScheme == .dark
+                                ? Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+                                : Color.white
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(
+                            createButtonBackground,
+                            in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        )
+                        .contentShape(
+                            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        )
                 }
+                .buttonStyle(.plain)
                 .disabled(!canCreateProfile(displayName) || !bioFitsLimit())
+                .opacity(
+                    canCreateProfile(displayName) && bioFitsLimit()
+                        ? 1
+                        : 0.45
+                )
+                .listRowBackground(Color.clear)
+                .listRowInsets(
+                    EdgeInsets(
+                        top: 14,
+                        leading: 0,
+                        bottom: 8,
+                        trailing: 0
+                    )
+                )
             } footer: {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Your profile is stored on your device and only shared with your contacts.")
@@ -116,7 +148,8 @@ struct CreateProfile: View {
             .compactSectionSpacing()
         }
         .navigationTitle("Create your profile")
-        .modifier(ThemedBackground(grouped: true))
+        .modifier(XauXatListBackgroundCompat(background: xauXatBackground))
+        .tint(xauXatAccent)
         .alert(item: $alert) { a in userProfileAlert(a, $displayName) }
         .confirmationDialog("Profile image", isPresented: $showChooseSource, titleVisibility: .visible) {
             Button("Take picture") {
@@ -133,20 +166,61 @@ struct CreateProfile: View {
             }
         }
         .sheet(isPresented: $showImagePicker) {
-            LibraryImagePicker(image: $chosenImage) { _ in
-                await MainActor.run {
-                    showImagePicker = false
+            LibraryImagePicker(image: $chosenImage) { didSelectImage in
+                if !didSelectImage {
+                    await MainActor.run {
+                        showImagePicker = false
+                    }
                 }
             }
         }
         .onChange(of: chosenImage) { image in
-            Task {
-                let resized: String? = if let image {
-                    await resizeImageToStrSize(cropToSquare(image), maxDataSize: 12500)
-                } else {
-                    nil
-                }
-                await MainActor.run { profileImage = resized }
+            guard let image else { return }
+
+            imageToEdit = image
+
+            if showImagePicker {
+                showImagePicker = false
+            } else if !showTakePhoto {
+                showAvatarEditor = true
+            }
+        }
+        .onChange(of: showImagePicker) { isPresented in
+            if !isPresented, imageToEdit != nil {
+                showAvatarEditor = true
+            }
+        }
+        .onChange(of: showTakePhoto) { isPresented in
+            if !isPresented, imageToEdit != nil {
+                showAvatarEditor = true
+            }
+        }
+        .fullScreenCover(isPresented: $showAvatarEditor) {
+            if let imageToEdit {
+                XauXatAvatarEditor(
+                    image: imageToEdit,
+                    onCancel: {
+                        showAvatarEditor = false
+                        chosenImage = nil
+                        self.imageToEdit = nil
+                    },
+                    onConfirm: { croppedImage in
+                        showAvatarEditor = false
+                        chosenImage = nil
+                        self.imageToEdit = nil
+
+                        Task {
+                            let resized = await resizeImageToStrSize(
+                                croppedImage,
+                                maxDataSize: 12500
+                            )
+
+                            await MainActor.run {
+                                profileImage = resized
+                            }
+                        }
+                    }
+                )
             }
         }
         .onAppear() {
@@ -154,6 +228,24 @@ struct CreateProfile: View {
                 focusDisplayName = true
             }
         }
+    }
+
+    private var xauXatBackground: Color {
+        colorScheme == .dark
+            ? Color.black
+            : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+    }
+
+    private var xauXatAccent: Color {
+        colorScheme == .dark
+            ? Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+    }
+
+    private var createButtonBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
     }
 
     private func bioFitsLimit() -> Bool {
