@@ -12,6 +12,7 @@ struct UserProfilesView: View {
     @EnvironmentObject private var theme: AppTheme
     @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @Environment(\.editMode) private var editMode
+    @Environment(\.colorScheme) private var colorScheme
     var allowsProfileCreation = true
     var creationLockedByPlan = false
     var title: LocalizedStringKey = "Your chat profiles"
@@ -133,7 +134,8 @@ struct UserProfilesView: View {
             }
         }
         .navigationTitle(title)
-        .modifier(ThemedBackground(grouped: true))
+        .modifier(XauXatListBackgroundCompat(background: xauXatBackground))
+        .tint(xauXatAccent)
         .searchable(text: $searchTextOrPassword, placement: .navigationBarDrawer(displayMode: .always))
         .autocorrectionDisabled(true)
         .textInputAutocapitalization(.never)
@@ -195,6 +197,18 @@ struct UserProfilesView: View {
                 return mkAlert(title: title, message: error)
             }
         }
+    }
+
+    private var xauXatBackground: Color {
+        colorScheme == .dark
+            ? Color.black
+            : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+    }
+
+    private var xauXatAccent: Color {
+        colorScheme == .dark
+            ? Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
     }
 
     private func filteredUsers() -> [UserInfo] {
@@ -464,6 +478,26 @@ struct UserProfilesView: View {
                     showErrorAlert(error, NSLocalizedString("Error updating user privacy", comment: ""))
                 }
             }
+        }
+    }
+}
+
+
+struct XauXatListBackgroundCompat: ViewModifier {
+    let background: Color
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 16.0, *) {
+            content
+                .scrollContentBackground(.hidden)
+                .background(background.ignoresSafeArea())
+        } else {
+            content
+                .background(background.ignoresSafeArea())
+                .onAppear {
+                    UITableView.appearance().backgroundColor = .clear
+                }
         }
     }
 }

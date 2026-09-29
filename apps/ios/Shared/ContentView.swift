@@ -250,6 +250,32 @@ struct ContentView: View {
     private func mainView() -> some View {
         ZStack(alignment: .top) {
             XauXatHomeView(activeUserPickerSheet: $chatListUserPickerSheet)
+                .tint(
+                    colorScheme == .dark
+                        ? Color(
+                            red: 222 / 255,
+                            green: 206 / 255,
+                            blue: 175 / 255
+                        )
+                        : Color(
+                            red: 23 / 255,
+                            green: 19 / 255,
+                            blue: 14 / 255
+                        )
+                )
+                .accentColor(
+                    colorScheme == .dark
+                        ? Color(
+                            red: 222 / 255,
+                            green: 206 / 255,
+                            blue: 175 / 255
+                        )
+                        : Color(
+                            red: 23 / 255,
+                            green: 19 / 255,
+                            blue: 14 / 255
+                        )
+                )
                 .redacted(reason: appSheetState.redactionReasons(protectScreen))
             .onAppear {
                 // Connect only after the notifications prompt is resolved: the system prompt suspends

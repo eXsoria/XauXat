@@ -143,12 +143,64 @@ class SceneDelegate: NSObject, ObservableObject, UIWindowSceneDelegate {
     static var windowStatic: UIWindow?
     var windowScene: UIWindowScene?
 
+    private var xauXatNativeTint: UIColor {
+        UIColor { traits in
+            if traits.userInterfaceStyle == .dark {
+                return UIColor(
+                    red: 222 / 255,
+                    green: 206 / 255,
+                    blue: 175 / 255,
+                    alpha: 1
+                )
+            } else {
+                return UIColor(
+                    red: 23 / 255,
+                    green: 19 / 255,
+                    blue: 14 / 255,
+                    alpha: 1
+                )
+            }
+        }
+    }
+
+    private func applyXauXatNativeControlTint() {
+        UIView.appearance(
+            whenContainedInInstancesOf: [UIAlertController.self]
+        ).tintColor = xauXatNativeTint
+
+        if let rootViewController = windowScene?.keyWindow?.rootViewController {
+            applyXauXatTint(
+                xauXatNativeTint,
+                to: rootViewController
+            )
+        }
+    }
+
+    private func applyXauXatTint(
+        _ tint: UIColor,
+        to viewController: UIViewController
+    ) {
+        if let alert = viewController as? UIAlertController {
+            alert.view.tintColor = tint
+            alert.view.setNeedsLayout()
+        }
+
+        if let presented = viewController.presentedViewController {
+            applyXauXatTint(tint, to: presented)
+        }
+
+        for child in viewController.children {
+            applyXauXatTint(tint, to: child)
+        }
+    }
+
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         UITableView.appearance().backgroundColor = .clear
         guard let windowScene = scene as? UIWindowScene else { return }
         self.windowScene = windowScene
         window = windowScene.keyWindow
         SceneDelegate.windowStatic = windowScene.keyWindow
+        applyXauXatNativeControlTint()
         migrateAccentColorAndTheme()
         ThemeManager.applyTheme(currentThemeDefault.get())
         ThemeManager.adjustWindowStyle()

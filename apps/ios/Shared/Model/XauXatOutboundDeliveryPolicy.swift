@@ -23,7 +23,7 @@ enum XauXatOutboundDeliveryPolicy {
     }
 
     static func shouldRefreshTor(attempt: Int) -> Bool {
-        attempt > 0
+        attempt == 1
     }
 
     static func suspendTimeout(
