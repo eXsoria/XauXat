@@ -44,18 +44,43 @@ struct XauXatAvatarEditor: View {
             }
             .navigationTitle("Edit photo")
             .navigationBarTitleDisplayMode(.inline)
+            .tint(
+                Color(
+                    red: 222 / 255,
+                    green: 206 / 255,
+                    blue: 175 / 255
+                )
+            )
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
+                    Button(action: onCancel) {
+                        Text("Cancel")
+                            .foregroundColor(
+                                Color(
+                                    red: 222 / 255,
+                                    green: 206 / 255,
+                                    blue: 175 / 255
+                                )
+                            )
+                    }
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Use Photo") {
+                    Button {
                         if let result = renderCrop() {
                             onConfirm(result)
                         }
+                    } label: {
+                        Text("Use Photo")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(
+                                Color(
+                                    red: 222 / 255,
+                                    green: 206 / 255,
+                                    blue: 175 / 255
+                                )
+                            )
                     }
-                    .font(.system(size: 17, weight: .semibold))
                 }
             }
             .navigationViewStyle(.stack)

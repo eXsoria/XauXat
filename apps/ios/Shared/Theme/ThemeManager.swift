@@ -125,9 +125,30 @@ class ThemeManager {
         currentThemeDefault.set(theme)
         CurrentColors = currentColors(nil, nil, ChatModel.shared.currentUser?.uiThemes, themeOverridesDefault.get())
         AppTheme.shared.updateFromCurrentColors()
-        let tint = UIColor(CurrentColors.colors.primary)
-        if SceneDelegate.windowStatic?.tintColor != tint {
-            SceneDelegate.windowStatic?.tintColor = tint
+        let xauXatNativeTint = UIColor { traits in
+            if traits.userInterfaceStyle == .dark {
+                return UIColor(
+                    red: 222 / 255,
+                    green: 206 / 255,
+                    blue: 175 / 255,
+                    alpha: 1
+                )
+            } else {
+                return UIColor(
+                    red: 23 / 255,
+                    green: 19 / 255,
+                    blue: 14 / 255,
+                    alpha: 1
+                )
+            }
+        }
+
+        UIView.appearance(
+            whenContainedInInstancesOf: [UIAlertController.self]
+        ).tintColor = xauXatNativeTint
+
+        if SceneDelegate.windowStatic?.tintColor != xauXatNativeTint {
+            SceneDelegate.windowStatic?.tintColor = xauXatNativeTint
         }
 //        applyNavigationBarColors(CurrentColors.toAppTheme())
     }

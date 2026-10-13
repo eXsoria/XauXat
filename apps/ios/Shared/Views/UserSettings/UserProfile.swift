@@ -532,37 +532,89 @@ func editImageButton(
 }
 
 struct ProfileDescriptionEditor: View {
-    @EnvironmentObject var theme: AppTheme
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var description: String
     @FocusState private var keyboardVisible: Bool
 
+    private var background: Color {
+        colorScheme == .dark
+            ? Color.black
+            : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
+    }
+
+    private var surface: Color {
+        colorScheme == .dark
+            ? Color(red: 29 / 255, green: 29 / 255, blue: 30 / 255)
+            : Color.white
+    }
+
+    private var primary: Color {
+        colorScheme == .dark
+            ? Color.white
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+    }
+
+    private var secondary: Color {
+        colorScheme == .dark
+            ? Color(red: 139 / 255, green: 135 / 255, blue: 127 / 255)
+            : Color(red: 105 / 255, green: 97 / 255, blue: 88 / 255)
+    }
+
+    private var accent: Color {
+        colorScheme == .dark
+            ? Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+            : Color(red: 23 / 255, green: 19 / 255, blue: 14 / 255)
+    }
+
     var body: some View {
-        List {
-            Section {
-                if #available(iOS 16.0, *) {
-                    TextField("Enter description (optional)", text: $description, axis: .vertical)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("DESCRIPTION")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(secondary)
+                    .padding(.leading, 4)
+
+                Group {
+                    if #available(iOS 16.0, *) {
+                        TextField(
+                            "Enter description (optional)",
+                            text: $description,
+                            axis: .vertical
+                        )
                         .lineLimit(6...12)
                         .focused($keyboardVisible)
-                } else {
-                    // iOS 15 has no vertically-growing TextField (axis:) — fixed-height editor instead
-                    ZStack {
-                        Group {
+                    } else {
+                        ZStack(alignment: .topLeading) {
                             if description.isEmpty {
-                                TextEditor(text: Binding.constant(NSLocalizedString("Enter description (optional)", comment: "placeholder")))
-                                    .foregroundColor(theme.colors.secondary)
-                                    .disabled(true)
+                                Text("Enter description (optional)")
+                                    .foregroundStyle(secondary)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 8)
                             }
+
                             TextEditor(text: $description)
                                 .focused($keyboardVisible)
+                                .background(Color.clear)
+                                .frame(minHeight: 130)
                         }
-                        .padding(.horizontal, -5)
-                        .padding(.top, -8)
-                        .frame(height: 130, alignment: .topLeading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                .font(.system(size: 16))
+                .foregroundStyle(primary)
+                .tint(accent)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    surface,
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
             }
+            .padding(.horizontal, 22)
+            .padding(.top, 18)
         }
+        .background(background.ignoresSafeArea())
+        .tint(accent)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 keyboardVisible = true

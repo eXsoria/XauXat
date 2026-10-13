@@ -79,24 +79,39 @@ final class EmbeddedTorManager: ObservableObject {
             throw EmbeddedTorError.routeNotReady
         }
 
-        logger.notice("XauXat Tor: refreshing circuit after stalled delivery")
-        let reset = await withCheckedContinuation { continuation in
+        logger.notice("XauXat Tor: requesting NEWNYM after stalled delivery")
+        let newnym = await withCheckedContinuation { continuation in
             let completion = BooleanCompletion(continuation)
             let timeout = DispatchWorkItem {
                 completion.resume(false)
             }
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 5, execute: timeout)
-            controller.resetConnection { success in
+
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + 5,
+                execute: timeout
+            )
+
+            controller.sendCommand(
+                "SIGNAL NEWNYM",
+                arguments: nil,
+                data: nil
+            ) { codes, _, stop in
+                stop.pointee = true
                 timeout.cancel()
-                completion.resume(success)
+                completion.resume(codes.last?.intValue == 250)
+                return true
             }
         }
-        guard reset else { throw EmbeddedTorError.circuitReset }
 
-        // NEWNYM affects new streams. Give Tor a moment to establish the new
-        // route, then prove the same SOCKS endpoint is usable before the chat
-        // core reconnects its relay sessions.
+        guard newnym else {
+            throw EmbeddedTorError.circuitReset
+        }
+
+        // NEWNYM keeps the Tor process and SOCKS listener alive. It marks
+        // existing circuits as dirty so new relay streams can use fresh
+        // circuits without reloading Tor's configuration.
         try await Task.sleep(nanoseconds: 2_000_000_000)
+
         guard try await verifyTorRoute(timeout: 12) else {
             throw EmbeddedTorError.checkFailed
         }

@@ -722,6 +722,7 @@ private struct XauXatChatsView: View {
     @State private var searchText = ""
     @State private var searchRevealed = false
     @State private var pullDistance: CGFloat = 0
+    @State private var chatSwipeActive = false
 
     private var chats: [Chat] {
         let availableChats = chatModel.chats.filter { chat in
@@ -833,7 +834,8 @@ private struct XauXatChatsView: View {
                                     chat: chat,
                                     palette: palette,
                                     parentSheet: $parentSheet,
-                                    contactStyle: false
+                                    contactStyle: false,
+                                    chatSwipeActive: $chatSwipeActive
                                 )
                             }
                         }
@@ -851,6 +853,11 @@ private struct XauXatChatsView: View {
     private var pullGesture: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
+                guard !chatSwipeActive else {
+                    pullDistance = 0
+                    return
+                }
+
                 let vertical = value.translation.height
 
                 if !searchRevealed {
@@ -967,76 +974,184 @@ private struct XauXatContactsView: View {
     let palette: XauXatPalette
     @Binding var parentSheet: SomeSheet<AnyView>?
     @Binding var showNewChatSheet: Bool
+
     @State private var searchText = ""
+    @State private var searchRevealed = false
+    @State private var pullDistance: CGFloat = 0
 
     private var contacts: [Chat] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
         return chatModel.chats.filter { chat in
             guard case let .direct(contact) = chat.chatInfo,
                   contact.active,
-                  !contact.chatDeleted,
                   !contact.isContactCard,
                   !xauXatIsChatLocked(chat.id),
                   !xauXatIsChatHidden(chat.id) else { return false }
+
             return query.isEmpty || contact.chatViewName.localizedLowercase.contains(query)
         }
     }
 
+    private var searchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(palette.muted)
+
+            TextField("Search contacts", text: $searchText)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(palette.ink)
+                .tint(palette.ink)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(palette.muted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 40)
+        .background(
+            palette.surface,
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .padding(.horizontal, 22)
+        .padding(.bottom, 12)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(palette.faint)
-                TextField("Search contacts", text: $searchText)
-                    .font(.system(size: 15, weight: .regular, design: .default))
-                    .foregroundStyle(palette.ink)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 48)
-            .background(palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.horizontal, 22)
-            .padding(.top, 10)
+            Text("Contacts")
+                .font(.system(size: 32, weight: .bold))
+                .foregroundStyle(palette.ink)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.top, 4)
+                .padding(.bottom, searchRevealed ? 18 : 6)
 
-            if contacts.isEmpty {
+            if searchRevealed {
+                searchBar
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .top).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        )
+                    )
+            }
+
+            if contacts.isEmpty && searchText.isEmpty {
                 XauXatEmptyState(
                     palette: palette,
-                    title: searchText.isEmpty ? "No contacts yet." : "No matching contacts.",
-                    subtitle: searchText.isEmpty ? "Create a private link to connect." : "Try a different name.",
-                    action: searchText.isEmpty ? { showNewChatSheet = true } : nil
+                    title: "No contacts yet.",
+                    subtitle: "Create a private link to connect.",
+                    action: { showNewChatSheet = true }
                 )
-                // Keep the Contacts empty state optically aligned
-                // with the Chats empty state.
                 .offset(y: -5)
+                .contentShape(Rectangle())
+                .gesture(pullGesture)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(contacts, id: \.viewId) { chat in
-                            XauXatChatDestination(
-                                chat: chat,
-                                palette: palette,
-                                parentSheet: $parentSheet,
-                                contactStyle: true
-                            )
+                        if contacts.isEmpty {
+                            VStack(spacing: 8) {
+                                Text("No matching contacts.")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(palette.ink)
+
+                                Text("Try a different name.")
+                                    .font(.system(size: 14, weight: .regular))
+                                    .foregroundStyle(palette.muted)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 30)
+                        } else {
+                            ForEach(contacts, id: \.viewId) { chat in
+                                XauXatChatDestination(
+                                    chat: chat,
+                                    palette: palette,
+                                    parentSheet: $parentSheet,
+                                    contactStyle: true,
+                                    chatSwipeActive: .constant(false)
+                                )
+                            }
                         }
                     }
                     .padding(.horizontal, 22)
-                    .padding(.top, 8)
                 }
+                .simultaneousGesture(pullGesture)
             }
         }
+    }
+
+    private var pullGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                let vertical = value.translation.height
+
+                if !searchRevealed {
+                    pullDistance = max(0, vertical)
+
+                    if pullDistance >= 38 {
+                        withAnimation(.easeOut(duration: 0.20)) {
+                            searchRevealed = true
+                        }
+                        pullDistance = 0
+                    }
+
+                    return
+                }
+
+                guard searchText.isEmpty else {
+                    return
+                }
+
+                if vertical <= -28 {
+                    withAnimation(.easeOut(duration: 0.20)) {
+                        searchRevealed = false
+                    }
+                    pullDistance = 0
+                }
+            }
+            .onEnded { _ in
+                pullDistance = 0
+            }
     }
 }
 
 private struct XauXatChatDestination: View {
     @EnvironmentObject private var chatModel: ChatModel
+    @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     @ObservedObject var chat: Chat
     let palette: XauXatPalette
     @Binding var parentSheet: SomeSheet<AnyView>?
     let contactStyle: Bool
+    @Binding var chatSwipeActive: Bool
+
+    @State private var swipeOffset: CGFloat = 0
+    @State private var swipeStartOffset: CGFloat = 0
+    @State private var isSwiping = false
+    @State private var horizontalGestureLocked = false
+    @State private var suppressNextOpen = false
+    @State private var showMoreActions = false
+    @State private var showDeleteConfirmation = false
+    @State private var showDeleteContactConfirmation = false
+    @State private var showPlus = false
+    @State private var locked = false
+
+    private let actionWidth: CGFloat = 78
+    private let actionCount: CGFloat = 3
+
+    private var actionsWidth: CGFloat {
+        actionWidth * actionCount
+    }
 
     var body: some View {
         switch chat.chatInfo {
@@ -1050,14 +1165,477 @@ private struct XauXatChatDestination: View {
         }
     }
 
+    @ViewBuilder
     private var destination: some View {
+        if contactStyle {
+            rowButton
+        } else {
+            swipeableRow
+                .confirmationDialog(
+                    "Delete chat?",
+                    isPresented: $showDeleteConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete chat", role: .destructive) {
+                        closeSwipe()
+                        Task {
+                            _ = await deleteContactChat(
+                                chat,
+                                chatDeleteMode: .messages
+                            )
+                        }
+                    }
+
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("The conversation will be deleted. The contact will remain in Contacts.")
+                }
+                .confirmationDialog(
+                    "Delete contact?",
+                    isPresented: $showDeleteContactConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete contact", role: .destructive) {
+                        closeSwipe()
+                        Task {
+                            _ = await deleteContactChat(
+                                chat,
+                                chatDeleteMode: .full(notify: true)
+                            )
+                        }
+                    }
+
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This contact and its conversation will be permanently deleted.")
+                }
+                .sheet(isPresented: $showMoreActions) {
+                    XauXatChatMoreSheet(
+                        chat: chat,
+                        palette: palette,
+                        locked: locked,
+                        onToggleNotifications: {
+                            if let nextMode = chat.chatInfo.nextNtfMode {
+                                toggleNotifications(
+                                    chat,
+                                    enableNtfs: nextMode
+                                )
+                            }
+                        },
+                        onLock: {
+                            showMoreActions = false
+                            toggleConversationLock()
+                        },
+                        onDeleteChat: {
+                            showMoreActions = false
+
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                showDeleteConfirmation = true
+                            }
+                        },
+                        onDeleteContact: {
+                            showMoreActions = false
+
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                showDeleteContactConfirmation = true
+                            }
+                        }
+                    )
+                }
+                .sheet(isPresented: $showPlus) {
+                    NavigationView {
+                        XauXatPlusView()
+                            .navigationTitle("XauXat Plus")
+                            .navigationBarTitleDisplayMode(.inline)
+                    }
+                    .navigationViewStyle(.stack)
+                }
+                .onAppear {
+                    locked = xauXatIsChatLocked(chat.id)
+                }
+        }
+    }
+
+    private var swipeableRow: some View {
+        ZStack(alignment: .trailing) {
+            swipeActions
+                .zIndex(0)
+
+            rowButton
+                .background(palette.background)
+                .offset(x: swipeOffset)
+                .contentShape(Rectangle())
+                .highPriorityGesture(horizontalSwipeGesture)
+                .zIndex(1)
+        }
+        .overlay(alignment: .trailing) {
+            if swipeOffset < -1 {
+                swipeActions
+                    .frame(width: min(actionsWidth, abs(swipeOffset)))
+                    .clipped()
+                    .allowsHitTesting(swipeOffset <= -(actionsWidth * 0.85))
+                    .zIndex(2)
+            }
+        }
+        .clipped()
+    }
+
+    private var rowButton: some View {
         Button {
+            if isSwiping || suppressNextOpen {
+                suppressNextOpen = false
+                return
+            }
+
+            if swipeOffset < -1 {
+                closeSwipe()
+                return
+            }
+
             ItemsModel.shared.loadOpenChat(chat.id)
         } label: {
-            XauXatChatRow(chat: chat, palette: palette, contactStyle: contactStyle)
+            XauXatChatRow(
+                chat: chat,
+                palette: palette,
+                contactStyle: contactStyle,
+                isHorizontallyRevealed: swipeOffset < -1,
+                isConversationLocked: locked
+            )
         }
         .buttonStyle(.plain)
-        .disabled(chatModel.chatRunning != true || chatModel.deletedChats.contains(chat.id))
+        .disabled(
+            chatModel.chatRunning != true ||
+            chatModel.deletedChats.contains(chat.id)
+        )
+    }
+
+    private var swipeActions: some View {
+        HStack(spacing: 0) {
+            swipeAction(
+                title: "More",
+                systemImage: "ellipsis",
+                foreground: palette.ink,
+                background: palette.raised
+            ) {
+                showMoreActions = true
+                closeSwipe()
+            }
+
+            swipeAction(
+                title: locked ? "Unlock" : "Lock",
+                systemImage: locked ? "lock.open.fill" : "lock.fill",
+                foreground: palette.ivoryInk,
+                background: palette.ivory
+            ) {
+                toggleConversationLock()
+                closeSwipe()
+            }
+
+            swipeAction(
+                title: "Delete",
+                systemImage: "trash.fill",
+                foreground: .white,
+                background: .red
+            ) {
+                showDeleteConfirmation = true
+                closeSwipe()
+            }
+        }
+        .frame(width: actionsWidth)
+        .frame(maxHeight: .infinity)
+    }
+
+    private func swipeAction(
+        title: String,
+        systemImage: String,
+        foreground: Color,
+        background: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .foregroundStyle(foreground)
+            .frame(width: actionWidth)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(background)
+    }
+
+    private var horizontalSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { value in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+
+                if !horizontalGestureLocked {
+                    guard abs(horizontal) > 8,
+                          abs(horizontal) > abs(vertical) * 1.15 else {
+                        return
+                    }
+
+                    horizontalGestureLocked = true
+                    isSwiping = true
+                    chatSwipeActive = true
+                }
+
+                guard horizontalGestureLocked else {
+                    return
+                }
+
+                let proposed = swipeStartOffset + horizontal
+                swipeOffset = min(0, max(-actionsWidth, proposed))
+            }
+            .onEnded { value in
+                let horizontal = value.translation.width
+                let vertical = value.translation.height
+
+                guard horizontalGestureLocked else {
+                    return
+                }
+
+                let predicted = swipeStartOffset + value.predictedEndTranslation.width
+
+                let shouldOpen: Bool
+                if swipeStartOffset < 0 {
+                    shouldOpen = predicted < -(actionsWidth * 0.65)
+                } else {
+                    shouldOpen =
+                        swipeOffset < -(actionsWidth * 0.30) ||
+                        predicted < -(actionsWidth * 0.45)
+                }
+
+                let target: CGFloat = shouldOpen ? -actionsWidth : 0
+
+                swipeStartOffset = target
+                suppressNextOpen = isSwiping
+
+                withAnimation(.easeOut(duration: 0.18)) {
+                    swipeOffset = target
+                }
+
+                DispatchQueue.main.async {
+                    isSwiping = false
+                    horizontalGestureLocked = false
+                    chatSwipeActive = false
+                }
+
+                if suppressNextOpen {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                        suppressNextOpen = false
+                    }
+                }
+            }
+    }
+
+    private func closeSwipe() {
+        swipeStartOffset = 0
+
+        withAnimation(.easeOut(duration: 0.16)) {
+            swipeOffset = 0
+        }
+    }
+
+    private func toggleConversationLock() {
+        guard plusEntitlements.isAuthorized(for: .conversationLock) else {
+            showPlus = true
+            return
+        }
+
+        let currentlyLocked = xauXatIsChatLocked(chat.id)
+
+        authenticate(
+            title: currentlyLocked ? "Unlock conversation" : "Lock conversation",
+            reason: NSLocalizedString(
+                "Authenticate to change conversation protection",
+                comment: "conversation lock"
+            )
+        ) { result in
+            guard case .success = result else {
+                return
+            }
+
+            let next = !currentlyLocked
+
+            if xauXatSetChatLocked(chat.id, locked: next) {
+                DispatchQueue.main.async {
+                    locked = next
+                }
+            }
+        }
+    }
+}
+
+private struct XauXatChatMoreSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @ObservedObject var chat: Chat
+    let palette: XauXatPalette
+    let locked: Bool
+    let onToggleNotifications: () -> Void
+    let onLock: () -> Void
+    let onDeleteChat: () -> Void
+    let onDeleteContact: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 13) {
+                ChatInfoImage(
+                    chat: chat,
+                    size: 48,
+                    color: palette.raised,
+                    radiusOverride: 48
+                )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(chat.chatInfo.chatViewName)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(palette.ink)
+                        .lineLimit(1)
+
+                    Text("Conversation options")
+                        .font(.system(size: 13))
+                        .foregroundStyle(palette.muted)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 18)
+            .padding(.bottom, 16)
+
+            divider
+
+            if let nextMode = chat.chatInfo.nextNtfMode {
+                Button {
+                    onToggleNotifications()
+                } label: {
+                    moreRow(
+                        title: nextMode.text(
+                            mentions: chat.chatInfo.hasMentions
+                        ),
+                        systemImage: nextMode.icon
+                    )
+                }
+                .buttonStyle(.plain)
+
+                insetDivider
+            }
+
+            Button {
+                onLock()
+            } label: {
+                moreRow(
+                    title: locked
+                        ? "Unlock conversation"
+                        : "Lock conversation",
+                    systemImage: locked
+                        ? "lock.open"
+                        : "lock"
+                )
+            }
+            .buttonStyle(.plain)
+
+            insetDivider
+
+            Button {
+                onDeleteChat()
+            } label: {
+                moreRow(
+                    title: "Delete chat",
+                    systemImage: "bubble.left",
+                    destructive: true
+                )
+            }
+            .buttonStyle(.plain)
+
+            insetDivider
+
+            Button {
+                onDeleteContact()
+            } label: {
+                moreRow(
+                    title: "Delete contact",
+                    systemImage: "person.crop.circle.badge.xmark",
+                    destructive: true
+                )
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 8)
+
+            Button {
+                dismiss()
+            } label: {
+                Text("Cancel")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(palette.ink)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(
+                        palette.raised,
+                        in: RoundedRectangle(
+                            cornerRadius: 15,
+                            style: .continuous
+                        )
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 22)
+            .padding(.bottom, 12)
+        }
+        .background(palette.background.ignoresSafeArea())
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(palette.line.opacity(0.45))
+            .frame(height: 0.5)
+    }
+
+    private var insetDivider: some View {
+        Rectangle()
+            .fill(palette.line.opacity(0.45))
+            .frame(height: 0.5)
+            .padding(.leading, 58)
+    }
+
+    private func moreRow(
+        title: String,
+        systemImage: String,
+        destructive: Bool = false
+    ) -> some View {
+        HStack(spacing: 15) {
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .medium))
+                .frame(width: 22)
+
+            Text(title)
+                .font(.system(size: 15, weight: .medium))
+
+            Spacer()
+
+            if !destructive {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .opacity(0.45)
+            }
+        }
+        .foregroundStyle(
+            destructive ? Color.red : palette.ink
+        )
+        .padding(.horizontal, 22)
+        .frame(height: 58)
+        .contentShape(Rectangle())
     }
 }
 
@@ -1065,13 +1643,15 @@ private struct XauXatChatRow: View {
     @ObservedObject var chat: Chat
     let palette: XauXatPalette
     let contactStyle: Bool
+    let isHorizontallyRevealed: Bool
+    let isConversationLocked: Bool
 
     private var timestamp: Date {
         chat.chatItems.last?.meta.itemTs ?? chat.chatInfo.chatTs
     }
 
     private var detail: String {
-        if xauXatIsChatLocked(chat.id) {
+        if isConversationLocked {
             return "Locked conversation"
         }
         if contactStyle {
@@ -1098,7 +1678,7 @@ private struct XauXatChatRow: View {
 
                     Spacer(minLength: 10)
 
-                    if !contactStyle {
+                    if !contactStyle && !isHorizontallyRevealed {
                         formatTimestampText(timestamp)
                             .font(.system(size: 11, weight: .regular))
                             .foregroundStyle(palette.faint)
@@ -1106,7 +1686,7 @@ private struct XauXatChatRow: View {
                 }
 
                 HStack(spacing: 7) {
-                    if xauXatIsChatLocked(chat.id) {
+                    if isConversationLocked {
                         Image(systemName: "lock.fill")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(palette.faint)
