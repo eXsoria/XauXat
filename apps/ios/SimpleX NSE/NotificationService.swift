@@ -15,10 +15,10 @@ import SimpleXChat
 
 let logger = Logger()
 
-// Keep disabled until Apple assigns Notification Service Extension Filtering
-// to the notification-service App ID. This fallback keeps TestFlight builds
-// private without requesting an entitlement that is not yet provisioned.
-private let xauXatNotificationFilteringEnabled = false
+// Requires Notification (NSE) Filtering on the notification-service App ID.
+// The archive verifier checks both the signature and provisioning profile
+// before this build can be exported for TestFlight.
+private let xauXatNotificationFilteringEnabled = true
 
 let appSuspendingDelay: UInt64 = 2_500_000_000
 
