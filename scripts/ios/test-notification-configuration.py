@@ -18,6 +18,40 @@ ENCODED = base64.b64encode(ADDRESS.encode()).decode()
 
 
 class NotificationConfigurationTests(unittest.TestCase):
+    def profile_fixture(self):
+        return "\n".join(
+            'isa = XCBuildConfiguration;\nbuildSettings = {\n'
+            f'PRODUCT_BUNDLE_IDENTIFIER = "{bundle}";\n'
+            f'PROVISIONING_PROFILE_SPECIFIER = "$({variable})";\n'
+            '};\nname = Release;'
+            for bundle, variable in (
+                ("pt.exsoria.xauxat", "XAUXAT_MAIN_PROFILE"),
+                ("pt.exsoria.xauxat.notification-service", "XAUXAT_NSE_PROFILE"),
+                ("pt.exsoria.xauxat.share", "XAUXAT_SHARE_PROFILE"),
+            )
+        )
+
+    def test_distinct_release_profiles(self):
+        config.verify_profile_settings(self.profile_fixture())
+
+    def test_empty_duplicate_nse_profile_rejected(self):
+        project = self.profile_fixture().replace(
+            'PROVISIONING_PROFILE_SPECIFIER = "$(XAUXAT_NSE_PROFILE)";',
+            'PROVISIONING_PROFILE_SPECIFIER = "$(XAUXAT_NSE_PROFILE)";\nPROVISIONING_PROFILE_SPECIFIER = "";',
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            config.verify_profile_settings(project)
+
+    def test_wrong_extension_profile_rejected(self):
+        project = self.profile_fixture().replace("XAUXAT_NSE_PROFILE", "XAUXAT_MAIN_PROFILE")
+        with self.assertRaisesRegex(ValueError, "missing or overridden"):
+            config.verify_profile_settings(project)
+
+    def test_missing_extension_profile_rejected(self):
+        project = self.profile_fixture().replace('PROVISIONING_PROFILE_SPECIFIER = "$(XAUXAT_SHARE_PROFILE)";', '')
+        with self.assertRaises(ValueError):
+            config.verify_profile_settings(project)
+
     def test_pinned_public_endpoint(self):
         self.assertEqual(config.validate_server(ENCODED), ADDRESS)
 
