@@ -26,6 +26,9 @@ In Certificates, Identifiers & Profiles:
 3. Open `pt.exsoria.xauxat.notification-service` and
    `pt.exsoria.xauxat.share`. Enable App Groups and assign the same group to
    each extension.
+   On the notification-service App ID, also enable the approved Notification
+   (NSE) Filtering capability. The NSE requests
+   `com.apple.developer.usernotifications.filtering`; its profile must grant it.
 4. Regenerate profiles affected by the capability change, or let Xcode manage
    them automatically on the next archive with `-allowProvisioningUpdates`.
 5. In Xcode Settings > Accounts, make sure the intended team is signed in.
@@ -71,10 +74,24 @@ The script:
 - creates a Release archive with automatic signing;
 - verifies production APNs, App Groups, keychain groups
   and every XauXat bundle identifier from the signed entitlements;
+- verifies the NSE filtering entitlement in both the signature and embedded
+  provisioning profile, and a configured NTF endpoint shared by all bundles;
 - exports and re-verifies the App Store Connect IPA.
 
 Outputs are written to `.xauxat-release/`, which is gitignored. A previous
 output is never overwritten.
+
+Release builds include `nft.exsoria.pt:8443` and its public pinned CA fingerprint
+by default. Remove any stale empty `XAUXAT_NTF_SERVER_B64` override from
+`apps/ios/Local.xcconfig` before archiving. Never copy the server's APNs `.p8`
+key into the app or CI: that key cannot sign an iOS application.
+
+The iOS GitHub Actions workflow compiles the Release device app without code
+signing and launches a Debug simulator app. These checks can run while the
+developer is on Windows. The resulting unsigned `.app` cannot be installed
+through TestFlight. Signed distribution still needs an Apple Distribution
+identity (certificate plus private key) and updated profiles, either on a Mac
+or securely installed in a separate macOS CI distribution workflow.
 
 To archive, validate and upload directly after the App Store Connect record
 exists:

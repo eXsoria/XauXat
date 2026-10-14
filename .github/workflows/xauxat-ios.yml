@@ -38,6 +38,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  notification-configuration:
+    name: Notification configuration and signing guards
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: python3 scripts/ios/verify-notification-configuration.py
+      - run: python3 scripts/ios/test-notification-configuration.py
+      - run: ./scripts/ios/verify-notification-privacy-policy.sh
+      - run: ./scripts/ios/verify-nse-tor-policy.sh
+      - run: ./scripts/ios/validate-notification-matrix.sh --allow-pending docs/xauxat/ios-notification-test-matrix.json
+
   native-core:
     name: XauXat native core (arm64)
     runs-on: macos-26
@@ -97,7 +108,7 @@ jobs:
           retention-days: 14
 
   device:
-    name: Latest iOS device (arm64)
+    name: Latest iOS Release device (arm64)
     runs-on: macos-26
     timeout-minutes: 60
     needs: native-core
@@ -137,12 +148,15 @@ jobs:
           test "$(pod --version)" = "1.17.0"
           pod install --project-directory=apps/ios --deployment
 
-      - name: Build unsigned latest iOS device app
+      - name: Verify production notification configuration
+        run: python3 scripts/ios/verify-notification-configuration.py
+
+      - name: Build unsigned latest iOS Release device app
         run: |
           xcodebuild \
             -workspace apps/ios/SimpleX.xcworkspace \
             -scheme "SimpleX (iOS)" \
-            -configuration Debug \
+            -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/XauXatDerivedData" \
@@ -152,7 +166,7 @@ jobs:
 
       - name: Verify arm64 app and embedded Tor
         run: |
-          app_path="$RUNNER_TEMP/XauXatDerivedData/Build/Products/Debug-iphoneos/SimpleX.app"
+          app_path="$RUNNER_TEMP/XauXatDerivedData/Build/Products/Release-iphoneos/SimpleX.app"
           test -d "$app_path"
           test -f "$app_path/SimpleX"
           test -f "$app_path/Frameworks/Tor.framework/Tor"
@@ -162,7 +176,7 @@ jobs:
           xcrun vtool -show-build "$app_path/SimpleX" | grep -q 'platform IOS'
           xcrun vtool -show-build "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'platform IOS'
           otool -L "$app_path/SimpleX" | grep -q '@rpath/Tor.framework/Tor'
-          ./scripts/ios/verify-xauxat-identifiers.sh "$app_path" development
+          ./scripts/ios/verify-xauxat-identifiers.sh "$app_path" production
           swiftygif_privacy_manifest=$(find "$app_path/Frameworks" -path '*SwiftyGif*.framework/*/PrivacyInfo.xcprivacy' -type f -print -quit)
           test -n "$swiftygif_privacy_manifest"
           plutil -lint "$swiftygif_privacy_manifest"
@@ -171,7 +185,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: XauXat-iOS-Device-arm64-${{ github.sha }}
-          path: ${{ runner.temp }}/XauXatDerivedData/Build/Products/Debug-iphoneos/*.app
+          path: ${{ runner.temp }}/XauXatDerivedData/Build/Products/Release-iphoneos/*.app
           if-no-files-found: error
           retention-days: 14
 

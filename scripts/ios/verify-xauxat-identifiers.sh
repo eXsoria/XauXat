@@ -82,3 +82,9 @@ if [[ -n "$expected_apns" ]]; then
 fi
 
 echo "XauXat iOS identifiers verified."
+
+notification_checks=(--app "$app_path")
+if [[ "$expected_apns" == "production" ]]; then
+  notification_checks+=(--require-configured)
+fi
+python3 "$script_dir/verify-notification-configuration.py" "${notification_checks[@]}"

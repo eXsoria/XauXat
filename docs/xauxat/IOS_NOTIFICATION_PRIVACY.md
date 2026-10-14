@@ -36,15 +36,22 @@ registration reconciler.
 
 ## Apple capability
 
-Apple has not yet granted `com.apple.developer.usernotifications.filtering` to
-`pt.exsoria.xauxat.notification-service`, so the Release target does not request
-that managed entitlement. Until the provisioning profile includes it, events
-that would otherwise be silently suppressed use generic `XauXat` / `new
-activity` wording and incoming calls stay in the ordinary notification path
-instead of CallKit. No contact, profile, group or message content is exposed by
-this fallback.
+The NSE target requests `com.apple.developer.usernotifications.filtering` and
+enables the matching silent-filtering and CallKit paths together. The Apple
+Developer App ID `pt.exsoria.xauxat.notification-service` must have Notification
+(NSE) Filtering enabled and its provisioning profile must be regenerated after
+that change. Approval of the capability alone does not update an old profile.
 
-Once Apple approves the capability, the entitlement and silent-filtering paths
-can be enabled together and validated with a newly signed archive. APNs
-delivery, silent filtering, CallKit behaviour and the fail-closed Tor route
-remain gated by the two-iPhone matrix in `IOS_NOTIFICATION_TEST_MATRIX.md`.
+`archive-testflight.sh` rejects an archive or IPA whose NSE signature or embedded
+profile does not include the filtering entitlement. It also rejects missing or
+inconsistent notification endpoints across the app and both extensions. An
+unsigned CI build does not prove that Apple provisioning is correct.
+
+Release builds default to the public XauXat notification endpoint at
+`nft.exsoria.pt:8443`, with its CA fingerprint pinned in `Release.xcconfig`.
+The endpoint is public configuration; APNs signing keys stay on the server.
+Debug builds keep the endpoint empty unless explicitly configured locally:
+their sandbox APNs tokens cannot use the production-only APNs key.
+
+APNs delivery, silent filtering, CallKit behaviour and the fail-closed Tor
+route remain gated by the two-iPhone matrix in `IOS_NOTIFICATION_TEST_MATRIX.md`.

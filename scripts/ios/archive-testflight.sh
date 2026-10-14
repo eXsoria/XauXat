@@ -65,6 +65,8 @@ if [[ ! "$team_id" =~ ^[A-Z0-9]{10}$ ]]; then
   exit 64
 fi
 
+python3 "$script_dir/verify-notification-configuration.py"
+
 if [[ -n "$native_core_archive_dir" ]]; then
   test -f "$native_core_archive_dir/pkg-ios-aarch64-swift-json.zip"
   "$repo_root/scripts/xauxat/prepare-ios-libs.sh" \
@@ -180,6 +182,12 @@ verify_signed_entitlements() {
   assert_entitlement "$nse_entitlements" "application-identifier" "$team_id.pt.exsoria.xauxat.notification-service" "NSE application identifier"
   assert_entitlement "$nse_entitlements" "com.apple.security.application-groups:0" "group.pt.exsoria.xauxat" "NSE App Group"
   assert_entitlement "$nse_entitlements" "keychain-access-groups:0" "$team_id.pt.exsoria.xauxat" "NSE keychain group"
+
+  local notification_checks=(--app "$app_path" --require-configured --signed)
+  if [[ "$expected_apns" == "production" ]]; then
+    notification_checks+=(--production)
+  fi
+  python3 "$script_dir/verify-notification-configuration.py" "${notification_checks[@]}"
 
   assert_entitlement "$share_entitlements" "application-identifier" "$team_id.pt.exsoria.xauxat.share" "share application identifier"
   assert_entitlement "$share_entitlements" "com.apple.security.application-groups:0" "group.pt.exsoria.xauxat" "share App Group"
