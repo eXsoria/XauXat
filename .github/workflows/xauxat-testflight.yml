@@ -1,0 +1,171 @@
+name: XauXat TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      native_core_run_id:
+        description: Successful XauXat iOS push workflow run for this exact main commit
+        required: true
+        type: string
+      build_number:
+        description: Unused TestFlight build number (greater than the last uploaded build)
+        required: true
+        default: '13'
+        type: string
+      upload:
+        description: Upload the verified IPA to App Store Connect
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: xauxat-testflight
+  cancel-in-progress: false
+
+jobs:
+  distribution:
+    name: Sign and verify TestFlight IPA
+    if: github.ref == 'refs/heads/xauxat/main'
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      XAUXAT_DEVELOPMENT_TEAM: ${{ vars.XAUXAT_DEVELOPMENT_TEAM }}
+      XAUXAT_MANUAL_SIGNING: '1'
+      XAUXAT_BUILD_NUMBER: ${{ inputs.build_number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Validate source run and download matching native core
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NATIVE_CORE_RUN_ID: ${{ inputs.native_core_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$NATIVE_CORE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$XAUXAT_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          [[ "$XAUXAT_DEVELOPMENT_TEAM" =~ ^[A-Z0-9]{10}$ ]]
+          test "$(uname -m)" = arm64
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$NATIVE_CORE_RUN_ID" > "$RUNNER_TEMP/native-run.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          run = json.loads((Path(os.environ['RUNNER_TEMP']) / 'native-run.json').read_text())
+          assert run['head_sha'] == os.environ['GITHUB_SHA'], 'Native core run must match this exact commit'
+          assert run['head_branch'] == 'xauxat/main' and run['event'] == 'push', 'Only main push artifacts are accepted'
+          assert run['path'] == '.github/workflows/xauxat-ios.yml', 'Unexpected native core workflow'
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Source workflow must pass first'
+          PY
+          gh run download "$NATIVE_CORE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "XauXat-iOS-Native-Core-$GITHUB_SHA" --dir .xauxat-cache/ios-libs
+          unzip -tq .xauxat-cache/ios-libs/pkg-ios-aarch64-swift-json.zip
+
+      - name: Install distribution certificate and App Store profiles
+        env:
+          IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          IOS_APPSTORE_PROFILE_BASE64: ${{ secrets.IOS_APPSTORE_PROFILE_BASE64 }}
+          IOS_NSE_APPSTORE_PROFILE_BASE64: ${{ secrets.IOS_NSE_APPSTORE_PROFILE_BASE64 }}
+          IOS_SHARE_APPSTORE_PROFILE_BASE64: ${{ secrets.IOS_SHARE_APPSTORE_PROFILE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${IOS_DISTRIBUTION_P12_BASE64:?Missing distribution certificate secret}"
+          : "${IOS_DISTRIBUTION_P12_PASSWORD:?Missing certificate password secret}"
+          keychain="$RUNNER_TEMP/xauxat-signing.keychain-db"
+          keychain_password=$(openssl rand -hex 24)
+          echo "::add-mask::$keychain_password"
+          python3 - <<'PY'
+          import base64, os, plistlib, subprocess
+          from pathlib import Path
+          temp = Path(os.environ['RUNNER_TEMP'])
+          (temp / 'xauxat-distribution.p12').write_bytes(base64.b64decode(os.environ['IOS_DISTRIBUTION_P12_BASE64'], validate=True))
+          profiles = Path.home() / 'Library/MobileDevice/Provisioning Profiles'
+          profiles.mkdir(parents=True, exist_ok=True)
+          entries = (
+              ('IOS_APPSTORE_PROFILE_BASE64', 'pt.exsoria.xauxat', 'XAUXAT_MAIN_PROFILE'),
+              ('IOS_NSE_APPSTORE_PROFILE_BASE64', 'pt.exsoria.xauxat.notification-service', 'XAUXAT_NSE_PROFILE'),
+              ('IOS_SHARE_APPSTORE_PROFILE_BASE64', 'pt.exsoria.xauxat.share', 'XAUXAT_SHARE_PROFILE'),
+          )
+          for secret, bundle_id, variable in entries:
+              data = base64.b64decode(os.environ[secret], validate=True)
+              raw = temp / (variable + '.mobileprovision')
+              raw.write_bytes(data)
+              decoded = subprocess.check_output(['security', 'cms', '-D', '-i', str(raw)], stderr=subprocess.DEVNULL)
+              profile = plistlib.loads(decoded)
+              entitlements = profile['Entitlements']
+              assert entitlements['application-identifier'] == os.environ['XAUXAT_DEVELOPMENT_TEAM'] + '.' + bundle_id, 'Profile belongs to a different app/team'
+              assert not entitlements.get('get-task-allow', False), 'Distribution profile must not allow debugging'
+              assert 'ProvisionedDevices' not in profile and not profile.get('ProvisionsAllDevices', False), 'An App Store profile is required'
+              if bundle_id == 'pt.exsoria.xauxat':
+                  assert entitlements.get('aps-environment') == 'production', 'App profile needs production APNs'
+              if bundle_id.endswith('.notification-service'):
+                  assert entitlements.get('com.apple.developer.usernotifications.filtering') is True, 'NSE profile needs filtering'
+              uuid = profile['UUID']
+              import uuid as uuid_module
+              uuid_module.UUID(uuid)
+              (profiles / (uuid + '.mobileprovision')).write_bytes(data)
+              with open(os.environ['GITHUB_ENV'], 'a') as output:
+                  output.write(variable + '=' + uuid + '\n')
+          PY
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/xauxat-distribution.p12" -P "$IOS_DISTRIBUTION_P12_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$keychain" >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain"
+          security find-identity -v -p codesigning "$keychain" | grep -q 'Apple Distribution'
+
+      - name: Prepare App Store Connect authentication for requested upload
+        if: inputs.upload
+        env:
+          APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${APP_STORE_CONNECT_KEY_P8:?Missing App Store Connect API key}"
+          : "${APP_STORE_CONNECT_KEY_ID:?Missing API key ID}"
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing issuer ID}"
+          printf '%s' "$APP_STORE_CONNECT_KEY_P8" > "$RUNNER_TEMP/xauxat-appstore-connect.p8"
+          echo "APP_STORE_CONNECT_KEY_PATH=$RUNNER_TEMP/xauxat-appstore-connect.p8" >> "$GITHUB_ENV"
+          echo "APP_STORE_CONNECT_KEY_ID=$APP_STORE_CONNECT_KEY_ID" >> "$GITHUB_ENV"
+          echo "APP_STORE_CONNECT_ISSUER_ID=$APP_STORE_CONNECT_ISSUER_ID" >> "$GITHUB_ENV"
+
+      - name: Archive, verify and optionally upload
+        env:
+          UPLOAD_REQUESTED: ${{ inputs.upload }}
+        run: |
+          set -euo pipefail
+          args=(--team-id "$XAUXAT_DEVELOPMENT_TEAM" --native-core-archive-dir .xauxat-cache/ios-libs)
+          if [[ "$UPLOAD_REQUESTED" == true ]]; then args+=(--upload); fi
+          ./scripts/ios/archive-testflight.sh "${args[@]}"
+
+      - name: Save verified distribution output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: XauXat-TestFlight-${{ inputs.build_number }}-${{ github.sha }}
+          path: .xauxat-release/**/*.ipa
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/xauxat-signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/xauxat-distribution.p12" "$RUNNER_TEMP/xauxat-appstore-connect.p8"
+          rm -f "$RUNNER_TEMP"/XAUXAT_*_PROFILE.mobileprovision
+          for profile in "${XAUXAT_MAIN_PROFILE:-}" "${XAUXAT_NSE_PROFILE:-}" "${XAUXAT_SHARE_PROFILE:-}"; do
+            if [[ "$profile" =~ ^[A-Fa-f0-9-]{36}$ ]]; then
+              rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$profile.mobileprovision"
+            fi
+          done

@@ -151,9 +151,42 @@ Suggested beta review note:
 TestFlight builds remain available for 90 days. The first external build
 requires beta review; later builds may be approved without a full review.
 
-## Future GitHub upload workflow
+## Manual GitHub distribution from Windows
 
-Automated signed uploads should only be enabled after a local archive succeeds.
-The workflow will need protected secrets for the Apple team, an App Store
-Connect API key, signing certificate and provisioning profiles. Never commit
-those values to the repository.
+`XauXat TestFlight` is a manually dispatched workflow, restricted to
+`xauxat/main`. It never signs pull-request code or uploads automatically after
+a push. Before dispatching it, install the signing material securely:
+
+| Repository setting | Purpose |
+| --- | --- |
+| Variable `XAUXAT_DEVELOPMENT_TEAM` | Apple team ID |
+| Secret `IOS_DISTRIBUTION_P12_BASE64` | Base64 Apple Distribution certificate and private key |
+| Secret `IOS_DISTRIBUTION_P12_PASSWORD` | Password protecting that PKCS#12 file |
+| Secret `IOS_APPSTORE_PROFILE_BASE64` | Base64 App Store profile for the main app |
+| Secret `IOS_NSE_APPSTORE_PROFILE_BASE64` | Base64 App Store profile for the NSE, including filtering |
+| Secret `IOS_SHARE_APPSTORE_PROFILE_BASE64` | Base64 App Store profile for the share extension |
+| Secret `APP_STORE_CONNECT_KEY_P8` | App Store Connect API key PEM, only needed for upload |
+| Secret `APP_STORE_CONNECT_KEY_ID` | Its key ID |
+| Secret `APP_STORE_CONNECT_ISSUER_ID` | Its issuer ID |
+
+The App Store Connect API key is separate from the notification server's APNs
+key. Certificate private keys, profile files, passwords and API keys must never
+be committed. Profiles must use the installed distribution certificate and the
+correct bundle IDs and App Group. A new dedicated CI distribution certificate
+can be requested from Windows without exporting the Mac's existing private key.
+
+First merge the reviewed changes and let `XauXat iOS` pass for that exact main
+commit. Supply that successful push workflow's run ID to `native_core_run_id`,
+choose an unused build number (the next candidate after build 12 is 13), and
+leave `upload` false for the first signing run. The workflow downloads only
+the matching successful main native-core artifact, installs signing material
+in an ephemeral keychain, and checks the signed archive and exported IPA.
+It removes the signing material on exit and stores the IPA for seven days.
+That first run is the signing validation when a local Mac is unavailable;
+unsigned PR checks cannot substitute for it.
+
+After inspecting the first signed result, dispatch a new run with `upload`
+true to upload to App Store Connect. Use a fresh build number if a prior upload
+already succeeded. The API key needs a role that can upload builds, such as
+Developer. TestFlight tester rollout and physical-device acceptance remain
+separate from generating or uploading an IPA.

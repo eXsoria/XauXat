@@ -67,6 +67,30 @@ fi
 
 python3 "$script_dir/verify-notification-configuration.py"
 
+# Manual signing supports an ephemeral CI keychain and three installed profiles.
+# Local Xcode archives keep automatic signing unless explicitly requested.
+provisioning_args=(-allowProvisioningUpdates)
+signing_args=(XAUXAT_DEVELOPMENT_TEAM="$team_id")
+if [[ "${XAUXAT_MANUAL_SIGNING:-0}" == "1" ]]; then
+  for variable in XAUXAT_MAIN_PROFILE XAUXAT_NSE_PROFILE XAUXAT_SHARE_PROFILE; do
+    value=${!variable:-}
+    if [[ ! "$value" =~ ^[A-Fa-f0-9-]{36}$ ]]; then
+      echo "Manual signing requires an installed profile UUID in $variable." >&2
+      exit 64
+    fi
+    signing_args+=("$variable=$value")
+  done
+  provisioning_args=()
+  signing_args+=(CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=Apple Distribution")
+fi
+if [[ -n "${XAUXAT_BUILD_NUMBER:-}" ]]; then
+  if [[ ! "$XAUXAT_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+    echo "XAUXAT_BUILD_NUMBER must be a positive integer." >&2
+    exit 64
+  fi
+  signing_args+=(CURRENT_PROJECT_VERSION="$XAUXAT_BUILD_NUMBER")
+fi
+
 if [[ -n "$native_core_archive_dir" ]]; then
   test -f "$native_core_archive_dir/pkg-ios-aarch64-swift-json.zip"
   "$repo_root/scripts/xauxat/prepare-ios-libs.sh" \
@@ -96,7 +120,7 @@ build_settings=$(xcodebuild \
   -scheme "$scheme" \
   -configuration Release \
   -showBuildSettings \
-  XAUXAT_DEVELOPMENT_TEAM="$team_id")
+  "${signing_args[@]}")
 version=$(awk -F ' = ' '/^[[:space:]]*MARKETING_VERSION = / {print $2; exit}' <<<"$build_settings")
 build=$(awk -F ' = ' '/^[[:space:]]*CURRENT_PROJECT_VERSION = / {print $2; exit}' <<<"$build_settings")
 test -n "$version"
@@ -120,8 +144,8 @@ xcodebuild \
   -configuration Release \
   -destination 'generic/platform=iOS' \
   -archivePath "$archive_path" \
-  -allowProvisioningUpdates \
-  XAUXAT_DEVELOPMENT_TEAM="$team_id" \
+  ${provisioning_args[@]+"${provisioning_args[@]}"} \
+  "${signing_args[@]}" \
   archive
 
 archive_app="$archive_path/Products/Applications/SimpleX.app"
@@ -199,13 +223,20 @@ verify_signed_entitlements "$archive_app"
 export_options="$work_dir/ExportOptions.plist"
 cp "$export_options_source" "$export_options"
 /usr/libexec/PlistBuddy -c "Add :teamID string $team_id" "$export_options"
+if [[ "${XAUXAT_MANUAL_SIGNING:-0}" == "1" ]]; then
+  /usr/libexec/PlistBuddy -c 'Set :signingStyle manual' "$export_options"
+  /usr/libexec/PlistBuddy -c 'Add :provisioningProfiles dict' "$export_options"
+  /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:pt.exsoria.xauxat string $XAUXAT_MAIN_PROFILE" "$export_options"
+  /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:pt.exsoria.xauxat.notification-service string $XAUXAT_NSE_PROFILE" "$export_options"
+  /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:pt.exsoria.xauxat.share string $XAUXAT_SHARE_PROFILE" "$export_options"
+fi
 xcodebuild \
   -quiet \
   -exportArchive \
   -archivePath "$archive_path" \
   -exportPath "$export_path" \
   -exportOptionsPlist "$export_options" \
-  -allowProvisioningUpdates
+  ${provisioning_args[@]+"${provisioning_args[@]}"}
 
 ipa_path=$(find "$export_path" -maxdepth 1 -type f -name '*.ipa' -print -quit)
 test -n "$ipa_path"
@@ -225,6 +256,13 @@ plutil -lint "$swiftygif_privacy_manifest" >/dev/null
 echo "Exported TestFlight IPA: $ipa_path"
 
 if [[ "$upload" == true ]]; then
+  authentication_args=()
+  if [[ -n "${APP_STORE_CONNECT_KEY_PATH:-}" ]]; then
+    test -f "$APP_STORE_CONNECT_KEY_PATH"
+    : "${APP_STORE_CONNECT_KEY_ID:?App Store Connect key ID required}"
+    : "${APP_STORE_CONNECT_ISSUER_ID:?App Store Connect issuer ID required}"
+    authentication_args=(-authenticationKeyPath "$APP_STORE_CONNECT_KEY_PATH" -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID")
+  fi
   upload_options="$work_dir/UploadOptions.plist"
   cp "$export_options" "$upload_options"
   /usr/libexec/PlistBuddy -c "Set :destination upload" "$upload_options"
@@ -234,7 +272,8 @@ if [[ "$upload" == true ]]; then
     -archivePath "$archive_path" \
     -exportPath "$work_dir/upload" \
     -exportOptionsPlist "$upload_options" \
-    -allowProvisioningUpdates
+    -allowProvisioningUpdates \
+    ${authentication_args[@]+"${authentication_args[@]}"}
   echo "Uploaded XauXat $version ($build) to App Store Connect."
 fi
 
