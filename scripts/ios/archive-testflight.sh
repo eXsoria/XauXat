@@ -70,7 +70,8 @@ python3 "$script_dir/verify-notification-configuration.py"
 # Manual signing supports an ephemeral CI keychain and three installed profiles.
 # Local Xcode archives keep automatic signing unless explicitly requested.
 provisioning_args=(-allowProvisioningUpdates)
-signing_args=(XAUXAT_DEVELOPMENT_TEAM="$team_id")
+# Package resource bundles also need the standard setting at invocation scope.
+signing_args=(XAUXAT_DEVELOPMENT_TEAM="$team_id" DEVELOPMENT_TEAM="$team_id")
 if [[ "${XAUXAT_MANUAL_SIGNING:-0}" == "1" ]]; then
   for variable in XAUXAT_MAIN_PROFILE XAUXAT_NSE_PROFILE XAUXAT_SHARE_PROFILE; do
     value=${!variable:-}

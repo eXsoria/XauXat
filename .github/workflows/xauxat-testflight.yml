@@ -87,7 +87,7 @@ jobs:
           from pathlib import Path
           temp = Path(os.environ['RUNNER_TEMP'])
           (temp / 'xauxat-distribution.p12').write_bytes(base64.b64decode(os.environ['IOS_DISTRIBUTION_P12_BASE64'], validate=True))
-          profiles = Path.home() / 'Library/MobileDevice/Provisioning Profiles'
+          profiles = Path.home() / 'Library/Developer/Xcode/UserData/Provisioning Profiles'
           profiles.mkdir(parents=True, exist_ok=True)
           entries = (
               ('IOS_APPSTORE_PROFILE_BASE64', 'pt.exsoria.xauxat', 'XAUXAT_MAIN_PROFILE'),
@@ -166,6 +166,6 @@ jobs:
           rm -f "$RUNNER_TEMP"/XAUXAT_*_PROFILE.mobileprovision
           for profile in "${XAUXAT_MAIN_PROFILE:-}" "${XAUXAT_NSE_PROFILE:-}" "${XAUXAT_SHARE_PROFILE:-}"; do
             if [[ "$profile" =~ ^[A-Fa-f0-9-]{36}$ ]]; then
-              rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$profile.mobileprovision"
+              rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$profile.mobileprovision"
             fi
           done
