@@ -49,7 +49,33 @@ def validate_server(encoded):
     return address
 
 
+def verify_profile_settings(project):
+    expected = {
+        "pt.exsoria.xauxat": "XAUXAT_MAIN_PROFILE",
+        "pt.exsoria.xauxat.notification-service": "XAUXAT_NSE_PROFILE",
+        "pt.exsoria.xauxat.share": "XAUXAT_SHARE_PROFILE",
+    }
+    found = set()
+    configurations = re.findall(
+        r"isa = XCBuildConfiguration;.*?buildSettings = \{(.*?)\n\s*\};\s*name = (\w+);",
+        project, re.DOTALL,
+    )
+    for settings, name in configurations:
+        profiles = re.findall(r"^\s*PROVISIONING_PROFILE_SPECIFIER\s*=\s*(.*?);\s*$", settings, re.MULTILINE)
+        if len(profiles) > 1:
+            raise ValueError("duplicate provisioning profile setting can override manual signing")
+        bundle = re.search(r'PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"?([^";\s]+)"?;', settings)
+        if name == "Release" and bundle and bundle[1] in expected:
+            required = '"$(' + expected[bundle[1]] + ')"'
+            if profiles != [required]:
+                raise ValueError(f"Release profile setting is missing or overridden for {bundle[1]}")
+            found.add(bundle[1])
+    if found != set(expected):
+        raise ValueError("Release manual signing settings must cover the app, NSE and share extension")
+
+
 def verify_source():
+    verify_profile_settings((ROOT / "apps/ios/SimpleX.xcodeproj/project.pbxproj").read_text())
     config = (ROOT / "apps/ios/Release.xcconfig").read_text()
     setting = re.search(r"^XAUXAT_NTF_SERVER_B64\s*=\s*(\S+)", config, re.MULTILINE)
     if setting is None:
