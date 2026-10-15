@@ -31,7 +31,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
       - name: Check XauXat packaging identity and isolation
         shell: bash
-        run: python3 scripts/xauxat/verify-desktop-identity.py
+        run: python3 scripts/desktop/verify-xauxat-identity.py
       - name: Compile actual Desktop UI and run JVM tests
         shell: bash
         working-directory: apps/multiplatform
