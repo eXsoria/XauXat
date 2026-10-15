@@ -189,6 +189,7 @@ struct ChatInfoView: View {
     @State private var connectionCode: String? = nil
     @FocusState private var aliasTextFieldFocused: Bool
     @State private var alert: ChatInfoViewAlert? = nil
+    @State private var safetyReport: XauXatSafetyReport? = nil
     @State private var actionSheet: SomeActionSheet? = nil
     @State private var sheet: SomeSheet<AnyView>? = nil
     @State private var showConnectContactViaAddressDialog = false
@@ -200,7 +201,6 @@ struct ChatInfoView: View {
     enum ChatInfoViewAlert: Identifiable {
         case clearChatAlert
         case blockContactAlert
-        case safetyReport(report: XauXatSafetyReport)
         case subStatusAlert(status: SubscriptionStatus)
         case switchAddressAlert
         case abortSwitchAddressAlert
@@ -213,7 +213,6 @@ struct ChatInfoView: View {
             switch self {
             case .clearChatAlert: return "clearChatAlert"
             case .blockContactAlert: return "blockContactAlert"
-            case let .safetyReport(report): return "safetyReport \(report.id)"
             case let .subStatusAlert(status): return "subStatusAlert \(status)"
             case .switchAddressAlert: return "switchAddressAlert"
             case .abortSwitchAddressAlert: return "abortSwitchAddressAlert"
@@ -443,7 +442,6 @@ struct ChatInfoView: View {
             switch(alertItem) {
             case .clearChatAlert: return clearChatAlert()
             case .blockContactAlert: return blockContactAlert()
-            case let .safetyReport(report): return safetyReportAlert(report)
             case let .subStatusAlert(status): return subStatusAlert(status)
             case .switchAddressAlert: return switchAddressAlert(switchContactAddress)
             case .abortSwitchAddressAlert: return abortSwitchAddressAlert(abortSwitchContactAddress)
@@ -462,6 +460,9 @@ struct ChatInfoView: View {
             }
         }
         .actionSheet(item: $actionSheet) { $0.actionSheet }
+        .sheet(item: $safetyReport) { report in
+            NavigationView { XauXatSupportComposeView(report: report) }.navigationViewStyle(.stack)
+        }
         .sheet(item: $sheet) {
             if #available(iOS 16.0, *) {
                 $0.content
@@ -672,7 +673,7 @@ struct ChatInfoView: View {
         Button(role: .destructive) {
             var buttons = ReportReason.supportedReasons.map { reason in
                 ActionSheet.Button.default(Text(reason.text)) {
-                    alert = .safetyReport(report: xauXatContactSafetyReport(displayName: contact.displayName, reason: reason))
+                    safetyReport = xauXatContactSafetyReport(displayName: contact.displayName, reason: reason)
                 }
             }
             buttons.append(.cancel())
@@ -707,17 +708,6 @@ struct ChatInfoView: View {
                 deleteContactMaybeErrorAlert(chat, contact, chatDeleteMode: .entity(notify: false), true) {
                     alert = .someAlert(alert: $0)
                 }
-            },
-            secondaryButton: .cancel()
-        )
-    }
-
-    private func safetyReportAlert(_ report: XauXatSafetyReport) -> Alert {
-        Alert(
-            title: Text(report.title),
-            message: Text(report.disclosure),
-            primaryButton: .default(Text("Open share sheet")) {
-                showShareSheet(items: [report.exportText])
             },
             secondaryButton: .cancel()
         )

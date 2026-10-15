@@ -1824,15 +1824,8 @@ struct ChatView: View {
                 markedRead = false
             }
             .actionSheet(item: $actionSheet) { $0.actionSheet }
-            .alert(item: $safetyReport) { report in
-                Alert(
-                    title: Text(report.title),
-                    message: Text(report.disclosure),
-                    primaryButton: .default(Text("Open share sheet")) {
-                        showShareSheet(items: [report.exportText])
-                    },
-                    secondaryButton: .cancel()
-                )
+            .sheet(item: $safetyReport) { report in
+                NavigationView { XauXatSupportComposeView(report: report) }.navigationViewStyle(.stack)
             }
             // skip updating struct on touch if no need to show GoTo button
             .if(touchInProgress || searchIsNotBlank || (chatItem.meta.itemForwarded != nil && chatItem.meta.itemForwarded != .unknown)) {
@@ -2818,8 +2811,13 @@ struct ChatView: View {
         }
 
         private func safetyReportMessageText(_ ci: ChatItem) -> String? {
-            guard !xauxatIsOneTimePhoto(ci) else { return nil }
-            let text = ci.content.msgContent?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !xauxatIsOneTimePhoto(ci), !xauXatIsAnyCodeLockedContent(ci.content.text),
+                  let content = ci.content.msgContent else { return nil }
+            switch content {
+            case .text, .link: break
+            default: return nil
+            }
+            let text = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : text
         }
 

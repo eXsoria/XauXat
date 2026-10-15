@@ -1,0 +1,49 @@
+name: XauXat support
+on:
+  pull_request:
+    paths: ['services/support/**', 'apps/ios/**', 'scripts/ios/*support*', 'scripts/ios/support-model-tests/**', '.github/workflows/xauxat-support.yml']
+  push:
+    branches: [xauxat/main]
+    paths: ['services/support/**', 'apps/ios/**', 'scripts/ios/*support*', 'scripts/ios/support-model-tests/**', '.github/workflows/xauxat-support.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: xauxat-support-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  service:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: python3 -B -m unittest discover -s services/support -p test_support.py
+      - run: node --check services/support/public/app.js
+      - run: docker build -t xauxat-support:test services/support
+      - name: Exercise production WSGI server with synthetic requests
+        run: |
+          set -euo pipefail
+          docker run -d --name xauxat-support-test --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --memory 128m --pids-limit 48 \
+            --tmpfs /tmp:size=8m --tmpfs /data:uid=10001,gid=10001,mode=0700 \
+            -e SUPPORT_PUBLIC_URL=https://support.example.test \
+            -e SUPPORT_CONTACT_EMAIL=operator@example.test \
+            -p 127.0.0.1:18787:8080 xauxat-support:test
+          trap 'docker rm -f xauxat-support-test >/dev/null' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18787/healthz >/dev/null; then break; fi
+            sleep 1
+          done
+          python3 services/support/integration_smoke.py http://127.0.0.1:18787
+  ios-support:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Verify support data and receipt invariants
+        run: |
+          swiftc apps/ios/Shared/Views/UserSettings/XauXatSupportModels.swift \
+            scripts/ios/support-model-tests/main.swift -o "$RUNNER_TEMP/support-model-tests"
+          "$RUNNER_TEMP/support-model-tests"
+      - name: Type-check support UI and fail-closed proxy transport
+        run: bash scripts/ios/check-support-ui.sh

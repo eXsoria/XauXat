@@ -432,8 +432,13 @@ struct SettingsView: View {
             }
 
             Section(header: Text("Contact").foregroundColor(theme.colors.secondary)) {
+                NavigationLink {
+                    XauXatSupportHomeView()
+                } label: {
+                    settingsRow("lifepreserver", color: theme.colors.secondary) { Text("Support & safety") }
+                }
                 settingsRow("number", color: theme.colors.secondary) {
-                    ExternalLink("Report an issue", destination: URL(string: "https://github.com/eXsoria/XauXat/issues")!)
+                    ExternalLink("Public issue tracker", destination: URL(string: "https://github.com/eXsoria/XauXat/issues")!)
                 }
             }
 

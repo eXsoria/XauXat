@@ -1,3 +1,5 @@
 SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 XAUXAT_NTF_SERVER_B64 =
+// Official support HTTPS origin; set after the operational service is ready.
+XAUXAT_SUPPORT_URL =
 #include? "Local.xcconfig"
