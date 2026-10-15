@@ -41,6 +41,10 @@ fun showApp() {
       CompositionLocalProvider(
         LocalWindowExceptionHandlerFactory provides WindowExceptionHandlerFactory { window ->
           WindowExceptionHandler { e ->
+            if (System.getenv("XAUXAT_DESKTOP_UI_SMOKE_RESULT") != null) {
+              e.printStackTrace()
+              exitProcess(1)
+            }
             AlertManager.shared.showAlertMsg(
               title = generalGetString(MR.strings.app_was_crashed),
               text = e.stackTraceToString(),
@@ -128,10 +132,18 @@ private fun ApplicationScope.AppWindow(closedByError: MutableState<Boolean>) {
       } else {
         false
       }
-    }, title = XauXatDesktopBrand.name) {
+    }, title = XauXatDesktopBrand.windowTitle) {
 //      val hardwareAccelerationDisabled = remember { listOf(GraphicsApi.SOFTWARE_FAST, GraphicsApi.SOFTWARE_COMPAT, GraphicsApi.UNKNOWN).contains(window.renderApi) }
       simplexWindowState.window = window
       AppScreen()
+      System.getenv("XAUXAT_DESKTOP_UI_SMOKE_RESULT")?.let { resultPath ->
+        LaunchedEffect(Unit) {
+          delay(5000)
+          check(window.isDisplayable && window.isShowing) { "Desktop window was not shown" }
+          File(resultPath).writeText("ui-ok")
+          exitProcess(0)
+        }
+      }
       if (simplexWindowState.openDialog.isAwaiting) {
         FileDialogChooser(
           title = XauXatDesktopBrand.name,

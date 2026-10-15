@@ -18,8 +18,32 @@ import chat.simplex.common.views.helpers.*
 import chat.simplex.common.views.onboarding.OnboardingStage
 import kotlinx.coroutines.*
 import java.io.File
+import java.nio.file.Files
+import kotlin.system.exitProcess
 
-fun main() {
+fun main(args: Array<String>) {
+  if (args.contentEquals(arrayOf("--xauxat-native-smoke-test"))) {
+    // Exercise the packaged JNI/core and real SQLCipher migrations without starting networking.
+    // The CI launcher also isolates HOME/APPDATA/XDG and JVM user.home from operator data.
+    initHaskell()
+    val dir = Files.createTempDirectory("xauxat-native-smoke-").toFile()
+    try {
+      val migrated = chatMigrateInit(File(dir, "test").absolutePath, "internal-beta-test-key", "yesUp")
+      check((migrated[0] as String).contains("\"type\":\"ok\"")) { "Native database migration failed: ${migrated[0]}" }
+      val ctrl = migrated[1] as Long
+      check(ctrl != 0L)
+      try {
+        check(chatSendCmdRetry(ctrl, "/users", 0).contains("usersList")) { "Native command failed" }
+      } finally {
+        chatCloseStore(ctrl)
+      }
+      println("XAUXAT_NATIVE_SMOKE_OK")
+      System.getenv("XAUXAT_DESKTOP_NATIVE_SMOKE_RESULT")?.let { File(it).writeText("native-ok") }
+    } finally {
+      dir.deleteRecursively()
+    }
+    exitProcess(0)
+  }
   try {
     if (!acquireSingleInstance()) return
     // Clean shared temp dirs only in the owning instance (not in a Files.desktop val
@@ -40,6 +64,7 @@ fun main() {
     // after the window appears are handled by the WindowExceptionHandler in showApp instead.
     return showApp()
   } catch (e: Throwable) {
+    if (System.getenv("XAUXAT_DESKTOP_UI_SMOKE_RESULT") != null) throw e
     showStartupError(e) // the jpackage launcher otherwise hides the error behind "Failed to launch JVM" (#4146)
     throw e
   }

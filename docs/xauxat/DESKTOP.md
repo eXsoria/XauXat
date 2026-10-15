@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-The requested product is XauXat Desktop for Windows, macOS and Linux, based on the native Kotlin/Compose Desktop client already in this fork. This branch establishes a separate product identity and build-validation path; it is not yet a tested or signed desktop release, and does not claim parity with the iOS-only XauXat protections.
+The requested product is XauXat Desktop for Windows, macOS and Linux, based on the native Kotlin/Compose Desktop client already in this fork. The first milestone, chosen by the owner, is an internal beta for iPhone linking and operating the VPS support profile. Full iOS-specific privacy/feature parity is a later release gate. The window title and onboarding identify this beta and its test-profile scope.
 
 Initial build targets:
 
@@ -13,7 +13,7 @@ Initial build targets:
 | macOS | Intel | DMG |
 | Linux | x86_64 | DEB initially |
 
-The current workflow compiles the actual Desktop Kotlin/Compose sources and runs JVM tests on all four runners. It deliberately excludes native CMake packaging; a green JVM build does not prove native-library loading, a working installer, or iPhone/CLI interoperability. No public release is created by this workflow.
+The workflow compiles actual Desktop Kotlin/Compose sources and runs JVM tests on all four runners. A separate job per target builds this fork's Haskell core and JNI, packages an internal MSI/DMG/DEB, and verifies native database migrations/commands and actual Compose window startup from the bundled app image. JVM checks alone do not prove native loading. A package is uploaded only after its packaged startup checks pass. Physical iPhone/CLI pairing remains a separate acceptance test. No GitHub Release or tester notification is created. The repository is public, so Actions artifacts must contain no credentials, profiles or user data.
 
 ## Product identity
 
@@ -51,14 +51,16 @@ cd apps/multiplatform
 
 A fresh checkout needs recursive submodules, including nanohttpd. The JVM task exclusion is for compile/test validation only: a runnable app still requires its matching native libraries and resources.
 
-Native build scripts already exist under `scripts/desktop`, but their compiler/dependency versions, download verification and cleanup operations must be reviewed before the new distribution pipeline runs them. Use an isolated build workspace on each target OS. Keep Windows native toolchain and filesystem operations in one shell, and verify resolved cleanup targets remain inside that workspace. Avoid global GHC settings changes on the user's workstation.
+`scripts/desktop/build-internal-beta.py` is restricted to ephemeral Actions runners. It builds the core from the checked-out source with GHC 9.6.3 and pinned Cabal dependencies, builds SHA-256-verified OpenSSL 3.5.9 LTS, verifies the VLC v3.0.23-2 archive, relocates runtime libraries and builds JNI. It does not invoke the legacy scripts' recursive cleanup or shared `/tmp/tmp` downloads. The GHC Windows DLL-export workaround is restored in `finally`; the builder refuses an existing `cabal.project.local`. Native libraries and source commit/dependency hashes are recorded in `BUILD-PROVENANCE.json`.
+
+Packages are unsigned (macOS native libraries are ad-hoc signed) and not notarized. Existing iOS signing credentials are not used for Desktop. Linux is initially built and tested on Ubuntu 24.04 x86_64; compatibility with older distributions is not claimed. `PACKAGED-SMOKE.json` distinguishes automated native/GUI checks from pending physical pairing. Smoke tests use temporary HOME/APPDATA/XDG locations and JVM user.home, not the operator's live profile. These tests exercise startup, not complete messaging or multimedia acceptance.
 
 ## Release gates
 
 A public XauXat desktop release still requires all of the following:
 
 1. Passing source/JVM tests on Windows, macOS Apple Silicon, macOS Intel and Linux.
-2. Reproducible fork-native core/JNI builds per target, verified media/runtime dependencies, and successful packaged launch. Include provenance/digests with private CI artifacts.
+2. Fork-native core/JNI builds per target, verified media/runtime dependencies, and successful packaged launch. Include provenance/digests with CI artifacts; do not claim bit-for-bit reproducibility without measuring it.
 3. A physical test linking the XauXat iPhone and an operator test controlling/replying through the existing VPS support profile.
 4. Ordinary message/file/group compatibility tests with the current iOS build, plus reconnect, suspend/resume, network-change, restart and notification tests on each OS.
 5. Port or explicitly exclude XauXat protected/custom content, hidden-chat/profile policy, code locks, one-time-view rules, duress/decoy behavior and Plus semantics. Current Kotlin models do not yet implement the custom XauXat image format. Unknown-message fallback is not a substitute for a protection policy.
