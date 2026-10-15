@@ -113,12 +113,21 @@ def mac_dependencies(entry, ghc_libdir):
         dest = LIBS / src.name
         if src.resolve() != dest.resolve():
             copy_file(src, dest)
+        source_commands = run('otool', '-l', src, capture=True)
+        source_rpaths = re.findall(r'cmd LC_RPATH\s+cmdsize \d+\s+path (.*?) \(offset', source_commands)
         deps = [line.strip().split(' (', 1)[0] for line in run('otool', '-L', src, capture=True).splitlines()[1:]]
         for dep in deps:
             if dep.startswith(('/usr/lib/', '/System/Library/')) or Path(dep).name == src.name:
                 continue
             name = Path(dep).name
             candidate = Path(dep.replace('@loader_path', str(src.parent)))
+            if dep.startswith('@rpath/'):
+                # Hackage libraries are in Cabal's store, separate from GHC's runtime.
+                for rpath in source_rpaths:
+                    resolved = Path(rpath.replace('@loader_path', str(src.parent))) / dep.removeprefix('@rpath/')
+                    if resolved.is_file():
+                        candidate = resolved
+                        break
             if not candidate.is_file():
                 candidate = search.get(name)
             if candidate is None or not candidate.is_file():
@@ -237,6 +246,10 @@ def prepare_vlc():
         shutil.copytree(root / 'plugins', dest / 'vlc/plugins', dirs_exist_ok=True)
         if MAC:
             for lib in dest.rglob('*.dylib'):
+                rpath = '@loader_path' if lib.parent == dest else '@loader_path/../../'
+                commands = run('otool', '-l', lib, capture=True)
+                if f'path {rpath} (offset' not in commands:
+                    run('install_name_tool', '-add_rpath', rpath, lib)
                 run('codesign', '--force', '--sign', '-', lib)
     license_file = download('https://github.com/simplex-chat/vlc/releases/download/v3.0.23-2/COPYING', '8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643')
     copy_file(license_file, dest / 'COPYING')
@@ -259,6 +272,7 @@ def build_jni():
     common = LINK.parent / 'common'
     common.mkdir(exist_ok=True)
     copy_file(ROOT / 'LICENSE', common / 'LICENSE-XauXat-AGPL.txt')
+    copy_file(WORK / f'openssl-source/openssl-{OPENSSL_VERSION}/LICENSE.txt', common / 'LICENSE-OpenSSL-Apache.txt')
     provenance = {
         'commit': run('git', 'rev-parse', 'HEAD', capture=True).strip(),
         'core': 'built from this repository source; not an upstream app binary',

@@ -11,6 +11,9 @@ assert 'licenseFile.set(rootProject.file("../../LICENSE"))' in s
 platform=(p/'common/src/desktopMain/kotlin/chat/simplex/common/platform/Platform.desktop.kt').read_text()
 assert '"/simplex"' not in platform and 'File.separator + "SimpleX"' not in platform
 assert 'xauxat-desktop-' in platform
+files=(p/'common/src/desktopMain/kotlin/chat/simplex/common/platform/Files.desktop.kt').read_text()
+assert 'val tmpDir: File = File(dataDir, "desktop_tmp")' in files
+assert 'System.getProperty("java.io.tmpdir") + File.separator + "simplex"' not in files
 brand=(p/'common/src/commonMain/kotlin/chat/simplex/common/platform/XauXatDesktopBrand.kt').read_text()
 assert 'automaticUpdatesEnabled = false' in brand
 assert 'https://smp5.simplex.im/a#' in brand

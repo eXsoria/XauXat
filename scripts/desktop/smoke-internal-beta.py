@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate the actual jpackage image with isolated test homes and no operator data."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import platform
@@ -18,9 +19,10 @@ for stage in ('native', 'ui'):
     with tempfile.TemporaryDirectory(prefix='xauxat-package-smoke-') as tmp:
         home = Path(tmp)
         marker = home / 'result.txt'
+        (home / 'tmp').mkdir()
         env = dict(os.environ, HOME=tmp, APPDATA=tmp, LOCALAPPDATA=tmp,
                    XDG_CONFIG_HOME=tmp, XDG_DATA_HOME=tmp, XDG_CACHE_HOME=tmp,
-                   JAVA_TOOL_OPTIONS=f'-Duser.home="{tmp}"',
+                   JAVA_TOOL_OPTIONS=f'-Duser.home="{tmp}" -Djava.io.tmpdir="{home / "tmp"}"',
                    SKIKO_RENDER_API='SOFTWARE')
         env[f'XAUXAT_DESKTOP_{stage.upper()}_SMOKE_RESULT'] = str(marker)
         args = [str(exe)] + (['--xauxat-native-smoke-test'] if stage == 'native' else [])
@@ -43,3 +45,10 @@ result = release / 'PACKAGED-SMOKE.json'
 result.write_text(json.dumps({'system': system, 'architecture': platform.machine(),
                              'image': image.name, 'checks': results,
                              'physical_iphone_pairing': 'pending', 'vps_operator_pairing': 'pending'}, indent=2) + '\n', encoding='utf-8')
+packages = [p for suffix in ('msi', 'dmg', 'deb') for p in (release / suffix).glob(f'*.{suffix}')]
+assert packages, 'No installer produced'
+lines = []
+for package in packages:
+    with package.open('rb') as f:
+        lines.append(f'{hashlib.file_digest(f, "sha256").hexdigest()}  {package.name}')
+(release / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')

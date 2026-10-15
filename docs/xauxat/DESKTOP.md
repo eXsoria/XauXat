@@ -23,6 +23,7 @@ The workflow compiles actual Desktop Kotlin/Compose sources and runs JVM tests o
 - Windows data/config: `%APPDATA%/XauXat`.
 - Unix data/config: `${XDG_DATA_HOME:-~/.local/share}/xauxat` and `${XDG_CONFIG_HOME:-~/.config}/xauxat`.
 - Existing SimpleX databases/preferences are neither imported nor overwritten automatically.
+- Desktop temporary files live under the XauXat data directory, so startup cleanup cannot delete SimpleX's shared temporary directory.
 - Original protocol/JNI package names are retained for compatibility; upstream license/copyright attribution is retained. Product identity is separate from protocol identifiers.
 - Icons reuse existing XauXat app pixels. The Windows ICO and macOS ICNS are containers around existing PNG images, not newly generated artwork.
 - Support uses the real XauXat native business address through the existing verified-link/connection planner; it does not email the upstream team.

@@ -65,6 +65,7 @@ jobs:
         with:
           ghc-version: '9.6.3'
           cabal-version: '3.10.2.0'
+          cabal-update: false
       - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
         if: runner.os == 'Windows'
         with:
@@ -76,11 +77,14 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y build-essential libgmp-dev zlib1g-dev libffi-dev libnuma-dev patchelf cmake xvfb libasound2t64 libxrender1 libxtst6 libxi6 libgl1 fakeroot
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        id: cabal-cache
         with:
           path: ${{ steps.haskell.outputs.cabal-store }}
-          key: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}
+          key: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-${{ github.sha }}
+          restore-keys: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
       - name: Update Hackage index
+        working-directory: ${{ runner.temp }}
         run: cabal update
       - name: Build fork-native core, verified media runtime and JNI (Unix)
         if: runner.os != 'Windows'
@@ -89,6 +93,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: python scripts/desktop/build-internal-beta.py
+      - name: Preserve compiled Cabal dependencies even when packaging fails
+        if: always() && steps.haskell.outcome == 'success' && steps.cabal-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ steps.haskell.outputs.cabal-store }}
+          key: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-${{ github.sha }}
       - name: Package internal beta on its target OS
         shell: bash
         working-directory: apps/multiplatform
@@ -107,4 +117,5 @@ jobs:
             apps/multiplatform/release/main/dmg/*.dmg
             apps/multiplatform/release/main/deb/*.deb
             apps/multiplatform/release/main/PACKAGED-SMOKE.json
+            apps/multiplatform/release/main/SHA256SUMS.txt
             apps/multiplatform/build/links/common/BUILD-PROVENANCE.json
