@@ -32,7 +32,6 @@ final class EmbeddedTorManager: ObservableObject {
     private var controller: TorController?
     private var configuration: TorConfiguration?
     private var authenticated = false
-    private var circuitObserver: Any?
     private var statusObserver: Any?
     private var attempt: UUID?
     private var callbacks: [(Result<UInt16, Error>) -> Void] = []
@@ -113,32 +112,7 @@ final class EmbeddedTorManager: ObservableObject {
         }
 
         logger.notice("XauXat Tor: requesting NEWNYM after stalled delivery")
-        let newnym = await withCheckedContinuation { continuation in
-            let completion = BooleanCompletion(continuation)
-            let timeout = DispatchWorkItem {
-                completion.resume(false)
-            }
-
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(
-                deadline: .now() + 5,
-                execute: timeout
-            )
-
-            controller.sendCommand(
-                "SIGNAL NEWNYM",
-                arguments: nil,
-                data: nil
-            ) { codes, _, stop in
-                stop.pointee = true
-                timeout.cancel()
-                completion.resume(codes.last?.intValue == 250)
-                return true
-            }
-        }
-
-        guard newnym else {
-            throw EmbeddedTorError.circuitReset
-        }
+        try await command(controller, "SIGNAL", ["NEWNYM"])
 
         // NEWNYM keeps the Tor process and SOCKS listener alive. It marks
         // existing circuits as dirty so new relay streams can use fresh
@@ -235,7 +209,8 @@ final class EmbeddedTorManager: ObservableObject {
                 } catch {
                     guard attempt == id else { return }
                     removeObservers()
-                    controller.disconnect()
+                    // TorController.disconnect() sends SIGNAL SHUTDOWN in the
+                    // pinned framework. Releasing its socket must not kill Tor.
                     self.controller = nil
                     authenticated = false
                     // Reopen the control socket below rather than trusting a
@@ -261,7 +236,6 @@ final class EmbeddedTorManager: ObservableObject {
                         authenticate(control, cookie: cookie, id: id)
                         return
                     }
-                    control.disconnect()
                 }
                 try await Task.sleep(nanoseconds: 200_000_000)
             }
@@ -280,43 +254,64 @@ final class EmbeddedTorManager: ObservableObject {
                     return
                 }
                 self.authenticated = true
-                self.observeCircuit(control, id: id)
+                do {
+                    // Reauthentication can follow a repair interrupted while
+                    // DisableNetwork was set. Restore Tor before waiting for
+                    // a circuit; otherwise that retry could wait forever.
+                    try await self.command(control, "SETCONF", ["DisableNetwork=0"])
+                    guard self.attempt == id else { return }
+                    self.observeCircuit(control, id: id)
+                } catch {
+                    self.finish(.failure(error), id: id)
+                }
             }
         }
     }
 
     private func observeCircuit(_ control: TorController, id: UUID) {
         removeObservers()
-        statusObserver = control.addObserver(forStatusEvents: { [weak self] _, _, action, arguments in
-            guard action == "BOOTSTRAP", let value = arguments?["PROGRESS"], let progress = Int(value) else {
-                return false
-            }
+        statusObserver = control.addObserver(forStatusEvents: { [weak self] type, _, action, arguments in
+            guard type == "STATUS_CLIENT" else { return false }
             Task { @MainActor in
                 guard let self, self.attempt == id, !self.requestingPort else { return }
-                self.state = .bootstrapping(progress)
+                if action == "BOOTSTRAP", let value = arguments?["PROGRESS"], let progress = Int(value) {
+                    self.state = .bootstrapping(progress)
+                } else if action == "CIRCUIT_ESTABLISHED" {
+                    self.requestingPort = true
+                    self.requestSocksPort(control, id: id)
+                }
             }
             return false
         })
-        circuitObserver = control.addObserver(forCircuitEstablished: { [weak self] established in
-            guard established else { return }
-            Task { @MainActor in
-                guard let self, self.attempt == id, !self.requestingPort else { return }
-                self.requestingPort = true
-                self.requestSocksPort(control, id: id)
+        Task {
+            do {
+                try await command(control, "SETEVENTS", ["STATUS_CLIENT"])
+                guard attempt == id else { return }
+                let established = try await info(control, "status/circuit-established")
+                guard attempt == id, !requestingPort else { return }
+                if established == "1" {
+                    requestingPort = true
+                    requestSocksPort(control, id: id)
+                }
+            } catch {
+                // An established-circuit event may already have advanced this
+                // attempt; an obsolete snapshot must not reset that progress.
+                guard attempt == id, !requestingPort else { return }
+                finish(.failure(error), id: id)
             }
-        })
+        }
     }
 
     private func requestSocksPort(_ control: TorController, id: UUID) {
-        control.getInfoForKeys(["net/listeners/socks"]) { [weak self] values in
-            Task { @MainActor in
-                guard let self, self.attempt == id else { return }
-                guard values.count == 1, let port = Self.loopbackPort(values[0]) else {
-                    self.finish(.failure(EmbeddedTorError.invalidSocksPort), id: id)
-                    return
-                }
-                self.state = .verifying
-                self.routeTask = Task { await self.verifyStartupRoute(port: port, id: id) }
+        Task {
+            do {
+                let value = try await info(control, "net/listeners/socks")
+                guard attempt == id else { return }
+                guard let port = Self.loopbackPort(value) else { throw EmbeddedTorError.invalidSocksPort }
+                state = .verifying
+                routeTask = Task { await self.verifyStartupRoute(port: port, id: id) }
+            } catch {
+                finish(.failure(error), id: id)
             }
         }
     }
@@ -386,7 +381,8 @@ final class EmbeddedTorManager: ObservableObject {
             logger.notice("XauXat Tor: embedded client is ready")
         case let .failure(error):
             setXauXatTorSocksPort(nil)
-            controller?.disconnect()
+            // Dropping the controller closes only its socket. Its disconnect()
+            // method would shut down the entire embedded Tor runtime.
             controller = nil
             authenticated = false
             state = .failed(error.localizedDescription)
@@ -416,11 +412,15 @@ final class EmbeddedTorManager: ObservableObject {
     }
 
     private func command(_ control: TorController, _ name: String, _ arguments: [String]) async throws {
-        let accepted = await withCheckedContinuation { continuation in
-            let completion = BooleanCompletion(continuation)
+        let accepted: Bool = await withCheckedContinuation { continuation in
+            let completion = ControlCompletion(continuation)
             let timeout = DispatchWorkItem { completion.resume(false) }
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 5, execute: timeout)
-            control.sendCommand(name, arguments: arguments, data: nil) { codes, _, stop in
+            control.sendCommand(name, arguments: arguments, data: nil) { codes, lines, stop in
+                guard let code = codes.first?.intValue, code < 600 else { return false }
+                // GETINFO replies belonging to another outstanding request
+                // are not an acknowledgement for this command.
+                if code == 250, !(codes.count == 1 && lines.count == 1 && String(data: lines[0], encoding: .utf8) == "OK") { return false }
                 stop.pointee = true
                 timeout.cancel()
                 completion.resume(codes.last?.intValue == 250)
@@ -430,23 +430,43 @@ final class EmbeddedTorManager: ObservableObject {
         guard accepted else { throw EmbeddedTorError.controlConnection }
     }
 
+    private func info(_ control: TorController, _ key: String) async throws -> String {
+        let value: String? = await withCheckedContinuation { continuation in
+            let completion = ControlCompletion(continuation)
+            let timeout = DispatchWorkItem { completion.resume(nil) }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 5, execute: timeout)
+            control.sendCommand("GETINFO", arguments: [key], data: nil) { codes, lines, stop in
+                // Tor sends 650 status events between command replies. The
+                // framework GETINFO helper consumes these as invalid replies.
+                guard let code = codes.first?.intValue, code < 600 else { return false }
+                let prefix = key + "="
+                let result = lines.compactMap { String(data: $0, encoding: .utf8) }.first { $0.hasPrefix(prefix) }
+                if code == 250 && result == nil { return false }
+                stop.pointee = true
+                timeout.cancel()
+                completion.resume(codes.allSatisfy { $0.intValue == 250 } ? result.map { String($0.dropFirst(prefix.count)) } : nil)
+                return true
+            }
+        }
+        guard let value else { throw EmbeddedTorError.controlConnection }
+        return value
+    }
+
     private func removeObservers() {
-        controller?.removeObserver(circuitObserver)
         controller?.removeObserver(statusObserver)
-        circuitObserver = nil
         statusObserver = nil
     }
 
-    private final class BooleanCompletion: @unchecked Sendable {
+    private final class ControlCompletion<Value>: @unchecked Sendable {
         private let lock = NSLock()
         private var finished = false
-        private let continuation: CheckedContinuation<Bool, Never>
+        private let continuation: CheckedContinuation<Value, Never>
 
-        init(_ continuation: CheckedContinuation<Bool, Never>) {
+        init(_ continuation: CheckedContinuation<Value, Never>) {
             self.continuation = continuation
         }
 
-        func resume(_ value: Bool) {
+        func resume(_ value: Value) {
             lock.lock()
             guard !finished else {
                 lock.unlock()

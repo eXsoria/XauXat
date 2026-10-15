@@ -31,6 +31,8 @@ import Tor
         try await readyMustBeRevalidated()
         try await recoveryRebindsAndPublishesOnlyVerifiedPort()
         try await recoveryFailureIsBounded()
+        try await interruptedRepairDoesNotStrandNextRetry()
+        try await statusEventsCannotConsumeCommandReplies()
         try await staleControlChannelIsReopened()
         try await manualFailureCannotLeaveReady()
         try await oldManualFailureCannotInvalidateNewReadiness()
@@ -96,6 +98,27 @@ import Tor
         TorTestState.failNextCommand = true
         _ = try await manager.ensureReady()
         require(TorTestState.controllers == 2 && TorTestState.threadStarts == 1, "A stale control socket must be reopened without a second Tor runtime")
+    }
+
+    static func statusEventsCannotConsumeCommandReplies() async throws {
+        reset()
+        TorTestState.injectStatusBeforeReply = true
+        let probe = ScriptedProbe(), manager = probe.manager()
+        _ = try await manager.ensureReady()
+        require(publishedTorPort != nil && probe.calls == 1, "Status events interleaved with control replies must not hang or restart bootstrap")
+    }
+
+    static func interruptedRepairDoesNotStrandNextRetry() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager()
+        TorTestState.failCommandContaining = "SocksPort=0"
+        probe.handler = { _ in throw TorSOCKSProbeError.failed(.localSocket) }
+        do { _ = try await manager.ensureReady(); fatalError("Interrupted repair should fail") } catch { }
+        require(TorTestState.networkDisabled && publishedTorPort == nil, "Failure during repair must remain closed")
+        probe.handler = { _ in true }
+        _ = try await manager.ensureReady()
+        require(!TorTestState.networkDisabled && publishedTorPort != nil, "Reauthenticated retry must restore Tor networking before waiting for a circuit")
+        require(TorTestState.threadStarts == 1, "Interrupted repair must reuse the existing C-Tor runtime")
     }
 
     static func manualFailureCannotLeaveReady() async throws {

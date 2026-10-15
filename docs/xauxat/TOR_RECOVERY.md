@@ -14,11 +14,20 @@ re-enables networking in the existing Tor runtime. It does not reload a torrc,
 enable a direct route, or start a second C-Tor instance. A terminated C runtime
 produces a clear reopen-app error instead of attempting unsafe in-process re-entry.
 
+The pinned framework's GETINFO/circuit helpers can consume a 650 status event
+as an invalid command response. The manager now matches its own bounded control
+replies and ignores asynchronous events, while still observing bootstrap/circuit
+progress. Releasing a stale control socket deliberately avoids the framework's
+`disconnect()` method, which sends SHUTDOWN to Tor. An interrupted repair is
+also recoverable: after reauthentication, networking is re-enabled before
+waiting for a circuit again.
+
 Each attempt has a four-minute overall deadline, covering bootstrap, control
 commands, probes and repair. Each probe has a 30-second deadline and each control
 command a five-second deadline. Probe retries allow three checks before and three
 after the single repair; the overall deadline takes precedence. Late callbacks
-cannot publish readiness for an expired or superseded attempt. Manual failures
+cannot publish readiness for an expired or superseded attempt. Outstanding probes
+are cancelled when their attempt expires. Manual failures
 withdraw readiness without invalidating a newer successful check.
 
 The chat core receives the current verified configuration before app resume and
