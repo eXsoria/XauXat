@@ -34,8 +34,6 @@ The workflow compiles actual Desktop Kotlin/Compose sources and runs JVM tests o
 
 The upstream native client already implements both a local desktop profile and a remotely controlled mobile/CLI profile. Neither is implemented by copying a live iPhone database onto the desktop.
 
-The initial beta onboarding exposes linking an existing profile; standalone profile creation is hidden until the Desktop privacy and onboarding gates are met. Existing remotely controlled profiles may still contain upstream preset contact cards. Use **Contact XauXat** in Settings for XauXat support, rather than an upstream team's card.
-
 For a linked iPhone, the phone remains the running profile and must be reachable. Use the normal native linking UI on the same local network; verify the pairing code on both devices. This is remote access to a live profile, not independent cloud synchronization or a promise of an offline desktop copy.
 
 For XauXat support, the existing VPS CLI remains the owner of its dedicated business profile. Desktop can control it via the documented native remote-control protocol and a loopback-only SSH reverse tunnel. Pair only after comparing verification codes. Do not expose the controller port or clone the live CLI databases into another networked client.
