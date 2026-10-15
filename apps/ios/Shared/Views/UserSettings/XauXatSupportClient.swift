@@ -62,7 +62,7 @@ enum XauXatSupportClient {
         // System TLS verification is retained; redirects are never followed.
         let (data, response) = try await session.data(for: request)
         // A full conversation can include 30 messages, each up to 4,000 scalars.
-        guard let http = response as? HTTPURLResponse, data.count <= 1048576 else { throw XauXatSupportError.response }
+        guard let http = response as? HTTPURLResponse, data.count <= 2097152 else { throw XauXatSupportError.response }
         guard (200...299).contains(http.statusCode) else {
             if let error = try? JSONDecoder().decode(ServiceError.self, from: data), error.error.count <= 240 {
                 throw XauXatSupportError.service(error.error)

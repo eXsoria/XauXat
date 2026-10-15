@@ -71,7 +71,7 @@ def validate(data):
 
 
 class Store:
-    def __init__(self, path, retention_days=30, max_tickets=10000, daily_limit=500):
+    def __init__(self, path, retention_days=30, max_tickets=1000, daily_limit=500):
         self.path = str(path)
         self.retention_days = retention_days
         self.max_tickets = max_tickets

@@ -198,6 +198,39 @@ class SupportTests(unittest.TestCase):
             smtp.return_value.__enter__.return_value.starttls.assert_called()
             self.assertEqual(supportctl.notify(self.store), 0)
 
+    def test_followup_arriving_during_alert_delivery_remains_queued(self):
+        data = self.submission()
+        self.store.create(data)
+        env = {"SUPPORT_SMTP_HOST": "smtp.example.test", "SUPPORT_ALERT_EMAIL": "operator@example.test", "SUPPORT_FROM_EMAIL": "alerts@example.test"}
+        def concurrent_followup(_message):
+            self.store.followup(data["id"], data["secret"], {"id": str(uuid.uuid4()), "text": "Arrived during SMTP delivery", "consent": True, "consentVersion": "2026-10-15"})
+        with patch.dict(os.environ, env), patch.object(smtplib, "SMTP") as smtp:
+            smtp.return_value.__enter__.return_value.send_message.side_effect = concurrent_followup
+            self.assertEqual(supportctl.notify(self.store), 1)
+        with self.store.connect() as db:
+            self.assertIsNone(db.execute("SELECT notified_at FROM tickets").fetchone()[0])
+
+    def test_early_deletion_requires_matching_private_receipt(self):
+        data = self.submission()
+        ticket, _ = self.store.create(data)
+        receipt_file = Path(self.temp.name) / "receipt.txt"
+        args = ["supportctl", "delete", ticket["reference"], "--receipt-file", str(receipt_file), "--confirm-delete"]
+        receipt_file.write_text(data["id"] + "." + secrets.token_urlsafe(32), encoding="utf-8")
+        with patch.dict(os.environ, {"SUPPORT_DATABASE": self.store.path}), patch("sys.argv", args):
+            with self.assertRaises(SystemExit):
+                supportctl.main()
+        self.assertIsNotNone(self.store.get(data["id"], data["secret"]))
+        receipt_file.write_text(data["id"] + "." + data["secret"], encoding="utf-8")
+        with patch.dict(os.environ, {"SUPPORT_DATABASE": self.store.path}), patch("sys.argv", args):
+            supportctl.main()
+        self.assertIsNone(self.store.get(data["id"], data["secret"]))
+
+    def test_maintenance_failure_is_visible_when_alerts_remain_queued(self):
+        self.store.create(self.submission())
+        with patch.dict(os.environ, {"SUPPORT_DATABASE": self.store.path}), patch("sys.argv", ["supportctl", "maintenance"]), patch.object(supportctl, "notify", return_value=0):
+            with self.assertRaisesRegex(SystemExit, "Alerts remain queued"):
+                supportctl.main()
+
 
 if __name__ == "__main__":
     unittest.main()

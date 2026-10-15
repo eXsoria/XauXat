@@ -1,0 +1,12 @@
+[Unit]
+Description=Maintain XauXat support inbox every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+AccuracySec=10s
+RandomizedDelaySec=5s
+Unit=xauxat-support-maintenance.service
+
+[Install]
+WantedBy=timers.target
