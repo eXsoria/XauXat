@@ -1,7 +1,17 @@
 package chat.simplex.desktop
 
-import chat.simplex.common.model.*
-import chat.simplex.common.platform.*
+import chat.simplex.common.model.API
+import chat.simplex.common.model.CC
+import chat.simplex.common.model.CR
+import chat.simplex.common.model.Profile
+import chat.simplex.common.model.RemoteCtrlAddress
+import chat.simplex.common.model.json
+import chat.simplex.common.platform.ChatCtrl
+import chat.simplex.common.platform.chatCloseStore
+import chat.simplex.common.platform.chatMigrateInit
+import chat.simplex.common.platform.chatRecvMsgWait
+import chat.simplex.common.platform.chatSendCmdRetry
+import chat.simplex.common.platform.chatSendRemoteCmdRetry
 import java.io.File
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.decodeFromString
@@ -35,7 +45,7 @@ internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
       val hostId = connected.remoteHost.remoteHostId
       check(storedHostId == null || storedHostId == hostId) { "Reconnect changed the paired host" }
       storedHostId = hostId
-      val remote = json.decodeFromString<API>(chatSendRemoteCmdRetry(desktop, hostId, CC.ListUsers().cmdString, 0)).result
+      val remote = json.decodeFromString<API>(chatSendRemoteCmdRetry(desktop, hostId.toInt(), CC.ListUsers().cmdString, 0)).result
       check(remote is CR.UsersList && remote.users.single().user.profile.displayName == "CIRemote") {
         "Remote command did not return the controlled profile"
       }
