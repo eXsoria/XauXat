@@ -212,7 +212,12 @@ startRemoteHost rh_ rcAddrPrefs_ port_ = do
       -- Clean up on a separate thread so cancelling pollAction cannot abort
       -- its own cleanup before RemoteHostStopped is emitted. The session
       -- sequence guard still ignores duplicate/stale disconnect callbacks.
-      let notifyDisconnected = void . forkIO $ disconnected `catchAny` (logError . tshow)
+      let notifyDisconnected = do
+            cleanup <- async $ disconnected `catchAny` (logError . tshow)
+            -- The polling caller is cancelled by cleanup while waiting here;
+            -- other callers wait until the stopped event has been emitted.
+            -- Returning immediately could race a polling error into the UI.
+            void $ waitCatch cleanup
       httpClient <- liftError' (httpError remoteHostId) $ attachRevHTTP2Client notifyDisconnected tls
       rhClient <- mkRemoteHostClient httpClient sessionKeys sessId storePath hostInfo
       pollAction <- async $ pollEvents remoteHostId rhClient
