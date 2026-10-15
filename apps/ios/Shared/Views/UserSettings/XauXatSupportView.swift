@@ -54,8 +54,8 @@ struct XauXatSupportComposeView: View {
         .navigationTitle(report?.title ?? "Support & safety")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if report != nil {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            ToolbarItem(placement: .cancellationAction) {
+                if report != nil { Button("Close") { dismiss() } }
             }
         }
     }
