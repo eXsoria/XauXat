@@ -80,15 +80,39 @@ def extract(archive, target):
 
 
 def build_openssl():
+    prefix = WORK / 'openssl'
+    target = 'mingw64' if WINDOWS else ('darwin64-arm64-cc' if ARCH == 'aarch64' else 'darwin64-x86_64-cc') if MAC else 'linux-x86_64'
+    inputs = {
+        'source_sha256': OPENSSL_HASH, 'target': target,
+        'compiler': run('gcc' if WINDOWS else 'cc', '--version', capture=True).splitlines()[0],
+        'prefix': prefix.as_posix(), 'options': ['shared', 'no-tests', '--libdir=lib'],
+        'sdk': os.environ.get('SDKROOT') if MAC else None,
+        'deployment': os.environ.get('MACOSX_DEPLOYMENT_TARGET') if MAC else None,
+    }
+    manifest = prefix / 'XAUXAT-OPENSSL-BUILD.json'
+    if manifest.is_file():
+        try:
+            cached = json.loads(manifest.read_text(encoding='utf-8'))
+            files = {p.relative_to(prefix).as_posix(): p for p in prefix.rglob('*') if p.is_file() and p != manifest}
+            if cached['inputs'] == inputs and files.keys() == cached['files'].keys() and all(digest(p) == cached['files'][name] for name, p in files.items()):
+                print('Verified cached OpenSSL build inputs and every installed file digest.', flush=True)
+                return prefix
+        except (ValueError, KeyError, OSError):
+            pass
+    if prefix.exists():
+        # Only a checked build-cache directory in this ephemeral checkout is removed.
+        inside(prefix, WORK)
+        shutil.rmtree(prefix)
     source = WORK / 'openssl-source' / f'openssl-{OPENSSL_VERSION}'
     archive = download(f'https://github.com/openssl/openssl/releases/download/openssl-{OPENSSL_VERSION}/openssl-{OPENSSL_VERSION}.tar.gz', OPENSSL_HASH)
     if not source.exists():
         extract(archive, source.parent)
-    prefix = WORK / 'openssl'
-    target = 'mingw64' if WINDOWS else ('darwin64-arm64-cc' if ARCH == 'aarch64' else 'darwin64-x86_64-cc') if MAC else 'linux-x86_64'
     run('perl', 'Configure', target, 'shared', 'no-tests', '--libdir=lib', f'--prefix={prefix.as_posix()}', cwd=source)
     run('make', '-j2', cwd=source)
     run('make', 'install_sw', cwd=source)
+    copy_file(source / 'LICENSE.txt', prefix / 'LICENSE.txt')
+    files = {p.relative_to(prefix).as_posix(): digest(p) for p in prefix.rglob('*') if p.is_file()}
+    manifest.write_text(json.dumps({'inputs': inputs, 'files': files}, indent=2) + '\n', encoding='utf-8')
     return prefix
 
 
@@ -305,7 +329,7 @@ def build_jni():
     common = LINK.parent / 'common'
     common.mkdir(exist_ok=True)
     copy_file(ROOT / 'LICENSE', common / 'LICENSE-XauXat-AGPL.txt')
-    copy_file(WORK / f'openssl-source/openssl-{OPENSSL_VERSION}/LICENSE.txt', common / 'LICENSE-OpenSSL-Apache.txt')
+    copy_file(WORK / 'openssl/LICENSE.txt', common / 'LICENSE-OpenSSL-Apache.txt')
     provenance = {
         'commit': run('git', 'rev-parse', 'HEAD', capture=True).strip(),
         'core': 'built from this repository source; not an upstream app binary',
@@ -322,6 +346,7 @@ def build_jni():
 if __name__ == '__main__':
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Run only in an ephemeral GitHub Actions checkout, not on a user workstation.')
+    inside(WORK, ROOT)
     WORK.mkdir(exist_ok=True)
     compiler_originals = configure_mac_sdk() if MAC else {}
     try:

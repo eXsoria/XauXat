@@ -84,6 +84,13 @@ jobs:
           key: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-${{ github.sha }}
           restore-keys: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - name: Restore verified OpenSSL build cache
+        id: openssl-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .desktop-beta-build/openssl
+          key: xauxat-openssl359-${{ matrix.os }}-v1-${{ github.sha }}
+          restore-keys: xauxat-openssl359-${{ matrix.os }}-v1-
       - name: Update Hackage index
         working-directory: ${{ runner.temp }}
         run: cabal update
@@ -97,9 +104,17 @@ jobs:
       - name: Preserve compiled Cabal dependencies even when packaging fails
         if: always() && steps.haskell.outcome == 'success' && steps.cabal-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        continue-on-error: true
         with:
           path: ${{ steps.haskell.outputs.cabal-store }}
           key: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-${{ github.sha }}
+      - name: Preserve verified OpenSSL build for later native checks
+        if: always() && steps.openssl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        continue-on-error: true
+        with:
+          path: .desktop-beta-build/openssl
+          key: xauxat-openssl359-${{ matrix.os }}-v1-${{ github.sha }}
       - name: Package internal beta on its target OS
         shell: bash
         working-directory: apps/multiplatform
