@@ -1365,6 +1365,10 @@ func apiSetNetworkInfo(_ networkInfo: UserNetworkInfo) throws {
 }
 
 func reconnectAllServers() async throws {
+    // A recovery can replace Tor's dynamic listener. Never reconnect the core
+    // with a cached port, or keep retrying a Ready flag whose socket has died.
+    _ = try await EmbeddedTorManager.shared.ensureReady()
+    try await MainActor.run { try setNetworkConfig(getNetCfg()) }
     try await sendCommandOkResp(.reconnectAllServers)
 }
 

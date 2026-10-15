@@ -1,0 +1,20 @@
+name: XauXat Tor recovery
+on:
+  pull_request:
+    paths: ['apps/ios/**', 'scripts/ios/*tor*', 'scripts/ios/tor-recovery-tests/**', '.github/workflows/xauxat-tor-recovery.yml']
+  push:
+    branches: [xauxat/main]
+    paths: ['apps/ios/**', 'scripts/ios/*tor*', 'scripts/ios/tor-recovery-tests/**', '.github/workflows/xauxat-tor-recovery.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: xauxat-tor-recovery-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  recovery:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: bash scripts/ios/test-tor-recovery.sh
