@@ -41,6 +41,10 @@ fun showApp() {
       CompositionLocalProvider(
         LocalWindowExceptionHandlerFactory provides WindowExceptionHandlerFactory { window ->
           WindowExceptionHandler { e ->
+            if (System.getenv("XAUXAT_DESKTOP_UI_SMOKE_RESULT") != null) {
+              e.printStackTrace()
+              exitProcess(1)
+            }
             AlertManager.shared.showAlertMsg(
               title = generalGetString(MR.strings.app_was_crashed),
               text = e.stackTraceToString(),
@@ -122,19 +126,27 @@ private fun ApplicationScope.AppWindow(closedByError: MutableState<Boolean>) {
   simplexWindowState.windowState = windowState
   // Reload all strings in all @Composable's after language change at runtime
   if (remember { ChatController.appPrefs.appLanguage.state }.value != "") {
-    Window(state = windowState, visible = simplexWindowState.windowVisible.value, icon = painterResource(MR.images.ic_simplex), onCloseRequest = { handleCloseRequest(closedByError) }, onKeyEvent = {
+    Window(state = windowState, visible = simplexWindowState.windowVisible.value, icon = painterResource(MR.images.xauxat_icon), onCloseRequest = { handleCloseRequest(closedByError) }, onKeyEvent = {
       if (it.key == Key.Escape && it.type == KeyEventType.KeyUp) {
         simplexWindowState.backstack.lastOrNull()?.invoke() != null
       } else {
         false
       }
-    }, title = "SimpleX") {
+    }, title = XauXatDesktopBrand.windowTitle) {
 //      val hardwareAccelerationDisabled = remember { listOf(GraphicsApi.SOFTWARE_FAST, GraphicsApi.SOFTWARE_COMPAT, GraphicsApi.UNKNOWN).contains(window.renderApi) }
       simplexWindowState.window = window
       AppScreen()
+      System.getenv("XAUXAT_DESKTOP_UI_SMOKE_RESULT")?.let { resultPath ->
+        LaunchedEffect(Unit) {
+          delay(5000)
+          check(window.isDisplayable && window.isShowing) { "Desktop window was not shown" }
+          File(resultPath).writeText("ui-ok")
+          exitProcess(0)
+        }
+      }
       if (simplexWindowState.openDialog.isAwaiting) {
         FileDialogChooser(
-          title = "SimpleX",
+          title = XauXatDesktopBrand.name,
           isLoad = true,
           params = simplexWindowState.openDialog.params,
           onResult = {
@@ -145,7 +157,7 @@ private fun ApplicationScope.AppWindow(closedByError: MutableState<Boolean>) {
 
       if (simplexWindowState.openMultipleDialog.isAwaiting) {
         FileDialogChooser(
-          title = "SimpleX",
+          title = XauXatDesktopBrand.name,
           isLoad = true,
           params = simplexWindowState.openMultipleDialog.params,
           onResult = {
@@ -156,7 +168,7 @@ private fun ApplicationScope.AppWindow(closedByError: MutableState<Boolean>) {
 
       if (simplexWindowState.saveDialog.isAwaiting) {
         FileDialogChooser(
-          title = "SimpleX",
+          title = XauXatDesktopBrand.name,
           isLoad = false,
           params = simplexWindowState.saveDialog.params,
           onResult = { simplexWindowState.saveDialog.onResult(it.firstOrNull()) }

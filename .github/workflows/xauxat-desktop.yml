@@ -1,0 +1,154 @@
+name: XauXat Desktop
+on:
+  pull_request:
+    paths: ['apps/multiplatform/**', 'scripts/desktop/**', 'scripts/xauxat/*desktop*', '.github/workflows/xauxat-desktop.yml']
+  push:
+    branches: [xauxat/main]
+    paths: ['apps/multiplatform/**', 'scripts/desktop/**', 'scripts/xauxat/*desktop*', '.github/workflows/xauxat-desktop.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: xauxat-desktop-${{ github.ref }}
+  # Let native builds finish and preserve their dependency cache before a new run.
+  cancel-in-progress: false
+jobs:
+  internal-beta:
+    name: Internal beta package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            package: packageMsi
+          - os: macos-26
+            package: packageDmg
+          - os: macos-15-intel
+            package: packageDmg
+          - os: ubuntu-24.04
+            package: packageDeb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: corretto
+          java-version: '17'
+      # Validate before native work, then reuse compiled classes when packaging
+      # on this same runner. Each OS advances after its own source checks pass.
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - name: Check XauXat packaging identity and isolation
+        shell: bash
+        run: python3 scripts/desktop/verify-xauxat-identity.py
+      - name: Compile actual Desktop UI and run JVM tests
+        shell: bash
+        working-directory: apps/multiplatform
+        run: ./gradlew --no-daemon --stacktrace :common:desktopTest :desktop:compileKotlinJvm -x :desktop:cmakeBuildAndCopy
+      - uses: haskell-actions/setup@0f8e8c99d88aeb3fbfd523f1ef2c6f762d10d64d
+        id: haskell
+        with:
+          ghc-version: '9.6.3'
+          cabal-version: '3.10.2.0'
+          cabal-update: false
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
+        if: runner.os == 'Windows'
+        with:
+          msystem: UCRT64
+          path-type: inherit
+          update: true
+          install: git perl make mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-gcc
+      - name: Install Linux build and GUI dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential libgmp-dev zlib1g-dev libffi-dev libnuma-dev patchelf cmake xvfb libasound2t64 libxrender1 libxtst6 libxi6 libgl1 fakeroot
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        id: cabal-cache
+        with:
+          path: ${{ steps.haskell.outputs.cabal-store }}
+          key: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-${{ github.sha }}
+          restore-keys: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-
+      - name: Restore verified OpenSSL build cache
+        id: openssl-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .desktop-beta-build/openssl
+          key: xauxat-openssl359-${{ matrix.os }}-v1-${{ github.sha }}
+          restore-keys: xauxat-openssl359-${{ matrix.os }}-v1-
+      - name: Restore matching native core cache
+        id: core-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .desktop-beta-build/core
+          key: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py', 'scripts/desktop/patch-windows-remote-peer.py') }}-${{ github.sha }}
+          restore-keys: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py', 'scripts/desktop/patch-windows-remote-peer.py') }}-
+      - name: Update Hackage index
+        working-directory: ${{ runner.temp }}
+        run: cabal update
+      - name: Build fork-native core, verified media runtime and JNI (Unix)
+        if: runner.os != 'Windows'
+        run: python3 scripts/desktop/build-internal-beta.py
+      - name: Build fork-native core, verified media runtime and JNI (Windows UCRT64)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: python scripts/desktop/build-internal-beta.py
+      - name: Preserve compiled Cabal dependencies even when packaging fails
+        if: always() && steps.haskell.outcome == 'success' && steps.cabal-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        continue-on-error: true
+        with:
+          path: ${{ steps.haskell.outputs.cabal-store }}
+          key: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-${{ github.sha }}
+      - name: Preserve verified OpenSSL build for later native checks
+        if: always() && steps.openssl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        continue-on-error: true
+        with:
+          path: .desktop-beta-build/openssl
+          key: xauxat-openssl359-${{ matrix.os }}-v1-${{ github.sha }}
+      - name: Preserve matching native core even when later packaging fails
+        if: always() && steps.core-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        continue-on-error: true
+        with:
+          path: .desktop-beta-build/core
+          key: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py', 'scripts/desktop/patch-windows-remote-peer.py') }}-${{ github.sha }}
+      - name: Create the native app image
+        shell: bash
+        working-directory: apps/multiplatform
+        run: ./gradlew --no-daemon --stacktrace :desktop:createDistributable -x :desktop:cmakeBuildAndCopy
+      - name: Check Windows native protocol before compressing the MSI
+        id: early-native
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python3 scripts/desktop/smoke-internal-beta.py --native-only
+      - name: Package internal beta on its target OS
+        shell: bash
+        working-directory: apps/multiplatform
+        run: ./gradlew --no-daemon --stacktrace :desktop:${{ matrix.package }} -x :desktop:cmakeBuildAndCopy
+      - name: Verify packaged native database and actual GUI startup
+        id: packaged-smoke
+        shell: bash
+        run: python3 scripts/desktop/smoke-internal-beta.py
+      - name: Preserve failed Windows app image for isolated diagnosis
+        if: failure() && runner.os == 'Windows' && (steps.early-native.outcome == 'failure' || steps.packaged-smoke.outcome == 'failure')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: xauxat-desktop-debug-windows-not-validated
+          retention-days: 3
+          if-no-files-found: error
+          path: apps/multiplatform/release/main/app/XauXat/
+      - name: Upload internal beta package and validation evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: xauxat-desktop-internal-beta-${{ matrix.os }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            apps/multiplatform/release/main/msi/*.msi
+            apps/multiplatform/release/main/dmg/*.dmg
+            apps/multiplatform/release/main/deb/*.deb
+            apps/multiplatform/release/main/PACKAGED-SMOKE.json
+            apps/multiplatform/release/main/SHA256SUMS.txt
+            apps/multiplatform/build/links/common/BUILD-PROVENANCE.json

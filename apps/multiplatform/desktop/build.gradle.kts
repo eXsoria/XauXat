@@ -8,7 +8,7 @@ plugins {
   id("io.github.tomtzook.gradle-cmake") version "1.2.2"
 }
 
-group = "chat.simplex"
+group = "pt.exsoria.xauxat"
 version = extra["desktop.version_name"] as String
 
 
@@ -40,7 +40,10 @@ compose {
       }
       mainClass = "chat.simplex.desktop.MainKt"
       nativeDistributions {
-        copyright = "(c) 2020-2026 SimpleX Chat"
+        copyright = "XauXat (c) 2026 eXsoria; SimpleX Chat (c) 2020-2026"
+        vendor = "eXsoria"
+        description = "XauXat Desktop"
+        licenseFile.set(rootProject.file("../../LICENSE"))
         // For debugging via VisualVM
         if (debugJava) {
           modules("jdk.zipfs", "jdk.unsupported", "jdk.management.agent")
@@ -64,27 +67,29 @@ compose {
           //, TargetFormat.AppImage // Gradle doesn't sync on Mac with it
         )
         linux {
-          iconFile.set(project.file("src/jvmMain/resources/distribute/simplex.png"))
+          iconFile.set(project.file("src/jvmMain/resources/distribute/xauxat.png"))
           appCategory = "Messenger"
         }
         windows {
-          packageName = "SimpleX"
-          iconFile.set(project.file("src/jvmMain/resources/distribute/simplex.ico"))
+          packageName = "XauXat"
+          iconFile.set(project.file("src/jvmMain/resources/distribute/xauxat.ico"))
           console = false
           perUserInstall = false
           dirChooser = true
           shortcut = true
-          upgradeUuid = "CC9EFBC8-AFFF-40D8-BB69-FCD7CE99EFB9"
+          upgradeUuid = "711B8BD7-47BF-5CE1-B489-4F1267AF2C47"
         }
         macOS {
-          packageName = "SimpleX"
-          iconFile.set(project.file("src/jvmMain/resources/distribute/simplex.icns"))
+          packageName = "XauXat"
+          iconFile.set(project.file("src/jvmMain/resources/distribute/xauxat.icns"))
           appCategory = "public.app-category.social-networking"
-          bundleID = "chat.simplex.app"
+          bundleID = "pt.exsoria.xauxat.desktop"
           infoPlist {
             extraKeysRawXml = """
               <key>NSMicrophoneUsageDescription</key>
-              <string>SimpleX needs microphone access to record voice messages</string>
+              <string>XauXat needs microphone access to record voice messages</string>
+              <key>NSLocalNetworkUsageDescription</key>
+              <string>XauXat uses your local network to connect to your iPhone and other linked profiles.</string>
             """
           }
           val identity = rootProject.extra["desktop.mac.signing.identity"] as String?
@@ -106,9 +111,9 @@ compose {
           }
         }
         if (os.contains("mac") || os.contains("win")) {
-          packageName = "SimpleX"
+          packageName = "XauXat"
         } else {
-          packageName = "simplex"
+          packageName = "xauxat"
         }
         // Packaging requires to have version like MAJOR.MINOR.PATCH
         var adjustedVersion = rootProject.extra["desktop.version_name"] as String

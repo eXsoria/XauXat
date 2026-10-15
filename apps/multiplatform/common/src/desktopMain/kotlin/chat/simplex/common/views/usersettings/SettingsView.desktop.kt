@@ -17,12 +17,9 @@ actual fun AdvancedSettingsAppSection(
 ) {
   SectionView {
     SettingsActionItem(painterResource(MR.images.ic_code), stringResource(MR.strings.settings_developer_tools), showSettingsModal { DeveloperView(withAuth) })
-    val selectedChannel = remember { appPrefs.appUpdateChannel.state }
-    val values = AppUpdatesChannel.entries.map { it to it.text }
-    ExposedDropDownSettingRow(stringResource(MR.strings.app_check_for_updates), values, selectedChannel) {
-      appPrefs.appUpdateChannel.set(it)
-      setupUpdateChecker()
-    }
+    // The upstream updater must not replace XauXat with a SimpleX installer.
+    // Update controls return once XauXat package signing/replacement is verified.
+
   }
 }
 

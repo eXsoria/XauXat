@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.15)
+
 # Manually downloaded headers because `find_package(JNI REQUIRED)` doesn't work while cross-compiling:
 
 # https://raw.githubusercontent.com/openjdk/jdk/master/src/java.base/share/native/include/jni.h
@@ -11,7 +13,6 @@ elseif(WIN32)
 endif()
 
 # Sets the minimum version of CMake required to build the native library.
-cmake_minimum_required(VERSION 3.10.2)
 
 # Declares and names the project.
 project("app")

@@ -160,6 +160,7 @@ fun showAppUpdateNotice() {
 private var updateCheckerJob: Job = Job()
 fun setupUpdateChecker() = withLongRunningApi {
   updateCheckerJob.cancel()
+  if (!XauXatDesktopBrand.automaticUpdatesEnabled) return@withLongRunningApi
   if (appPrefs.appUpdateChannel.get() == AppUpdatesChannel.DISABLED) {
     return@withLongRunningApi
   }
@@ -177,6 +178,7 @@ private fun createUpdateJob() {
 
 
 fun checkForUpdate() {
+  if (!XauXatDesktopBrand.automaticUpdatesEnabled) return
   Log.d(TAG, "Checking for update")
   val currentSemVer = SemVer.fromCurrentVersionName()
   if (currentSemVer == null) {
@@ -185,7 +187,7 @@ fun checkForUpdate() {
   }
   val client = setupHttpClient()
   try {
-    val request = Request.Builder().url("https://api.github.com/repos/simplex-chat/simplex-chat/releases").addHeader("User-agent", "curl").build()
+    val request = Request.Builder().url("https://api.github.com/repos/eXsoria/XauXat/releases").addHeader("User-agent", "curl").build()
     client.newCall(request).execute().use { response ->
       response.body?.use {
         val body = it.string()
@@ -455,14 +457,14 @@ private suspend fun installAppUpdate(file: File) = withContext(Dispatchers.IO) {
     }
     desktopPlatform.isMac() -> {
       // Default mount point if no other DMGs were mounted before
-      var volume = "/Volumes/SimpleX"
+      var volume = "/Volumes/XauXat"
       try {
         val process = Runtime.getRuntime().exec("hdiutil mount ${file.absolutePath}").onExit().join()
         val startedInstallation = process.exitValue() == 0
         val lines = process.inputReader().use { it.readLines() }
         // This is needed for situations when mount point has non-default path. 
         // For example, when a user already had mounted SimpleX.dmg before and default mount point is not available.
-        // Mac will make volume like /Volumes/SimpleX 1
+        // Mac will make volume like /Volumes/XauXat 1
         val lastLine = lines.lastOrNull()?.substringAfterLast('\t')
         if (!startedInstallation || lastLine == null || !lastLine.lowercase().contains("/volumes/")) {
           Log.e(TAG, "Error starting installation: ${process.inputReader().use { it.readLines().joinToString("\n") }}${process.errorStream.use { String(it.readAllBytes()) }}")
@@ -471,8 +473,8 @@ private suspend fun installAppUpdate(file: File) = withContext(Dispatchers.IO) {
           return@withContext
         }
         volume = lastLine
-        File("/Applications/SimpleX.app").renameTo(File("/Applications/SimpleX-old.app"))
-        val process2 = Runtime.getRuntime().exec(arrayOf("cp", "-R", "${volume}/SimpleX.app", "/Applications")).onExit().join()
+        File("/Applications/XauXat.app").renameTo(File("/Applications/XauXat-old.app"))
+        val process2 = Runtime.getRuntime().exec(arrayOf("cp", "-R", "${volume}/XauXat.app", "/Applications")).onExit().join()
         val copiedSuccessfully = process2.exitValue() == 0
         if (!copiedSuccessfully) {
           Log.e(TAG, "Error copying the app: ${process2.inputReader().use { it.readLines().joinToString("\n") }}${process2.errorStream.use { String(it.readAllBytes()) }}")
@@ -489,10 +491,10 @@ private suspend fun installAppUpdate(file: File) = withContext(Dispatchers.IO) {
         try {
           Runtime.getRuntime().exec(arrayOf("hdiutil", "unmount", volume)).onExit().join()
         } finally {
-          if (!File("/Applications/SimpleX.app").exists()) {
-            File("/Applications/SimpleX-old.app").renameTo(File("/Applications/SimpleX.app"))
+          if (!File("/Applications/XauXat.app").exists()) {
+            File("/Applications/XauXat-old.app").renameTo(File("/Applications/XauXat.app"))
           } else {
-            Runtime.getRuntime().exec("rm -rf /Applications/SimpleX-old.app").onExit().join()
+            Runtime.getRuntime().exec("rm -rf /Applications/XauXat-old.app").onExit().join()
           }
         }
       }

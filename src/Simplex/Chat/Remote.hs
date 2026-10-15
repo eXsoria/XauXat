@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -207,7 +208,17 @@ startRemoteHost rh_ rcAddrPrefs_ port_ = do
         toView $ CEvtNewRemoteHost rhi
       -- set up HTTP transport and remote profile protocol
       disconnected <- toIO $ onDisconnected rhKey' sseq
-      httpClient <- liftError' (httpError remoteHostId) $ attachRevHTTP2Client disconnected tls
+      -- sendRequestDirect can invoke this callback on pollAction itself.
+      -- Clean up on a separate thread so cancelling pollAction cannot abort
+      -- its own cleanup before RemoteHostStopped is emitted. The session
+      -- sequence guard still ignores duplicate/stale disconnect callbacks.
+      let notifyDisconnected = do
+            cleanup <- async $ disconnected `catchAny` (logError . tshow)
+            -- The polling caller is cancelled by cleanup while waiting here;
+            -- other callers wait until the stopped event has been emitted.
+            -- Returning immediately could race a polling error into the UI.
+            void $ waitCatch cleanup
+      httpClient <- liftError' (httpError remoteHostId) $ attachRevHTTP2Client notifyDisconnected tls
       rhClient <- mkRemoteHostClient httpClient sessionKeys sessId storePath hostInfo
       pollAction <- async $ pollEvents remoteHostId rhClient
       withRemoteHostSession rhKey' sseq $ \case
@@ -296,9 +307,17 @@ cancelRemoteHost handlingError = \case
     cancelPendingSession rhs
     closeConnection tls
   RHSessionConnected {rchClient, tls, rhClient = RemoteHostClient {httpClient}, pollAction} -> do
+#if defined(mingw32_HOST_OS)
+    -- Release a blocking Windows TLS read before joining the polling thread.
+    -- The session has already been deregistered, so re-entrant close callbacks
+    -- cannot cancel a replacement session.
+    closeConnection tls `catchAny` (logError . tshow)
+#endif
     uninterruptibleCancel pollAction
     cancelHostClient rchClient `catchAny` (logError . tshow)
+#if !defined(mingw32_HOST_OS)
     closeConnection tls `catchAny` (logError . tshow)
+#endif
     unless handlingError $ closeHTTP2Client httpClient `catchAny` (logError . tshow)
   where
     cancelPendingSession RHPendingSession {rchClient, rhsWaitSession} = do
@@ -694,9 +713,14 @@ cancelRemoteCtrl handlingError = \case
     cancelCtrlClient rcsClient
     closeConnection tls
   RCSessionConnected {rcsClient, tls, http2Server} -> do
+#if defined(mingw32_HOST_OS)
+    closeConnection tls
+#endif
     unless handlingError $ uninterruptibleCancel http2Server
     cancelCtrlClient rcsClient
+#if !defined(mingw32_HOST_OS)
     closeConnection tls
+#endif
 
 deleteRemoteCtrl :: RemoteCtrlId -> CM ()
 deleteRemoteCtrl rcId = do
