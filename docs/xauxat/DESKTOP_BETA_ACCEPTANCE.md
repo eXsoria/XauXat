@@ -10,7 +10,7 @@ These initial packages are unsigned/ad-hoc on macOS and not notarized. Linux ini
 
 ## Link a test iPhone
 
-1. Open XauXat Desktop and select **Link a mobile**. Onboarding may first ask for the local Desktop database passphrase. Keep this separate from the phone's passcode.
+1. Open XauXat Desktop and select **Link a mobile**. Set a custom local database passphrase, separate from the phone's passcode, and leave passphrase saving disabled. The inherited Desktop implementation stores any saved/random passphrase as plaintext in its settings; it does not use an OS keychain. Verify the app asks for your passphrase after reopening, before pairing a live support profile.
 2. Keep the iPhone and Desktop on the same trusted local Wi-Fi for the initial test. Allow XauXat local-network access on iOS and the Desktop application's local-network connection through the OS firewall. Do not forward this port on the router.
 3. In the iPhone chat-list menu choose **Connect to desktop** and scan the Desktop pairing QR code. Compare the full pairing/verification code on both screens before accepting.
 4. Keep the phone online and XauXat open during the first test. The Desktop controls that running profile; it is not an independent cloud-synchronized copy.
