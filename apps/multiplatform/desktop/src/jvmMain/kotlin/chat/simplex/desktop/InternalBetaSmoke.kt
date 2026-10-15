@@ -44,7 +44,8 @@ internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
     check(smokeCommand(controlled, CC.APISetNetworkConfig(blockedRelayConfig)) is CR.CmdOk)
     check(smokeCommand(controlled, CC.StartChat(mainApp = false)) is CR.ChatStarted)
     var storedHostId: Long? = null
-    repeat(2) {
+    repeat(2) { cycle ->
+      println("Native remote smoke cycle ${cycle + 1}: starting pairing")
       val started = smokeCommand(desktop, CC.StartRemoteHost(storedHostId, false, RemoteCtrlAddress("127.0.0.1", "lo"), null))
       check(started is CR.RemoteHostStarted)
       check(started.localAddrs.first().address == "127.0.0.1") { "Remote smoke must advertise loopback" }
@@ -52,6 +53,7 @@ internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
       val desktopCode = awaitSmokeEvent<CR.RemoteHostSessionCode>(desktop).sessionCode
       val controlledCode = awaitSmokeEvent<CR.RemoteCtrlSessionCode>(controlled).sessionCode
       check(desktopCode == controlledCode) { "Remote verification codes disagree" }
+      println("Native remote smoke cycle ${cycle + 1}: verification codes match")
       check(smokeCommand(controlled, CC.VerifyRemoteCtrlSession(controlledCode)) is CR.RemoteCtrlConnected)
       val connected = awaitSmokeEvent<CR.RemoteHostConnected>(desktop)
       val hostId = connected.remoteHost.remoteHostId
@@ -63,10 +65,16 @@ internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
       }
       val local = smokeCommand(desktop, CC.ListUsers())
       check(local is CR.UsersList && local.users.isEmpty()) { "Remote profile leaked into the local profile list" }
+      println("Native remote smoke cycle ${cycle + 1}: remote query and local isolation passed; disconnecting")
       check(smokeCommand(controlled, CC.StopRemoteCtrl()) is CR.CmdOk)
       check(awaitSmokeEvent<CR.RemoteHostStopped>(desktop).remoteHostId_ == hostId)
+      println("Native remote smoke cycle ${cycle + 1}: disconnect passed")
     }
     println("XAUXAT_LOOPBACK_REMOTE_PAIR_VERIFY_QUERY_DISCONNECT_RECONNECT_OK")
+  } catch (failure: Throwable) {
+    // Keep the failing stage visible even if native cleanup itself blocks.
+    failure.printStackTrace()
+    throw failure
   } finally {
     runCatching { smokeCommand(controlled, CC.StopRemoteCtrl()) }
     runCatching { smokeCommand(controlled, CC.ApiStopChat()) }
