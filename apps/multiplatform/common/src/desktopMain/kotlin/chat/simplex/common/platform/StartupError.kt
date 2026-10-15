@@ -16,7 +16,7 @@ fun showStartupError(e: Throwable) {
   try {
     // Win32 edit controls only break lines on CRLF; normalize every line ending to one CRLF so the
     // trace does not render as merged lines (the JVM's own separator is CRLF on Windows, LF elsewhere)
-    showWindowsErrorWindow("SimpleX failed to start", e.stackTraceToString().lines().joinToString("\r\n"))
+    showWindowsErrorWindow("XauXat failed to start", e.stackTraceToString().lines().joinToString("\r\n"))
   } catch (_: Throwable) {
     return // dialog failed to show; let the caller rethrow so the launcher's own box is the fallback
   }
@@ -25,8 +25,8 @@ fun showStartupError(e: Throwable) {
   exitProcess(0)
 }
 
-private const val ISSUES_URL = "https://github.com/simplex-chat/simplex-chat/issues"
-private const val SUPPORT_EMAIL = "chat@simplex.chat"
+private const val ISSUES_URL = "https://github.com/eXsoria/XauXat/issues"
+private const val SUPPORT_URL = "https://github.com/eXsoria/XauXat"
 
 // Win32 constants not defined in jna-platform
 private const val ES_MULTILINE = 0x0004
@@ -62,7 +62,7 @@ private fun showWindowsErrorWindow(title: String, trace: String) {
   val shellExecute = NativeLibrary.getInstance("shell32").getFunction("ShellExecuteW")
   val sendMessageW = user32native.getFunction("SendMessageW")
   val hInstance = Kernel32.INSTANCE.GetModuleHandle(null)
-  val className = "SimpleXStartupError"
+  val className = "XauXatStartupError"
 
   // Paint static backgrounds white to match the window, and draw the two link statics in blue
   val whiteBrush = gdi32.getFunction("GetStockObject").invokePointer(arrayOf<Any?>(Integer.valueOf(WHITE_BRUSH)))
@@ -81,7 +81,7 @@ private fun showWindowsErrorWindow(title: String, trace: String) {
         when (wParam.toInt() and 0xFFFF) {
           OK_BUTTON_ID -> user32.DestroyWindow(hwnd)
           URL_LINK_ID -> open(ISSUES_URL)                 // open the issue tracker in a browser
-          EMAIL_LINK_ID -> open("mailto:$SUPPORT_EMAIL")  // open the mail client
+          EMAIL_LINK_ID -> open(SUPPORT_URL)  // open the XauXat project
         }
         LRESULT(0)
       }
@@ -128,12 +128,12 @@ private fun showWindowsErrorWindow(title: String, trace: String) {
     18, 18, 32, 32, window, null, hInstance, null)
   user32.SendMessage(iconView, STM_SETICON, WPARAM(Pointer.nativeValue(hErrorIcon)), LPARAM(0))
 
-  user32.CreateWindowEx(0, "STATIC", "SimpleX could not start. Copy the error below and report it via:",
+  user32.CreateWindowEx(0, "STATIC", "XauXat could not start. Copy the error below and report it via:",
     WS_CHILD or WS_VISIBLE, 60, 20, cw - 80, 20, window, null, hInstance, null)
   val urlLink = user32.CreateWindowEx(0, "STATIC", ISSUES_URL, WS_CHILD or WS_VISIBLE or SS_NOTIFY,
     60, 46, cw - 80, 18, window, HMENU(Pointer.createConstant(URL_LINK_ID)), hInstance, null)
   urlLinkHwnd = Pointer.nativeValue(urlLink.pointer)
-  val emailLink = user32.CreateWindowEx(0, "STATIC", SUPPORT_EMAIL, WS_CHILD or WS_VISIBLE or SS_NOTIFY,
+  val emailLink = user32.CreateWindowEx(0, "STATIC", SUPPORT_URL, WS_CHILD or WS_VISIBLE or SS_NOTIFY,
     60, 68, cw - 80, 18, window, HMENU(Pointer.createConstant(EMAIL_LINK_ID)), hInstance, null)
   emailLinkHwnd = Pointer.nativeValue(emailLink.pointer)
 

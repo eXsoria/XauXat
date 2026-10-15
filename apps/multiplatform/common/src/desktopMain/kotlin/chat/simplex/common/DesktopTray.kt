@@ -14,6 +14,7 @@ import chat.simplex.common.model.CloseBehavior
 import chat.simplex.common.model.ChatController.appPrefs
 import chat.simplex.common.platform.Log
 import chat.simplex.common.platform.TAG
+import chat.simplex.common.platform.XauXatDesktopBrand
 import chat.simplex.common.ui.theme.isInDarkTheme
 import chat.simplex.common.views.helpers.AlertManager
 import chat.simplex.common.views.helpers.generalGetString
@@ -60,22 +61,16 @@ fun ApplicationScope.SimplexTray() {
       }
     }
   }
-  val iconRes = if (unread > 0) {
-    if (isInDarkTheme()) MR.images.ic_simplex_tray_dot_light else MR.images.ic_simplex_tray_dot
-  } else {
-    if (isInDarkTheme()) MR.images.ic_simplex_tray_light else MR.images.ic_simplex
-  }
-  val tooltip =
-    if (unread > 0) stringResource(MR.strings.tray_tooltip_unread, unread)
-    else stringResource(MR.strings.tray_tooltip)
+  val iconRes = MR.images.xauxat_icon
+  val tooltip = if (unread > 0) "${XauXatDesktopBrand.name} · $unread unread" else XauXatDesktopBrand.name
   Tray(
     icon = painterResource(iconRes),
     tooltip = tooltip,
     onAction = ::showWindow,
     menu = {
-      Item(stringResource(MR.strings.tray_show), onClick = ::showWindow)
+      Item("Open ${XauXatDesktopBrand.name}", onClick = ::showWindow)
       Separator()
-      Item(stringResource(MR.strings.tray_quit), onClick = { exitApplication() })
+      Item("Quit ${XauXatDesktopBrand.name}", onClick = { exitApplication() })
     }
   )
 }

@@ -70,8 +70,9 @@ fun SettingsView(chatModel: ChatModel, setPerformLA: (Boolean) -> Unit, close: (
   }
 }
 
-val simplexTeamUri =
-  "simplex:/a#lrdvu2d8A1GumSmoKb2krQmtKhWXq-tyGpHuM7aMwsw?h=smp6.simplex.im"
+val simplexTeamUri: String
+  get() = if (appPlatform.isDesktop) XauXatDesktopBrand.supportAddress
+  else "simplex:/a#lrdvu2d8A1GumSmoKb2krQmtKhWXq-tyGpHuM7aMwsw?h=smp6.simplex.im"
 
 @Composable
 fun SettingsLayout(
@@ -148,9 +149,13 @@ fun HelpAndSupportView(
 
     SectionView(stringResource(MR.strings.settings_section_title_contact)) {
       if (!chatModel.desktopNoUserNoRemote) {
-        SettingsActionItem(painterResource(MR.images.ic_tag), stringResource(MR.strings.chat_with_the_founder), { uriHandler.openVerifiedSimplexUri(simplexTeamUri) }, textColor = MaterialTheme.colors.primary, disabled = stopped)
+        SettingsActionItem(painterResource(MR.images.ic_tag), if (appPlatform.isDesktop) "Contact XauXat support" else stringResource(MR.strings.chat_with_the_founder), { uriHandler.openVerifiedSimplexUri(simplexTeamUri) }, textColor = MaterialTheme.colors.primary, disabled = stopped)
       }
-      SettingsActionItem(painterResource(MR.images.ic_mail), stringResource(MR.strings.send_us_an_email), { uriHandler.openUriCatching("mailto:chat@simplex.chat") }, textColor = MaterialTheme.colors.primary)
+      if (appPlatform.isDesktop) {
+        SettingsActionItem(painterResource(MR.images.ic_code), "XauXat source and issues", { uriHandler.openUriCatching(XauXatDesktopBrand.sourceUrl) }, textColor = MaterialTheme.colors.primary)
+      } else {
+        SettingsActionItem(painterResource(MR.images.ic_mail), stringResource(MR.strings.send_us_an_email), { uriHandler.openUriCatching("mailto:chat@simplex.chat") }, textColor = MaterialTheme.colors.primary)
+      }
     }
     SectionDividerSpaced()
 

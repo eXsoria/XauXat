@@ -174,8 +174,8 @@ fun SimpleXInfoLayout(
 @Composable
 fun SimpleXLogo() {
   Image(
-    painter = painterResource(if (isInDarkTheme()) MR.images.logo_light else MR.images.logo),
-    contentDescription = stringResource(MR.strings.image_descr_simplex_logo),
+    painter = painterResource(if (appPlatform.isDesktop) MR.images.xauxat_icon else if (isInDarkTheme()) MR.images.logo_light else MR.images.logo),
+    contentDescription = if (appPlatform.isDesktop) "XauXat" else stringResource(MR.strings.image_descr_simplex_logo),
     contentScale = ContentScale.FillWidth,
     modifier = Modifier
       .padding(bottom = 10.dp)
