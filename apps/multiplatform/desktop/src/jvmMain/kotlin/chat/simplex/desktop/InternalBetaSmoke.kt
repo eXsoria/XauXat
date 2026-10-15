@@ -82,6 +82,7 @@ private fun smokeCommand(ctrl: ChatCtrl, command: CC): CR {
 
 private inline fun <reified T : CR> awaitSmokeEvent(ctrl: ChatCtrl): T {
   val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+  val seen = mutableListOf<String>()
   while (System.nanoTime() < deadline) {
     val raw = chatRecvMsgWait(ctrl, 1_000_000)
     if (raw.isNotEmpty()) {
@@ -89,7 +90,12 @@ private inline fun <reified T : CR> awaitSmokeEvent(ctrl: ChatCtrl): T {
       val event = response.result
       if (event is T) return event
       check(response !is API.Error) { "Native smoke event failed: ${response.details}" }
+      check(event !is CR.RemoteCtrlStopped && event !is CR.RemoteHostStopped) {
+        "Remote session stopped before ${T::class.simpleName}: ${response.details}"
+      }
+      check(event !is CR.Response && event !is CR.Invalid) { "Unknown native smoke event: ${response.details}" }
+      if (seen.size < 20) seen.add(response.responseType)
     }
   }
-  error("Timed out waiting for ${T::class.simpleName}")
+  error("Timed out waiting for ${T::class.simpleName}; received ${seen.joinToString()}")
 }

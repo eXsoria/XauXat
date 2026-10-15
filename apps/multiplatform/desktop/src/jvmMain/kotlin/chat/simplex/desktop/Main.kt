@@ -25,23 +25,29 @@ fun main(args: Array<String>) {
   if (args.contentEquals(arrayOf("--xauxat-native-smoke-test"))) {
     // Exercise the packaged JNI/core and real SQLCipher migrations without starting networking.
     // The CI launcher also isolates HOME/APPDATA/XDG and JVM user.home from operator data.
-    initHaskell()
-    val dir = Files.createTempDirectory("xauxat-native-smoke-").toFile()
     try {
-      val migrated = chatMigrateInit(File(dir, "test").absolutePath, "internal-beta-test-key", "yesUp")
-      check((migrated[0] as String).contains("\"type\":\"ok\"")) { "Native database migration failed: ${migrated[0]}" }
-      val ctrl = migrated[1] as Long
-      check(ctrl != 0L)
+      initHaskell()
+      val dir = Files.createTempDirectory("xauxat-native-smoke-").toFile()
       try {
-        check(chatSendCmdRetry(ctrl, "/users", 0).contains("usersList")) { "Native command failed" }
-        verifyInternalBetaRemoteAccess(dir, ctrl)
+        val migrated = chatMigrateInit(File(dir, "test").absolutePath, "internal-beta-test-key", "yesUp")
+        check((migrated[0] as String).contains("\"type\":\"ok\"")) { "Native database migration failed: ${migrated[0]}" }
+        val ctrl = migrated[1] as Long
+        check(ctrl != 0L)
+        try {
+          check(chatSendCmdRetry(ctrl, "/users", 0).contains("usersList")) { "Native command failed" }
+          verifyInternalBetaRemoteAccess(dir, ctrl)
+        } finally {
+          chatCloseStore(ctrl)
+        }
+        println("XAUXAT_NATIVE_SMOKE_OK")
+        System.getenv("XAUXAT_DESKTOP_NATIVE_SMOKE_RESULT")?.let { File(it).writeText("native-ok") }
       } finally {
-        chatCloseStore(ctrl)
+        dir.deleteRecursively()
       }
-      println("XAUXAT_NATIVE_SMOKE_OK")
-      System.getenv("XAUXAT_DESKTOP_NATIVE_SMOKE_RESULT")?.let { File(it).writeText("native-ok") }
-    } finally {
-      dir.deleteRecursively()
+    } catch (e: Throwable) {
+      e.printStackTrace()
+      // Avoid the GUI launcher modal blocking a failed CI probe on Windows.
+      exitProcess(1)
     }
     exitProcess(0)
   }

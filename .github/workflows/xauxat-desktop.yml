@@ -119,8 +119,17 @@ jobs:
         working-directory: apps/multiplatform
         run: ./gradlew --no-daemon --stacktrace :desktop:createDistributable :desktop:${{ matrix.package }} -x :desktop:cmakeBuildAndCopy
       - name: Verify packaged native database and actual GUI startup
+        id: packaged-smoke
         shell: bash
         run: python3 scripts/desktop/smoke-internal-beta.py
+      - name: Preserve failed Windows app image for isolated diagnosis
+        if: failure() && runner.os == 'Windows' && steps.packaged-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: xauxat-desktop-debug-windows-not-validated
+          retention-days: 3
+          if-no-files-found: error
+          path: apps/multiplatform/release/main/app/XauXat/
       - name: Upload internal beta package and validation evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
