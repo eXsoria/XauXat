@@ -4,10 +4,12 @@ import secrets
 import sys
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 import uuid
 
 origin = sys.argv[1].rstrip("/")
-assert origin.startswith("http://127.0.0.1:"), "This synthetic test is restricted to a local container"
+parsed = urlsplit(origin)
+assert parsed.scheme == "http" and parsed.hostname == "127.0.0.1" and parsed.port and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment and parsed.path in ("", "/"), "This synthetic test is restricted to a local container"
 secret = secrets.token_urlsafe(32)
 ticket_id = str(uuid.uuid4())
 data = {"version": 1, "id": ticket_id, "secret": secret, "kind": "support", "reason": "CI integration smoke test", "details": "Synthetic fixture; no real user data", "consent": True, "consentVersion": "2026-10-15"}

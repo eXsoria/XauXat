@@ -158,6 +158,7 @@ struct XauXatSupportComposeView: View {
 
 struct XauXatSupportTrackView: View {
     @State private var receiptText: String
+    @State private var verifiedReceipt: XauXatSupportReceipt?
     @State private var ticket: XauXatSupportTicket?
     @State private var busy = false
     @State private var error: String?
@@ -205,12 +206,19 @@ struct XauXatSupportTrackView: View {
         }
         .navigationTitle("Follow a request")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: receiptText) { _ in
+            ticket = nil; verifiedReceipt = nil; additionalText = ""; reviewed = false
+        }
     }
 
     @MainActor private func check() async {
-        busy = true; error = nil; ticket = nil
+        busy = true; error = nil; ticket = nil; verifiedReceipt = nil
         defer { busy = false }
-        do { ticket = try await XauXatSupportClient.ticket(XauXatSupportReceipt(receiptText)) }
+        do {
+            let receipt = try XauXatSupportReceipt(receiptText)
+            ticket = try await XauXatSupportClient.ticket(receipt)
+            verifiedReceipt = receipt
+        }
         catch { self.error = error.localizedDescription }
     }
 
@@ -219,7 +227,7 @@ struct XauXatSupportTrackView: View {
         busy = true; error = nil
         defer { busy = false }
         do {
-            let receipt = try XauXatSupportReceipt(receiptText)
+            guard let receipt = verifiedReceipt else { throw XauXatSupportError.invalidReceipt }
             if pendingFollowup == nil { pendingFollowup = try XauXatSupportFollowup(additionalText) }
             guard let pendingFollowup else { return }
             ticket = try await XauXatSupportClient.followup(pendingFollowup, receipt: receipt)

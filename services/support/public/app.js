@@ -51,11 +51,16 @@ $('copy').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('receipt').value); $('request-status').textContent = 'Private receipt copied. Store it safely.'; }
   catch { $('receipt').type = 'text'; $('receipt').select(); $('request-status').textContent = 'Select and copy the receipt, then store it safely.'; }
 });
+$('track-receipt').addEventListener('input', () => {
+  tracked = undefined; $('replies').replaceChildren(); $('followup-form').hidden = true;
+  $('followup-text').value = ''; $('followup-consent').checked = false; $('track-status').textContent = '';
+});
 $('track-form').addEventListener('submit', async event => {
   if (pendingFollowup) { event.preventDefault(); $('track-status').textContent = 'Retry the pending message before changing receipts.'; return; }
   event.preventDefault(); const match = /^([0-9a-fA-F-]{36})\.([A-Za-z0-9_-]{43})$/.exec($('track-receipt').value.trim());
   $('replies').replaceChildren(); $('followup-form').hidden = true; tracked = undefined;
   if (!match) { $('track-status').textContent = 'Paste the complete private receipt.'; return; }
+  $('track-receipt').disabled = true; $('track-check').disabled = true;
   $('track-status').textContent = 'Checking…';
   try {
     const ticket = await api('/api/v1/tickets/' + match[1].toLowerCase(), {headers: {Authorization: 'Bearer ' + match[2]}});
@@ -64,6 +69,7 @@ $('track-form').addEventListener('submit', async event => {
     for (const reply of ticket.replies) { const p = document.createElement('p'); p.textContent = (reply.sender === 'support' ? 'XauXat support' : 'You') + ' · ' + new Date(reply.createdAt * 1000).toLocaleString() + ' · ' + reply.text; $('replies').append(p); }
     if (!ticket.replies.length) $('replies').textContent = 'No reply yet. You can check again later.';
   } catch (error) { $('track-status').textContent = error.message; }
+  finally { $('track-receipt').disabled = false; $('track-check').disabled = false; }
 });
 $('followup-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -72,10 +78,10 @@ $('followup-form').addEventListener('submit', async event => {
   const body = JSON.stringify(pendingFollowup);
   if (!pendingFollowup.text || new TextEncoder().encode(body).length > 24576) { pendingFollowup = undefined; $('track-status').textContent = 'Enter a shorter description.'; return; }
   $('followup-send').disabled = true; $('followup-text').disabled = true; $('followup-consent').disabled = true;
-  $('track-receipt').disabled = true;
+  $('track-receipt').disabled = true; $('track-check').disabled = true;
   try {
     await api('/api/v1/tickets/' + tracked.id + '/messages', {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + tracked.secret}, body});
-    pendingFollowup = undefined; $('track-receipt').disabled = false; $('followup-text').value = ''; $('followup-text').disabled = false; $('followup-consent').checked = false; $('followup-consent').disabled = false;
+    pendingFollowup = undefined; $('track-receipt').disabled = false; $('track-check').disabled = false; $('followup-text').value = ''; $('followup-text').disabled = false; $('followup-consent').checked = false; $('followup-consent').disabled = false;
     $('track-status').textContent = 'Additional information received. Check the receipt again to refresh the conversation.';
   } catch (error) { $('track-status').textContent = error.message + ' Retry sends the same message.'; }
   finally { $('followup-send').disabled = false; }
