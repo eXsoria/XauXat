@@ -13,33 +13,8 @@ concurrency:
   # Let native builds finish and preserve their dependency cache before a new run.
   cancel-in-progress: false
 jobs:
-  desktop:
-    name: Desktop JVM checks (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2025, macos-26, macos-15-intel, ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          submodules: recursive
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
-        with:
-          distribution: corretto
-          java-version: '17'
-      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
-      - name: Check XauXat packaging identity and isolation
-        shell: bash
-        run: python3 scripts/desktop/verify-xauxat-identity.py
-      - name: Compile actual Desktop UI and run JVM tests
-        shell: bash
-        working-directory: apps/multiplatform
-        run: ./gradlew --no-daemon --stacktrace :common:desktopTest :desktop:compileKotlinJvm -x :desktop:cmakeBuildAndCopy
   internal-beta:
     name: Internal beta package (${{ matrix.os }})
-    needs: desktop
     strategy:
       fail-fast: false
       matrix:
@@ -62,6 +37,16 @@ jobs:
         with:
           distribution: corretto
           java-version: '17'
+      # Validate before native work, then reuse compiled classes when packaging
+      # on this same runner. Each OS advances after its own source checks pass.
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - name: Check XauXat packaging identity and isolation
+        shell: bash
+        run: python3 scripts/desktop/verify-xauxat-identity.py
+      - name: Compile actual Desktop UI and run JVM tests
+        shell: bash
+        working-directory: apps/multiplatform
+        run: ./gradlew --no-daemon --stacktrace :common:desktopTest :desktop:compileKotlinJvm -x :desktop:cmakeBuildAndCopy
       - uses: haskell-actions/setup@0f8e8c99d88aeb3fbfd523f1ef2c6f762d10d64d
         id: haskell
         with:
@@ -84,7 +69,6 @@ jobs:
           path: ${{ steps.haskell.outputs.cabal-store }}
           key: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-${{ github.sha }}
           restore-keys: xauxat-desktop-${{ matrix.os }}-ghc963-openssl359-${{ hashFiles('cabal.project', 'simplex-chat.cabal') }}-
-      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
       - name: Restore verified OpenSSL build cache
         id: openssl-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
