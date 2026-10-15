@@ -7,6 +7,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
     let first = Recovery.Relay(userId: 1, server: "smp://private-relay-a.example")
     let second = Recovery.Relay(userId: 1, server: "smp://private-relay-b.example")
     var failed: Set<Recovery.Relay> = []
+    var connectingGrace: TimeInterval = 0
     var commands: [Recovery.Scope] = []
     var forces: [Bool] = []
     var applyCount = 0
@@ -35,7 +36,10 @@ typealias Recovery = XauXatConnectionRecoveryManager
             if self.applyFailure { throw Failure.synthetic }
             return self.configurationReconnected
         },
-        failedRelays: { self.summaryCount += 1; return self.failed },
+        failedRelays: {
+            self.summaryCount += 1
+            return Dictionary(uniqueKeysWithValues: self.failed.map { ($0, self.connectingGrace) })
+        },
         reconnect: { scope in
             self.commands.append(scope)
             await self.onReconnect?(scope)
@@ -82,6 +86,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await failuresStayClosedAndDiagnosticsStayPrivate()
         try await failedRelayDoesNotPreventOtherRepairs()
         try await automaticRetriesRespectCooldown()
+        try await connectingSessionsGetTheirNativeTimeBudget()
         try await pendingWorkCanFinishDuringBackoff()
         try await offlineDuringBackoffDoesNotReconnect()
         try await pathFlapsSettleOnce()
@@ -284,6 +289,28 @@ typealias Recovery = XauXatConnectionRecoveryManager
         require(f.commands.count == 3, "Recent global recovery must cover a redundant foreground request")
         try await f.manager.reconnect(.all)
         require(f.commands.count == 4, "Explicit manual retry must bypass the success cooldown")
+    }
+
+    static func connectingSessionsGetTheirNativeTimeBudget() async throws {
+        let f = RecoveryFixture()
+        f.failed = [f.first]
+        f.connectingGrace = 100
+        try await f.manager.reconnect(.automatic, reason: .pendingWork)
+        f.clock += 99
+        try await f.manager.reconnect(.automatic, reason: .pendingWork)
+        require(f.commands.isEmpty && f.forces.isEmpty, "A still-connecting relay must get its native connect/command time budget")
+        f.clock += 1
+        try await f.manager.reconnect(.automatic, reason: .pendingWork)
+        require(f.commands == [.relays([f.first])], "A persistently stalled connection must eventually be recovered")
+        f.clock += 16
+        try await f.manager.reconnect(.automatic, reason: .pendingWork)
+        require(f.commands.count == 1, "A restarted connection must receive a new grace window")
+        f.failed = []
+        try await f.manager.reconnect(.automatic, reason: .pendingWork)
+        f.clock += 200
+        f.failed = [f.first]
+        try await f.manager.reconnect(.automatic, reason: .pendingWork)
+        require(f.commands.count == 1, "A recovered relay cannot inherit an old stall timer on a new incident")
     }
 
     static func pendingWorkCanFinishDuringBackoff() async throws {

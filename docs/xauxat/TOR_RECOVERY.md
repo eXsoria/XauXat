@@ -87,7 +87,13 @@ does not probe, reconnect or rotate Tor. Summary failure is surfaced without a
 global fallback. Each selected relay has a 15-second cooldown; a command failure
 does not prevent attempts for the other selected relays. There is no periodic
 NEWNYM based on elapsed retries. Core acknowledgements, queue management and
-ordinary reconnects remain owned by the native core.
+ordinary reconnects remain owned by the native core. A still-connecting session
+or pending subscription first gets an observed grace window equal to the native
+background connect plus command timeouts (currently 100 seconds with the forced
+proxy defaults). Explicit disconnected session errors are eligible at the next
+backoff check. A successful/empty snapshot clears stale stall timers; reconnects
+start a new grace window, so recovery cannot repeatedly interrupt an ordinary
+Tor connection attempt before its timeout.
 
 Global recovery is retained for explicit global retry, foreground resume, a
 settled network-path change, or a verified replacement SOCKS endpoint. It is

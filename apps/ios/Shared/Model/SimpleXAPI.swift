@@ -130,12 +130,18 @@ extension XauXatConnectionRecoveryManager {
         failedRelays: {
             let userId = try currentUserId("connectionRecovery")
             let summary = try getAgentServersSummary()
-            return Set(summary.currentUserSMP.currentlyUsedSMPServers.compactMap { server in
+            let cfg = getNetCfg()
+            let connectingGrace = TimeInterval(cfg.tcpConnectTimeout.backgroundTimeout + cfg.tcpTimeout.backgroundTimeout) / 1_000_000
+            var failed: [Relay: TimeInterval] = [:]
+            for server in summary.currentUserSMP.currentlyUsedSMPServers {
                 let sessions = server.sessionsOrNew
                 let health = RelayHealth(connected: sessions.ssConnected, connecting: sessions.ssConnecting,
                                          errors: sessions.ssErrors, pendingSubscriptions: server.subsOrNew.ssPending)
-                return health.needsRecovery ? Relay(userId: userId, server: server.smpServer) : nil
-            })
+                guard health.needsRecovery else { continue }
+                let explicitlyFailed = health.connected == 0 && health.connecting == 0 && health.errors > 0
+                failed[Relay(userId: userId, server: server.smpServer)] = explicitlyFailed ? 0 : connectingGrace
+            }
+            return failed
         },
         reconnect: { scope in
             switch scope {

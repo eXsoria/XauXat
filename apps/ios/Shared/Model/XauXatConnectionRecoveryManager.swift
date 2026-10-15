@@ -58,7 +58,9 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         var invalidateTor: () -> Void
         // The pinned core reconnects all sessions itself when config changes.
         var applyTor: () throws -> Bool
-        var failedRelays: () async throws -> Set<Relay>
+        // Relay -> minimum observed stall duration. Explicit failed sessions
+        // may use zero; still-connecting sessions need their native time budget.
+        var failedRelays: () async throws -> [Relay: TimeInterval]
         var reconnect: (Scope) async throws -> Void
         var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
         var sleep: (TimeInterval) async throws -> Void = {
@@ -99,6 +101,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     private var flight: Flight?
     private var lastGlobal: (epoch: Int, context: Context, time: TimeInterval)?
     private var relayAttempts: [Relay: TimeInterval] = [:]
+    private var firstObserved: [Relay: TimeInterval] = [:]
     private var events: [String] = []
     private let startedAt: TimeInterval
 
@@ -155,18 +158,26 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             if scope == .automatic {
                 // No failed/pending session is evidence for leaving healthy
                 // sessions alone, even when a delivery receipt is delayed.
-                let failed = try await dependencies.failedRelays()
+                let failed: [Relay: TimeInterval]
+                do { failed = try await dependencies.failedRelays() }
+                catch { record(reason, "summary_failed"); throw error }
                 try requireCurrent(context, operationEpoch)
                 let now = dependencies.now()
-                let targets = failed.filter {
-                    $0.userId == context.userId && now - (relayAttempts[$0] ?? -.infinity) >= cooldown
+                firstObserved = firstObserved.filter { failed[$0.key] != nil }
+                var targets: Set<Relay> = []
+                for (relay, grace) in failed where relay.userId == context.userId {
+                    if firstObserved[relay] == nil { firstObserved[relay] = now }
+                    if now - firstObserved[relay]! >= max(0, grace),
+                       now - (relayAttempts[relay] ?? -.infinity) >= cooldown {
+                        targets.insert(relay)
+                    }
                 }
                 guard !targets.isEmpty else {
                     state = .monitoring
                     record(reason, "no_eligible_failed_relays")
                     return
                 }
-                scope = .relays(Set(targets))
+                scope = .relays(targets)
             }
             if case let .relays(relays) = scope {
                 guard !relays.isEmpty, relays.allSatisfy({ $0.userId == context.userId }) else {
@@ -191,7 +202,10 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 scope = .all
                 record(reason, "configuration_reconnected_all")
             } else if case let .relays(relays) = scope {
-                for relay in relays { relayAttempts[relay] = dependencies.now() }
+                for relay in relays {
+                    relayAttempts[relay] = dependencies.now()
+                    firstObserved[relay] = dependencies.now()
+                }
                 // Keep this in-memory map bounded when profiles/relays change.
                 relayAttempts = relayAttempts.filter { dependencies.now() - $0.value < 300 }
                 record(reason, "reconnect_selected", count: relays.count)
@@ -216,6 +230,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             try requireCurrent(context, operationEpoch)
             if scope == .all {
                 lastGlobal = (operationEpoch, context, dependencies.now())
+                firstObserved.removeAll()
             }
             state = .monitoring
             record(reason, "command_accepted")
@@ -277,6 +292,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         dependencies.invalidateTor()
         lastGlobal = nil
         relayAttempts.removeAll()
+        firstObserved.removeAll()
         networkTask?.cancel()
         networkSettling = online
         record(.networkChange, online ? "path_online" : "path_offline")
@@ -303,6 +319,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         flight?.task.cancel()
         lastGlobal = nil
         relayAttempts.removeAll()
+        firstObserved.removeAll()
         state = .idle
     }
 
@@ -314,6 +331,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         let context = dependencies.context()
         guard context.active, context.online else { return }
         lastGlobal = (epoch, context, dependencies.now())
+        firstObserved.removeAll()
         record(.foreground, "configuration_reconnected_all")
     }
 
