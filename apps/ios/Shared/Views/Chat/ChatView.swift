@@ -1824,15 +1824,8 @@ struct ChatView: View {
                 markedRead = false
             }
             .actionSheet(item: $actionSheet) { $0.actionSheet }
-            .alert(item: $safetyReport) { report in
-                Alert(
-                    title: Text(report.title),
-                    message: Text(report.disclosure),
-                    primaryButton: .default(Text("Open share sheet")) {
-                        showShareSheet(items: [report.exportText])
-                    },
-                    secondaryButton: .cancel()
-                )
+            .sheet(item: $safetyReport) { report in
+                NavigationView { XauXatSupportComposeView(report: report) }.navigationViewStyle(.stack)
             }
             // skip updating struct on touch if no need to show GoTo button
             .if(touchInProgress || searchIsNotBlank || (chatItem.meta.itemForwarded != nil && chatItem.meta.itemForwarded != .unknown)) {
@@ -2795,12 +2788,7 @@ struct ChatView: View {
             Button(role: .destructive) {
                 var buttons = ReportReason.supportedReasons.map { reason in
                     ActionSheet.Button.default(Text(reason.text)) {
-                        safetyReport = xauXatMessageSafetyReport(
-                            displayName: contact.displayName,
-                            reason: reason,
-                            messageType: safetyReportMessageType(ci),
-                            selectedText: safetyReportMessageText(ci)
-                        )
+                        safetyReport = xauXatMessageSafetyReport(reason: reason)
                     }
                 }
                 buttons.append(.cancel())
@@ -2817,27 +2805,6 @@ struct ChatView: View {
             }
         }
 
-        private func safetyReportMessageText(_ ci: ChatItem) -> String? {
-            guard !xauxatIsOneTimePhoto(ci) else { return nil }
-            let text = ci.content.msgContent?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return text.isEmpty ? nil : text
-        }
-
-        private func safetyReportMessageType(_ ci: ChatItem) -> String {
-            guard let content = ci.content.msgContent else { return "Unknown content" }
-            switch content {
-            case .text: return "Text"
-            case .link: return "Link"
-            case .image: return "Photo (not attached)"
-            case .xauXatImage: return xauxatIsOneTimePhoto(ci) ? "One-time photo (not attached)" : "Photo (not attached)"
-            case .video: return "Video (not attached)"
-            case .voice: return "Voice message (not attached)"
-            case .file: return "File (not attached)"
-            case .report: return "Report"
-            case .chat: return "Chat link"
-            case .unknown: return "Unknown content"
-            }
-        }
 
         var deleteMessagesTitle: LocalizedStringKey {
             let n = deletingItems.count

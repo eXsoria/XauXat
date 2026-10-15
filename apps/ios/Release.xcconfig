@@ -1,3 +1,5 @@
 // Public NTF address and pinned CA fingerprint; contains no APNs credentials.
 XAUXAT_NTF_SERVER_B64 = bnRmOi8vUV9fTDNLT08xT3FlN18zQ2dnMHE2bXdwVkU2UmQyRkFBR2RHV1plZ21qUT1AbmZ0LmV4c29yaWEucHQ6ODQ0Mw==
+// Public native support address; contains no credentials or chat history.
+XAUXAT_SUPPORT_CONTACT_B64 = aHR0cHM6Ly9zbXA1LnNpbXBsZXguaW0vYSN0ZHVHOTVoYmNCLTA2dEJwNXk5YzRrOHFQb05scmtOclI5MHdkWm5zLWJZ
 #include? "Local.xcconfig"

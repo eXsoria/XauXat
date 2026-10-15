@@ -279,6 +279,9 @@
 		E5E418012F83D2CA00252B9E /* OnboardingCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5E418002F83D2CA00252B9E /* OnboardingCards.swift */; };
 		E5E418022F83D2CA00252B9E /* ChannelWebAccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5E418032F83D2CA00252B9E /* ChannelWebAccessView.swift */; };
 		FBB34E2DB42E4CB435B96315 /* Pods_SimpleX_NSE.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F5616F18CA696CC5FB9AACD /* Pods_SimpleX_NSE.framework */; };
+		980A53729B9C47B9A1DAED8A /* XauXatSupportModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507A595F5C3C4EE981A23B0D /* XauXatSupportModels.swift */; };
+		BE4E9F26D5CF4EDDBD5B91DC /* XauXatSupportClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770BC2DC7A484BD2B17C21C8 /* XauXatSupportClient.swift */; };
+		374086B10B2A475C9F019600 /* XauXatSupportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F622903768D34008B2A6D308 /* XauXatSupportView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -719,6 +722,9 @@
 		E5DDBE6F2DC4217900A0EFF0 /* NSEAPITypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEAPITypes.swift; sourceTree = "<group>"; };
 		E5E418002F83D2CA00252B9E /* OnboardingCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingCards.swift; sourceTree = "<group>"; };
 		E5E418032F83D2CA00252B9E /* ChannelWebAccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelWebAccessView.swift; sourceTree = "<group>"; };
+		507A595F5C3C4EE981A23B0D /* XauXatSupportModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatSupportModels.swift; sourceTree = "<group>"; };
+		770BC2DC7A484BD2B17C21C8 /* XauXatSupportClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatSupportClient.swift; sourceTree = "<group>"; };
+		F622903768D34008B2A6D308 /* XauXatSupportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatSupportView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1043,6 +1049,9 @@
 			isa = PBXGroup;
 			children = (
 				643B3B4C2CCFD34B0083A2CF /* NetworkAndServers */,
+				507A595F5C3C4EE981A23B0D /* XauXatSupportModels.swift */,
+				770BC2DC7A484BD2B17C21C8 /* XauXatSupportClient.swift */,
+				F622903768D34008B2A6D308 /* XauXatSupportView.swift */,
 				5CB924D627A8563F00ACCCDD /* SettingsView.swift */,
 				5CB346E62868D76D001FD2EF /* NotificationsView.swift */,
 				5CADE79929211BB900072E13 /* PreferencesView.swift */,
@@ -1656,6 +1665,9 @@
 				5C55A923283CEDE600C4E99E /* SoundPlayer.swift in Sources */,
 				64A779F82DBFDBF200FDEF2F /* MemberSupportView.swift in Sources */,
 				5C93292F29239A170090FFF9 /* ProtocolServersView.swift in Sources */,
+				980A53729B9C47B9A1DAED8A /* XauXatSupportModels.swift in Sources */,
+				BE4E9F26D5CF4EDDBD5B91DC /* XauXatSupportClient.swift in Sources */,
+				374086B10B2A475C9F019600 /* XauXatSupportView.swift in Sources */,
 				5CB924D727A8563F00ACCCDD /* SettingsView.swift in Sources */,
 				5CEACCE327DE9246000BD591 /* ComposeView.swift in Sources */,
 				E51CC1E62C62085600DB91FE /* OneHandUICard.swift in Sources */,

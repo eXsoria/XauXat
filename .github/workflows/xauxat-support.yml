@@ -1,0 +1,33 @@
+name: XauXat support
+on:
+  pull_request:
+    paths: ['services/support-chat/**', 'apps/ios/**', 'scripts/ios/*support*', 'scripts/ios/support-model-tests/**', '.github/workflows/xauxat-support.yml']
+  push:
+    branches: [xauxat/main]
+    paths: ['services/support-chat/**', 'apps/ios/**', 'scripts/ios/*support*', 'scripts/ios/support-model-tests/**', '.github/workflows/xauxat-support.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: xauxat-support-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  deployment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: for script in services/support-chat/*.sh; do bash -n "$script"; done
+      - run: python3 scripts/ios/verify-native-support.py
+  ios-support:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Verify native support destination boundary
+        run: |
+          swiftc apps/ios/Shared/Views/UserSettings/XauXatSupportModels.swift \
+            scripts/ios/support-model-tests/main.swift -o "$RUNNER_TEMP/support-model-tests"
+          "$RUNNER_TEMP/support-model-tests"
+      - name: Type-check native support UI
+        run: bash scripts/ios/check-support-ui.sh

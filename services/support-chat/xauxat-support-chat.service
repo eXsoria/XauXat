@@ -1,0 +1,43 @@
+[Unit]
+Description=XauXat encrypted support profile (official SimpleX CLI)
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=forking
+User=xauxat-support
+Group=xauxat-support
+UMask=0077
+WorkingDirectory=/var/lib/xauxat-support-chat
+Environment=HOME=/var/lib/xauxat-support-chat
+RuntimeDirectory=xauxat-support-chat
+RuntimeDirectoryMode=0700
+PIDFile=/run/xauxat-support-chat/server.pid
+ExecStart=/opt/xauxat-support-chat/start.sh
+Restart=always
+RestartSec=15
+TimeoutStopSec=30
+KillMode=control-group
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/xauxat-support-chat /run/xauxat-support-chat
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+CPUQuota=25%
+MemoryHigh=256M
+MemoryMax=384M
+TasksMax=64
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

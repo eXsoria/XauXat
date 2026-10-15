@@ -12,57 +12,15 @@ import SimpleXChat
 struct XauXatSafetyReport: Identifiable {
     let id = UUID()
     let title: LocalizedStringKey
-    let disclosure: LocalizedStringKey
-    let exportText: String
+    let reason: String
 }
 
-func xauXatContactSafetyReport(displayName: String, reason: ReportReason) -> XauXatSafetyReport {
-    XauXatSafetyReport(
-        title: "Share contact report?",
-        disclosure: "XauXat has no central report server. This prepares only the contact's displayed name and your chosen reason. No messages or chat history are included. You choose where to send it next.",
-        exportText: """
-        XauXat safety report
-
-        Report type: Contact profile
-        Contact display name: \(displayName)
-        Reason: \(reason.text)
-
-        No messages or chat history are included in this report.
-        """
-    )
+func xauXatContactSafetyReport(reason: ReportReason) -> XauXatSafetyReport {
+    XauXatSafetyReport(title: "Report contact", reason: reason.text)
 }
 
-func xauXatMessageSafetyReport(
-    displayName: String,
-    reason: ReportReason,
-    messageType: String,
-    selectedText: String?
-) -> XauXatSafetyReport {
-    let trimmedText = selectedText?.trimmingCharacters(in: .whitespacesAndNewlines)
-    let hasText = trimmedText?.isEmpty == false
-    let disclosure: LocalizedStringKey = hasText
-        ? "XauXat has no central report server. This prepares only the contact's displayed name, your chosen reason, the message type and the selected message text. No other messages, files or chat history are included. You choose where to send it next."
-        : "XauXat has no central report server. This prepares only the contact's displayed name, your chosen reason and the selected message type. Media, files and chat history are not included. You choose where to send it next."
-    let selectedContent = if let trimmedText, !trimmedText.isEmpty {
-        "\nSelected message text:\n\(trimmedText)\n"
-    } else {
-        "\nThe selected message has no text included. Media and files are not attached.\n"
-    }
-
-    return XauXatSafetyReport(
-        title: "Share message report?",
-        disclosure: disclosure,
-        exportText: """
-        XauXat safety report
-
-        Report type: Message or content
-        Contact display name: \(displayName)
-        Reason: \(reason.text)
-        Selected message type: \(messageType)
-        \(selectedContent)
-        No other messages or chat history are included in this report.
-        """
-    )
+func xauXatMessageSafetyReport(reason: ReportReason) -> XauXatSafetyReport {
+    XauXatSafetyReport(title: "Report selected content", reason: reason.text)
 }
 
 func getTopViewController() -> UIViewController? {

@@ -1988,6 +1988,15 @@ private struct XauXatHelpDestination: View {
                         .padding(16)
                 }
 
+                XauXatSectionTitle("SUPPORT & SAFETY", palette: palette)
+                    .padding(.top, 28)
+                XauXatHelpCard(palette: palette) {
+                    NavigationLink { XauXatSupportHomeView() } label: {
+                        Label("Contact XauXat support", systemImage: "bubble.left.and.bubble.right")
+                            .padding(16)
+                    }
+                }
+
                 XauXatSectionTitle("BETA SUPPORT", palette: palette)
                     .padding(.top, 28)
                 XauXatHelpCard(palette: palette) {

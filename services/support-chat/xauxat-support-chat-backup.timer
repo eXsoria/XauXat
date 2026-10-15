@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily encrypted XauXat support profile backup
+
+[Timer]
+OnCalendar=*-*-* 04:20:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+Unit=xauxat-support-chat-backup.service
+
+[Install]
+WantedBy=timers.target
