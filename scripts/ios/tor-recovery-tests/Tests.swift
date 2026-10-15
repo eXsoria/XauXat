@@ -35,6 +35,7 @@ import Tor
         try await manualFailureCannotLeaveReady()
         try await oldManualFailureCannotInvalidateNewReadiness()
         try await deadlineCannotPublishLateSuccess()
+        try await deadlineCancelsOutstandingProbe()
         try await terminatedRuntimeIsNotStartedTwice()
         try await realSOCKSProbeCases()
         print("Tor recovery regression checks passed: \(checks)")
@@ -147,6 +148,20 @@ import Tor
         TorTestState.lastThread!.isFinished = true
         do { _ = try await manager.ensureReady(); fatalError("A terminated runtime is not Ready") } catch { }
         require(TorTestState.threadStarts == 1 && publishedTorPort == nil, "Do not re-enter a stopped C-Tor runtime inside the same app process")
+    }
+
+    static func deadlineCancelsOutstandingProbe() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager(timeout: 200_000_000)
+        var cancelled = false
+        probe.handler = { _ in
+            do { try await Task.sleep(nanoseconds: 10_000_000_000) }
+            catch { cancelled = Task.isCancelled; throw error }
+            return true
+        }
+        do { _ = try await manager.ensureReady(); fatalError("Deadline must finish") } catch { }
+        try await until { cancelled }
+        require(publishedTorPort == nil, "Deadline must cancel the outstanding probe, not leave its socket/task hanging")
     }
 
     static func realSOCKSProbeCases() async throws {

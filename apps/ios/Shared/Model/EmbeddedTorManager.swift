@@ -37,6 +37,7 @@ final class EmbeddedTorManager: ObservableObject {
     private var attempt: UUID?
     private var callbacks: [(Result<UInt16, Error>) -> Void] = []
     private var deadline: Task<Void, Never>?
+    private var routeTask: Task<Void, Never>?
     private var requestingPort = false
     private var recoveryAttempted = false
     private var readinessGeneration = UUID()
@@ -152,6 +153,8 @@ final class EmbeddedTorManager: ObservableObject {
         attempt = id
         readinessGeneration = id
         state = .starting
+        routeTask?.cancel()
+        routeTask = nil
         requestingPort = false
         recoveryAttempted = false
         setXauXatTorSocksPort(nil)
@@ -313,7 +316,7 @@ final class EmbeddedTorManager: ObservableObject {
                     return
                 }
                 self.state = .verifying
-                await self.verifyStartupRoute(port: port, id: id)
+                self.routeTask = Task { await self.verifyStartupRoute(port: port, id: id) }
             }
         }
     }
@@ -333,6 +336,7 @@ final class EmbeddedTorManager: ObservableObject {
                 finish(.success(port), id: id)
                 return
             } catch {
+                guard attempt == id else { return }
                 lastError = error
                 logger.error("XauXat Tor: startup route probe \(attemptNumber, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -362,6 +366,8 @@ final class EmbeddedTorManager: ObservableObject {
             requestingPort = true
             setXauXatTorSocksPort(nil)
             state = .verifying
+            routeTask?.cancel()
+            routeTask = nil
             removeObservers()
             Task { await recover(controller, id: id) }
             return
@@ -369,6 +375,8 @@ final class EmbeddedTorManager: ObservableObject {
         attempt = nil
         deadline?.cancel()
         deadline = nil
+        routeTask?.cancel()
+        routeTask = nil
         removeObservers()
 
         switch result {
