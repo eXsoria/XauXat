@@ -211,7 +211,8 @@ package direct-sqlcipher
 '''
     args = ['cabal', 'build', 'lib:simplex-chat', '-j2', '--constraint=simplexmq +client_library', '--constraint=simplex-chat +client_library']
     if WINDOWS:
-        config += f'package simplex-chat\n  ghc-options: -shared -threaded -optl-L{path(openssl / "lib")} -optl-lcrypto-3-x64 -o libsimplex.dll libsimplex.dll.def\n'
+        # Installed OpenSSL import library is lib/libcrypto.dll.a; its runtime DLL is in bin.
+        config += f'package simplex-chat\n  ghc-options: -shared -threaded -optl-L{path(openssl / "lib")} -optl-lcrypto -o libsimplex.dll libsimplex.dll.def\n'
     elif MAC:
         args += [f'--ghc-options=-optl-Wl,-rpath,@loader_path -optl-Wl,-install_name,@rpath/libsimplex.dylib -optl-Wl,-L{ghc_libdir}/{ARCH}-osx-ghc-{ghc} -optl-lHSrts_thr-ghc{ghc} -optl-lffi']
     else:
