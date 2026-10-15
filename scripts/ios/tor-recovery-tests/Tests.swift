@@ -86,9 +86,10 @@ import Tor
         let start = Task { try await manager.ensureReady() }
         try await until { held != nil }
         manager.invalidateReadiness()
+        probe.handler = { _ in true }
         held!.resume(returning: true)
         _ = try await start.value
-        probe.handler = { _ in true }
+        require(probe.calls == 2 && publishedPorts == [19050], "Startup waiters must receive only a route verified after the last invalidation")
         _ = try await manager.ensureReady(maxAge: 15)
         require(probe.calls == 2, "A probe started before path invalidation cannot grant a reusable lease")
     }

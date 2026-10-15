@@ -77,6 +77,9 @@ for a fresh route check; automatic/foreground follow-up may reuse a verification
 for at most 15 seconds. This lease also requires a live runtime and the managed
 configuration. Path changes and suspension invalidate it, including checks still
 in progress. The ordinary `ensureReady()` default remains a fresh check.
+If a successful probe began before the latest invalidation, its waiters remain
+pending while the manager verifies the latest generation; it cannot publish the
+old result as Ready, including during foreground startup before core recovery.
 
 Pending delivery/subscription recovery keeps the 8/20/45/90-second backoff but
 selects only current-profile relays with pending subscriptions or connecting/error

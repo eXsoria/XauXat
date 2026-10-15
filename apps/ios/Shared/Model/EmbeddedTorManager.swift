@@ -350,6 +350,13 @@ final class EmbeddedTorManager: ObservableObject {
             finish(.failure(EmbeddedTorError.processStopped), id: id, allowRecovery: false)
             return
         }
+        if case .success = result, attemptRevision != routeRevision {
+            // A path/background change happened while this probe was in flight.
+            // Keep every waiter, but do not publish old-path readiness. This
+            // also covers foreground startup, which precedes core recovery.
+            begin()
+            return
+        }
         if case .failure = result, allowRecovery, !recoveryAttempted,
            let thread, !thread.isFinished, authenticated,
            let controller, controller.isConnected {
