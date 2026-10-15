@@ -7,14 +7,14 @@ import sys
 
 MQ_COMMIT = 'efaad8e73436d60f5052f07dda6b71151ad5039b'
 CLIENT_SHA256 = 'd267fa0048210cae9acc2c8ac6dfe4f6e16ec2cdb0b7abc535ee92e8e5424de2'
-PATCHED_CLIENT_SHA256 = '2418bcdd966e38490cad1274ab91053c641d59788fabc66a97e144954eae07db'
+PATCHED_CLIENT_SHA256 = '9730a72efb3194930091b3a8993800046b96cdf8bfe4dd78cf8c4b19e6e041ce'
 PROBE = '        liftIO $ peekBuffered tlsBuffer 100000 (TLS.recvData tlsContext) >>= logDebug . tshow -- should normally be ("", Nothing) here'
 
 
 def patched_client(original):
     assert hashlib.sha256(original.encode()).hexdigest() == CLIENT_SHA256, 'Unexpected pinned MQ client source'
     assert original.count(PROBE) == 1
-    result = original.replace('import Simplex.Messaging.Transport.Buffer (peekBuffered)\n', '').replace('import qualified Network.TLS as TLS\n', '')
+    result = original.replace('import Simplex.Messaging.Transport.Buffer (peekBuffered)\n', '')
     result = result.replace('\\tls@TLS {tlsBuffer, tlsContext} -> runExceptT $ do', '\\tls -> runExceptT $ do')
     return result.replace(
         '        -- pump socket to detect connection problems\n' + PROBE,
