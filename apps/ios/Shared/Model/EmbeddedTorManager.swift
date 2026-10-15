@@ -40,6 +40,9 @@ final class EmbeddedTorManager: ObservableObject {
     private var requestingPort = false
     private var recoveryAttempted = false
     private var readinessGeneration = UUID()
+    private var verifiedAt: TimeInterval?
+    private var routeRevision = 0
+    private var attemptRevision = 0
     private let routeProbe: @MainActor (UInt16, TimeInterval) async throws -> Bool
     private let retryDelay: UInt64
     private let startupTimeout: UInt64
@@ -66,10 +69,23 @@ final class EmbeddedTorManager: ObservableObject {
         }
     }
 
-    func ensureReady() async throws -> UInt16 {
-        try await withCheckedThrowingContinuation { continuation in
+    /// Only coordinated follow-up work may reuse a short-lived verification.
+    /// Foreground/manual callers retain the default fresh check. Network and
+    /// lifecycle changes invalidate this lease even while a check is running.
+    func ensureReady(maxAge: TimeInterval = 0) async throws -> UInt16 {
+        if maxAge > 0, case let .ready(port) = state,
+           thread?.isFinished == false, isXauXatManagedTorConfig(getNetCfg()),
+           let verifiedAt, ProcessInfo.processInfo.systemUptime - verifiedAt < maxAge {
+            return port
+        }
+        return try await withCheckedThrowingContinuation { continuation in
             start { continuation.resume(with: $0) }
         }
+    }
+
+    func invalidateReadiness() {
+        routeRevision += 1
+        verifiedAt = nil
     }
 
     /// Opens a fresh SOCKS5 tunnel through the exact loopback endpoint used by
@@ -92,6 +108,7 @@ final class EmbeddedTorManager: ObservableObject {
             // Do not invalidate an unrelated, newer startup attempt.
             if case let .ready(currentPort) = state, currentPort == port,
                attempt == nil, readinessGeneration == generation {
+                invalidateReadiness()
                 setXauXatTorSocksPort(nil)
                 state = .failed(error.localizedDescription)
             }
@@ -99,33 +116,12 @@ final class EmbeddedTorManager: ObservableObject {
         }
     }
 
-    /// Requests a new Tor circuit after checking the live SOCKS route. If that
-    /// route is broken, readiness recovery may replace its loopback listener.
-    /// The SimpleX core must apply the verified endpoint before reconnecting.
-    func refreshCircuit() async throws {
-        _ = try await ensureReady()
-        guard case .ready = state,
-              let thread, !thread.isFinished,
-              authenticated,
-              let controller, controller.isConnected else {
-            throw EmbeddedTorError.routeNotReady
-        }
-
-        logger.notice("XauXat Tor: requesting NEWNYM after stalled delivery")
-        try await command(controller, "SIGNAL", ["NEWNYM"])
-
-        // NEWNYM keeps the Tor process and SOCKS listener alive. It marks
-        // existing circuits as dirty so new relay streams can use fresh
-        // circuits without reloading Tor's configuration.
-        try await Task.sleep(nanoseconds: 2_000_000_000)
-
-        _ = try await ensureReady()
-    }
-
     private func begin() {
         let id = UUID()
         attempt = id
         readinessGeneration = id
+        attemptRevision = routeRevision
+        verifiedAt = nil
         state = .starting
         routeTask?.cancel()
         routeTask = nil
@@ -376,6 +372,7 @@ final class EmbeddedTorManager: ObservableObject {
 
         switch result {
         case let .success(port):
+            if attemptRevision == routeRevision { verifiedAt = ProcessInfo.processInfo.systemUptime }
             setXauXatTorSocksPort(port)
             state = .ready(port)
             logger.notice("XauXat Tor: embedded client is ready")

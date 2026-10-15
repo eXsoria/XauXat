@@ -3183,6 +3183,7 @@ private struct XauXatNewChatDestination: View {
 
 struct XauXatTorDiagnosticsView: View {
     @ObservedObject private var tor = EmbeddedTorManager.shared
+    @ObservedObject private var recovery = XauXatConnectionRecoveryManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var verification: Verification = .idle
 
@@ -3234,6 +3235,19 @@ struct XauXatTorDiagnosticsView: View {
                 }
 
                 Text("This check sends no chat data. It opens a fresh SOCKS5 tunnel through the same local Tor endpoint and confirms that Tor Project is reachable through it. It does not request, display or store an exit IP.")
+                    .font(.system(size: 12, weight: .regular, design: .default))
+                    .foregroundStyle(palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button("Copy connection diagnostics") {
+                    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+                    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+                    UIPasteboard.general.string = "XauXat \(version) (\(build))\n" + recovery.diagnosticText
+                }
+                .font(.system(size: 14, weight: .bold, design: .default))
+                .foregroundStyle(palette.ink)
+
+                Text("Copies recent recovery stages from this app session. No messages, contacts, server addresses or keys are included. Nothing is uploaded automatically.")
                     .font(.system(size: 12, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)

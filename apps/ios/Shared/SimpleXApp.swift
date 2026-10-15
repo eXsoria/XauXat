@@ -83,6 +83,7 @@ struct SimpleXApp: App {
                     AppSheetState.shared.scenePhaseActive = phase == .active
                     switch (phase) {
                     case .background:
+                        XauXatConnectionRecoveryManager.shared.pause()
                         // --- authentication
                         // see ContentView .onChange(of: scenePhase) for remaining authentication logic
                         if chatModel.contentViewAccessAuthenticated {
@@ -101,6 +102,7 @@ struct SimpleXApp: App {
                     case .active:
                         CallController.shared.shouldSuspendChat = false
                         startEmbeddedTor {
+                            guard scenePhase == .active else { return }
                             resumeChatAfterTor()
                         }
                     default:
@@ -149,6 +151,7 @@ struct SimpleXApp: App {
 
         startChatAndActivate {
             guard chatModel.chatRunning == true else { return }
+            XauXatConnectionRecoveryManager.shared.resume()
             if let ntfResponse = chatModel.notificationResponse {
                 chatModel.notificationResponse = nil
                 NtfManager.shared.processNotificationResponse(ntfResponse)
@@ -156,7 +159,7 @@ struct SimpleXApp: App {
             if appState.inactive {
                 Task {
                     do {
-                        try await reconnectAllServers()
+                        try await reconnectAllServers(reason: .foreground)
                         logger.notice("XauXat foreground recovery reconnected relay sessions")
                     } catch {
                         logger.error("XauXat foreground recovery failed: \(responseError(error), privacy: .public)")

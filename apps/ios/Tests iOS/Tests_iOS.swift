@@ -215,8 +215,6 @@ class Tests_iOS: XCTestCase {
         XCTAssertEqual(XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: 1), 20)
         XCTAssertEqual(XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: 2), 45)
         XCTAssertEqual(XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: 20), 90)
-        XCTAssertFalse(XauXatOutboundDeliveryPolicy.shouldRefreshTor(attempt: 0))
-        XCTAssertTrue(XauXatOutboundDeliveryPolicy.shouldRefreshTor(attempt: 1))
     }
 
 }

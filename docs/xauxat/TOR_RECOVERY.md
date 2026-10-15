@@ -65,3 +65,60 @@ bridges/censorship circumvention are not introduced by this change.
 The reported incident included repeated app restarts without recovery. These
 changes fix observable code defects, but the incident's root cause remains
 unconfirmed until the physical test and exact error distinguish the failing stage.
+
+## Coordinated and selective recovery
+
+`XauXatConnectionRecoveryManager` now serializes the complete operation: select
+targets, verify Tor, apply the current configuration, then reconnect the core.
+Concurrent requests share work only when the operation covers their scope,
+profile and network generation. A global request arriving during a selected-relay
+repair waits for it instead of running alongside it. Manual retries always ask
+for a fresh route check; automatic/foreground follow-up may reuse a verification
+for at most 15 seconds. This lease also requires a live runtime and the managed
+configuration. Path changes and suspension invalidate it, including checks still
+in progress. The ordinary `ensureReady()` default remains a fresh check.
+
+Pending delivery/subscription recovery keeps the 8/20/45/90-second backoff but
+selects only current-profile relays with pending subscriptions or connecting/error
+sessions and no connected session. Pending subscriptions are eligible even if
+other subscriptions to the same relay are active: the native reconnect command
+operates at relay granularity, not individual queues. A healthy/empty snapshot
+does not probe, reconnect or rotate Tor. Summary failure is surfaced without a
+global fallback. Each selected relay has a 15-second cooldown; a command failure
+does not prevent attempts for the other selected relays. There is no periodic
+NEWNYM based on elapsed retries. Core acknowledgements, queue management and
+ordinary reconnects remain owned by the native core.
+
+Global recovery is retained for explicit global retry, foreground resume, a
+settled network-path change, or a verified replacement SOCKS endpoint. It is
+needed when old sessions reference a replaced port. The route probe and its
+bounded control-plane repair remain as documented above; this change does not
+remove the diagnostic dependency on Tor Project or prove every relay reachable.
+
+Every NWPathMonitor callback invalidates freshness, even if its coarse network
+type remains Wi-Fi. Availability changes are forwarded to the core immediately;
+global recovery waits for one second of path stability. Old monitor callbacks
+are discarded. Profile/offline/epoch/cancellation checks are repeated after
+awaits and before issuing relay commands. Entering background pauses the app's
+automatic recovery; it resumes with pending work when the app becomes active.
+This does not grant extra background execution or change the NSE's separate Tor.
+
+The outbound tracker finishes at `sndSent` as well as a receipt/error status.
+Thus missing delivery receipts (`Sent to relay` versus `Delivered`) do not by
+themselves trigger recovery. Publishing tracker changes re-reads current state
+under its lock rather than sending stale booleans to the main actor.
+
+Private connection settings offer **Copy connection diagnostics**. The bounded
+80-event in-memory journal contains app version/build, elapsed seconds, allowlisted
+stages/reasons and aggregate relay counts. It includes no message/contact data,
+server addresses, profile IDs, keys, IPs or raw errors, and uploads nothing.
+It resets when the app process exits. An accepted reconnect command is logged as
+such; it is not evidence of successful message delivery.
+
+The macOS script also compiles the actual coordinator with injected core/route
+boundaries. Checks cover shared operations, scope widening, selective targets,
+cooldowns, path flaps, late results, profile changes, suspension, offline backoff,
+configuration/route failures and diagnostic redaction. Physical validation must
+add a healthy relay alongside a failing relay and verify that recovery does not
+interrupt the healthy conversation, while messages and receipts recover in both
+directions after Wi-Fi/mobile/offline/foreground transitions.
