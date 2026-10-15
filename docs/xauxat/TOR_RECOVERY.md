@@ -94,6 +94,10 @@ settled network-path change, or a verified replacement SOCKS endpoint. It is
 needed when old sessions reference a replaced port. The route probe and its
 bounded control-plane repair remain as documented above; this change does not
 remove the diagnostic dependency on Tor Project or prove every relay reachable.
+The pinned simplexmq `setNetworkConfig` already reconnects all sessions when the
+configuration changes. The adapter compares the actual core configuration and
+reports that reconnect to the coordinator; neither recovery nor foreground adds
+a second reconnect command immediately after applying it.
 
 Every NWPathMonitor callback invalidates freshness, even if its coarse network
 type remains Wi-Fi. Availability changes are forwarded to the core immediately;

@@ -43,13 +43,13 @@ class NetworkObserver {
         prevInfo = info
         // A new path may still be Wi-Fi and online. Process every callback for
         // recovery; send core network-info updates only when those values change.
-        if infoChanged, hasChatCtrl() {
-            do { try apiSetNetworkInfo(info) }
-            catch { logger.error("XauXat could not update core network availability") }
-        }
         DispatchQueue.main.async {
             ChatModel.shared.networkInfo = info
             XauXatConnectionRecoveryManager.shared.networkChanged(online: info.online)
+        }
+        if infoChanged, hasChatCtrl() {
+            do { try apiSetNetworkInfo(info) }
+            catch { logger.error("XauXat could not update core network availability") }
         }
     }
 
@@ -66,5 +66,4 @@ class NetworkObserver {
             .none
         }
     }
-
 }

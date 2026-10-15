@@ -14,6 +14,17 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         let server: String
     }
 
+    struct RelayHealth {
+        let connected: Int
+        let connecting: Int
+        let errors: Int
+        let pendingSubscriptions: Int
+
+        var needsRecovery: Bool {
+            pendingSubscriptions > 0 || (connected == 0 && (errors > 0 || connecting > 0))
+        }
+    }
+
     enum Scope: Hashable {
         case automatic
         case all
@@ -45,7 +56,8 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         var context: () -> Context
         var ensureTor: (_ force: Bool) async throws -> Route
         var invalidateTor: () -> Void
-        var applyTor: () throws -> Void
+        // The pinned core reconnects all sessions itself when config changes.
+        var applyTor: () throws -> Bool
         var failedRelays: () async throws -> Set<Relay>
         var reconnect: (Scope) async throws -> Void
         var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
@@ -54,7 +66,15 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         }
     }
 
-    enum RecoveryError: Error { case unavailable, superseded }
+    enum RecoveryError: LocalizedError {
+        case unavailable, superseded
+        var errorDescription: String? {
+            switch self {
+            case .unavailable: NSLocalizedString("Recovery is waiting for an active app and a network connection.", comment: "connection recovery error")
+            case .superseded: NSLocalizedString("The connection changed during recovery. Please retry.", comment: "connection recovery error")
+            }
+        }
+    }
 
     @Published private(set) var state: State = .idle
     private let dependencies: Dependencies
@@ -160,13 +180,17 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             catch { record(reason, "route_failed"); throw error }
             try requireCurrent(context, operationEpoch)
             // A replaced listener invalidates every old core session. This is
-            // the one automatic reason to widen a relay repair to all servers.
+            // a reason to widen a relay repair to all servers.
             if route.replaced { scope = .all; record(reason, "endpoint_replaced") }
-            do { try dependencies.applyTor() }
+            let configurationReconnected: Bool
+            do { configurationReconnected = try dependencies.applyTor() }
             catch { record(reason, "configuration_failed"); throw error }
             try requireCurrent(context, operationEpoch)
             state = .reconnectingRelays
-            if case let .relays(relays) = scope {
+            if configurationReconnected {
+                scope = .all
+                record(reason, "configuration_reconnected_all")
+            } else if case let .relays(relays) = scope {
                 for relay in relays { relayAttempts[relay] = dependencies.now() }
                 // Keep this in-memory map bounded when profiles/relays change.
                 relayAttempts = relayAttempts.filter { dependencies.now() - $0.value < 300 }
@@ -174,7 +198,10 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             } else {
                 record(reason, "reconnect_all")
             }
-            if case let .relays(relays) = scope {
+            if configurationReconnected {
+                // Do not immediately tear down the sessions the native config
+                // change just restarted (simplexmq efaad8e setNetworkConfig).
+            } else if case let .relays(relays) = scope {
                 var failure: Error?
                 for relay in relays.sorted(by: { $0.server < $1.server }) {
                     try requireCurrent(context, operationEpoch)
@@ -280,6 +307,15 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     }
 
     func resume() { updateLoop() }
+
+    /// Foreground must apply a changed endpoint before activating the core.
+    /// Account for that native global reconnect when activation completes.
+    func configurationApplied() {
+        let context = dependencies.context()
+        guard context.active, context.online else { return }
+        lastGlobal = (epoch, context, dependencies.now())
+        record(.foreground, "configuration_reconnected_all")
+    }
 
     // Only allowlisted stages, elapsed seconds and aggregate counts. Never
     // interpolate errors, server addresses, user IDs or message/contact data.

@@ -126,15 +126,15 @@ extension XauXatConnectionRecoveryManager {
             return Route(port: port, replaced: previousPort != port)
         },
         invalidateTor: { EmbeddedTorManager.shared.invalidateReadiness() },
-        applyTor: { try setNetworkConfig(getNetCfg()) },
+        applyTor: { try applyXauXatRecoveryConfiguration() },
         failedRelays: {
             let userId = try currentUserId("connectionRecovery")
             let summary = try getAgentServersSummary()
             return Set(summary.currentUserSMP.currentlyUsedSMPServers.compactMap { server in
                 let sessions = server.sessionsOrNew
-                let hasPending = server.subsOrNew.ssPending > 0
-                let sessionFailed = sessions.ssConnected == 0 && (sessions.ssErrors > 0 || sessions.ssConnecting > 0)
-                return hasPending || sessionFailed ? Relay(userId: userId, server: server.smpServer) : nil
+                let health = RelayHealth(connected: sessions.ssConnected, connecting: sessions.ssConnecting,
+                                         errors: sessions.ssErrors, pendingSubscriptions: server.subsOrNew.ssPending)
+                return health.needsRecovery ? Relay(userId: userId, server: server.smpServer) : nil
             })
         },
         reconnect: { scope in
@@ -1284,6 +1284,20 @@ func apiSetNetworkInfo(_ networkInfo: UserNetworkInfo) throws {
     let r: ChatResponse2 = try chatSendCmdSync(.apiSetNetworkInfo(networkInfo: networkInfo))
     if case .cmdOk = r { return }
     throw r.unexpected
+}
+
+/// In the pinned simplexmq core, a changed network configuration already calls
+/// reconnectAllServers. Return that fact so recovery does not reconnect twice.
+func applyXauXatRecoveryConfiguration() throws -> Bool {
+    let desired = xauXatManagedTorConfig(getNetCfg())
+    guard isXauXatManagedTorConfig(desired) else {
+        throw RuntimeError("XauXat private route is not ready.")
+    }
+    let response: ChatResponse0 = try chatSendCmdSync(.apiGetNetworkConfig, log: false)
+    guard case let .networkConfig(current) = response else { throw response.unexpected }
+    guard current != desired else { return false }
+    try setNetworkConfig(desired)
+    return true
 }
 
 func reconnectAllServers(reason: XauXatConnectionRecoveryManager.Reason = .manual) async throws {

@@ -16,7 +16,9 @@ typealias Recovery = XauXatConnectionRecoveryManager
     var route = Recovery.Route(port: 19050, replaced: false)
     var ensure: (() async throws -> Void)?
     var applyFailure = false
+    var configurationReconnected = false
     var relayFailure: Recovery.Relay?
+    var onReconnect: ((Recovery.Scope) async -> Void)?
     var sleep: (TimeInterval) async throws -> Void = {
         try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000))
     }
@@ -31,10 +33,12 @@ typealias Recovery = XauXatConnectionRecoveryManager
         applyTor: {
             self.applyCount += 1
             if self.applyFailure { throw Failure.synthetic }
+            return self.configurationReconnected
         },
         failedRelays: { self.summaryCount += 1; return self.failed },
         reconnect: { scope in
             self.commands.append(scope)
+            await self.onReconnect?(scope)
             if let relay = self.relayFailure, scope == .relays([relay]) { throw Failure.synthetic }
         },
         now: { self.clock },
@@ -63,12 +67,16 @@ typealias Recovery = XauXatConnectionRecoveryManager
 
     static func main() async throws {
         try await identicalRequestsShareWholeOperation()
+        try await cancelledWaiterCannotAbortSharedOperation()
+        relayHealthSelection()
         try await automaticRecoveryIsSelective()
         try await emptyAndHealthySnapshotsDoNotDisturbTor()
         try await broaderRequestWaitsForNarrowerOperation()
         try await globalOperationCoversConcurrentAutomaticRequest()
         try await replacementEndpointWidensRecovery()
+        try await changedConfigurationDoesNotReconnectTwice()
         try await newPathCannotReuseOldOperation()
+        try await pathChangeStopsRemainingRelayCommands()
         try await offlineAndProfileChangesDiscardLateResults()
         try await pausePreventsLateReconnect()
         try await failuresStayClosedAndDiagnosticsStayPrivate()
@@ -77,6 +85,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await pendingWorkCanFinishDuringBackoff()
         try await offlineDuringBackoffDoesNotReconnect()
         try await pathFlapsSettleOnce()
+        try await diagnosticJournalIsBounded()
         print("Coordinated recovery regression checks passed: \(checks)")
     }
 
@@ -92,6 +101,34 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await first.value
         try await second.value
         require(f.forces == [true] && f.applyCount == 1 && f.commands == [.all], "Concurrent requests must share Tor, config and core reconnect")
+    }
+
+    static func cancelledWaiterCannotAbortSharedOperation() async throws {
+        let f = RecoveryFixture()
+        var held: CheckedContinuation<Void, Never>?
+        f.ensure = { await withCheckedContinuation { held = $0 } }
+        let owner = Task { try await f.manager.reconnect(.all) }
+        try await until { held != nil }
+        let waiter = Task { try await f.manager.reconnect(.all) }
+        try await Task.sleep(nanoseconds: 10_000_000)
+        owner.cancel()
+        held!.resume()
+        await failed(owner, "Cancelled caller must receive cancellation")
+        try await waiter.value
+        require(f.commands == [.all], "A cancelled waiter must not cancel shared work needed by another caller")
+    }
+
+    static func relayHealthSelection() {
+        require(!Recovery.RelayHealth(connected: 1, connecting: 0, errors: 1, pendingSubscriptions: 0).needsRecovery,
+                "A connected relay must not be reset merely because an error counter is nonzero")
+        require(Recovery.RelayHealth(connected: 1, connecting: 0, errors: 0, pendingSubscriptions: 1).needsRecovery,
+                "A pending subscription on a shared relay still needs recovery")
+        require(Recovery.RelayHealth(connected: 0, connecting: 1, errors: 0, pendingSubscriptions: 0).needsRecovery,
+                "An attempted but stalled connection is eligible after backoff")
+        require(Recovery.RelayHealth(connected: 0, connecting: 0, errors: 1, pendingSubscriptions: 0).needsRecovery,
+                "An errored disconnected session needs recovery")
+        require(!Recovery.RelayHealth(connected: 0, connecting: 0, errors: 0, pendingSubscriptions: 0).needsRecovery,
+                "An unused relay is not evidence of a failed connection")
     }
 
     static func automaticRecoveryIsSelective() async throws {
@@ -145,6 +182,20 @@ typealias Recovery = XauXatConnectionRecoveryManager
         require(f.commands == [.all] && f.applyCount == 1, "A replaced SOCKS endpoint must be applied before reconnecting every old session")
     }
 
+    static func changedConfigurationDoesNotReconnectTwice() async throws {
+        let f = RecoveryFixture()
+        f.failed = [f.first]
+        f.configurationReconnected = true
+        try await f.manager.reconnect(.automatic, reason: .pendingWork)
+        require(f.applyCount == 1 && f.commands.isEmpty, "Native configuration reconnect must not be followed by a duplicate reconnect command")
+        try await f.manager.reconnect(.all, reason: .foreground)
+        require(f.forces.count == 1, "Native global reconnect must satisfy a recent foreground request")
+        let foreground = RecoveryFixture()
+        foreground.manager.configurationApplied()
+        try await foreground.manager.reconnect(.automatic, reason: .pendingWork)
+        require(foreground.commands.isEmpty && foreground.forces.isEmpty, "Foreground config application must cover immediate pending recovery")
+    }
+
     static func newPathCannotReuseOldOperation() async throws {
         let f = RecoveryFixture()
         var held: CheckedContinuation<Void, Never>?
@@ -158,6 +209,19 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await until { f.commands.count == 1 }
         require(f.forces == [true, true] && f.commands == [.all] && f.applyCount == 1, "Latest path must force a fresh verification and exactly one reconnect")
         require(f.invalidations == 1, "Even same-type online paths must invalidate route freshness")
+    }
+
+    static func pathChangeStopsRemainingRelayCommands() async throws {
+        let f = RecoveryFixture()
+        var held: CheckedContinuation<Void, Never>?
+        f.onReconnect = { _ in await withCheckedContinuation { held = $0 } }
+        let operation = Task { try await f.manager.reconnect(.relays([f.first, f.second])) }
+        try await until { held != nil }
+        f.context.online = false
+        f.manager.networkChanged(online: false)
+        held!.resume()
+        await failed(operation, "An old relay batch must stop when the path changes")
+        require(f.commands.count == 1, "Remaining relay commands cannot run after a path change")
     }
 
     static func offlineAndProfileChangesDiscardLateResults() async throws {
@@ -258,5 +322,10 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await Task.sleep(nanoseconds: 30_000_000)
         require(f.commands == [.all] && f.forces == [true] && f.invalidations == 3, "Flapping paths must produce one fresh recovery after settling")
     }
-}
 
+    static func diagnosticJournalIsBounded() async throws {
+        let f = RecoveryFixture()
+        for _ in 0..<100 { try await f.manager.reconnect(.automatic, reason: .pendingWork) }
+        require(f.manager.diagnosticText.split(separator: "\n").count == 81, "Diagnostic journal must retain at most 80 events plus its header")
+    }
+}

@@ -141,8 +141,9 @@ struct SimpleXApp: App {
         let appState = AppChatState.shared.value
         guard appState != .stopped else { return }
 
+        var configurationReconnected = false
         if hasChatCtrl(), chatModel.currentUser != nil {
-            do { try setNetworkConfig(getNetCfg()) }
+            do { configurationReconnected = try applyXauXatRecoveryConfiguration() }
             catch {
                 logger.error("XauXat could not apply its verified Tor route before resuming")
                 return
@@ -151,6 +152,7 @@ struct SimpleXApp: App {
 
         startChatAndActivate {
             guard chatModel.chatRunning == true else { return }
+            if configurationReconnected { XauXatConnectionRecoveryManager.shared.configurationApplied() }
             XauXatConnectionRecoveryManager.shared.resume()
             if let ntfResponse = chatModel.notificationResponse {
                 chatModel.notificationResponse = nil
@@ -159,7 +161,7 @@ struct SimpleXApp: App {
             if appState.inactive {
                 Task {
                     do {
-                        try await reconnectAllServers(reason: .foreground)
+                        if !configurationReconnected { try await reconnectAllServers(reason: .foreground) }
                         logger.notice("XauXat foreground recovery reconnected relay sessions")
                     } catch {
                         logger.error("XauXat foreground recovery failed: \(responseError(error), privacy: .public)")
