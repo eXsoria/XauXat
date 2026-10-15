@@ -23,6 +23,10 @@ import kotlinx.serialization.decodeFromString
  * Connections use a loopback invitation; the native listener uses wildcard binding.
  */
 internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
+  System.getenv("XAUXAT_DESKTOP_EXTERNAL_PEER_SMOKE")?.let {
+    verifyExternalSmokePeer(dir, desktop, File(it))
+    return
+  }
   val migrated = chatMigrateInit(File(dir, "controlled").absolutePath, "internal-beta-test-key", "yesUp")
   check((migrated[0] as String).contains("\"type\":\"ok\"")) { "Controlled test database failed to migrate" }
   val controlled = migrated[1] as Long
@@ -70,6 +74,35 @@ internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
   }
 }
 
+/** An owned external CLI peer verifies the Desktop controller across OSes.
+ * The operator harness compares both codes before issuing CLI verification.
+ */
+private fun verifyExternalSmokePeer(dir: File, desktop: ChatCtrl, peer: File) {
+  check(peer.isDirectory && peer.list().orEmpty().isEmpty()) { "External probe directory must be fresh and empty" }
+  configureSmokePaths(desktop, File(dir, "desktop-files"))
+  check(smokeCommand(desktop, CC.SetLocalDeviceName("XauXat Windows Probe")) is CR.CmdOk)
+  var storedHostId: Long? = null
+  repeat(2) { cycle ->
+    val started = smokeCommand(desktop, CC.StartRemoteHost(storedHostId, false, RemoteCtrlAddress("127.0.0.1", "lo"), 12346))
+    check(started is CR.RemoteHostStarted && started.localAddrs.first().address == "127.0.0.1")
+    File(peer, "invitation-$cycle").writeText(started.invitation + "\n")
+    val code = awaitSmokeEvent<CR.RemoteHostSessionCode>(desktop, 120).sessionCode
+    File(peer, "desktop-code-$cycle").writeText(code + "\n")
+    val connected = awaitSmokeEvent<CR.RemoteHostConnected>(desktop, 120)
+    val hostId = connected.remoteHost.remoteHostId
+    check(storedHostId == null || storedHostId == hostId)
+    storedHostId = hostId
+    val remote = json.decodeFromString<API>(chatSendRemoteCmdRetry(desktop, hostId.toInt(), CC.ListUsers().cmdString, 0)).result
+    check(remote is CR.UsersList && remote.users.single().user.profile.displayName == "XauXatDesktopProbe")
+    val local = smokeCommand(desktop, CC.ListUsers())
+    check(local is CR.UsersList && local.users.isEmpty())
+    File(peer, "query-ok-$cycle").writeText("ok\n")
+    check(awaitSmokeEvent<CR.RemoteHostStopped>(desktop, 120).remoteHostId_ == hostId)
+    File(peer, "cycle-done-$cycle").writeText("ok\n")
+  }
+  println("XAUXAT_EXTERNAL_PEER_PAIR_VERIFY_QUERY_DISCONNECT_RECONNECT_OK")
+}
+
 private fun configureSmokePaths(ctrl: ChatCtrl, dir: File) {
   val paths = listOf("files", "tmp", "assets", "remote_hosts").map { File(dir, it).absolutePath }
   check(smokeCommand(ctrl, CC.ApiSetAppFilePaths(paths[0], paths[1], paths[2], paths[3])) is CR.CmdOk)
@@ -80,8 +113,8 @@ private fun smokeCommand(ctrl: ChatCtrl, command: CC): CR {
   return response.result ?: error("Native smoke command ${command.cmdType} failed: ${response.details}")
 }
 
-private inline fun <reified T : CR> awaitSmokeEvent(ctrl: ChatCtrl): T {
-  val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+private inline fun <reified T : CR> awaitSmokeEvent(ctrl: ChatCtrl, seconds: Long = 30): T {
+  val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds)
   val seen = mutableListOf<String>()
   while (System.nanoTime() < deadline) {
     val raw = chatRecvMsgWait(ctrl, 1_000_000)
@@ -93,7 +126,12 @@ private inline fun <reified T : CR> awaitSmokeEvent(ctrl: ChatCtrl): T {
       check(event !is CR.RemoteCtrlStopped && event !is CR.RemoteHostStopped) {
         "Remote session stopped before ${T::class.simpleName}: ${response.details}"
       }
-      check(event !is CR.Response && event !is CR.Invalid) { "Unknown native smoke event: ${response.details}" }
+      // The core can emit unrelated newer events (e.g. connectionsDiff), which
+      // the UI deliberately preserves as CR.Response rather than typed events.
+      val expectedType = T::class.simpleName.orEmpty().replaceFirstChar { it.lowercase() }
+      check(event !is CR.Invalid && !(event is CR.Response && event.type == expectedType)) {
+        "Cannot decode expected native smoke event: ${response.details}"
+      }
       if (seen.size < 20) seen.add(response.responseType)
     }
   }

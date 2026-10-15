@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -296,9 +297,17 @@ cancelRemoteHost handlingError = \case
     cancelPendingSession rhs
     closeConnection tls
   RHSessionConnected {rchClient, tls, rhClient = RemoteHostClient {httpClient}, pollAction} -> do
+#if defined(mingw32_HOST_OS)
+    -- Release a blocking Windows TLS read before joining the polling thread.
+    -- The session has already been deregistered, so re-entrant close callbacks
+    -- cannot cancel a replacement session.
+    closeConnection tls `catchAny` (logError . tshow)
+#endif
     uninterruptibleCancel pollAction
     cancelHostClient rchClient `catchAny` (logError . tshow)
+#if !defined(mingw32_HOST_OS)
     closeConnection tls `catchAny` (logError . tshow)
+#endif
     unless handlingError $ closeHTTP2Client httpClient `catchAny` (logError . tshow)
   where
     cancelPendingSession RHPendingSession {rchClient, rhsWaitSession} = do
@@ -694,9 +703,14 @@ cancelRemoteCtrl handlingError = \case
     cancelCtrlClient rcsClient
     closeConnection tls
   RCSessionConnected {rcsClient, tls, http2Server} -> do
+#if defined(mingw32_HOST_OS)
+    closeConnection tls
+#endif
     unless handlingError $ uninterruptibleCancel http2Server
     cancelCtrlClient rcsClient
+#if !defined(mingw32_HOST_OS)
     closeConnection tls
+#endif
 
 deleteRemoteCtrl :: RemoteCtrlId -> CM ()
 deleteRemoteCtrl rcId = do

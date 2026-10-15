@@ -81,8 +81,8 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: .desktop-beta-build/core
-          key: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py') }}-${{ github.sha }}
-          restore-keys: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py') }}-
+          key: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py', 'scripts/desktop/patch-windows-remote-peer.py') }}-${{ github.sha }}
+          restore-keys: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py', 'scripts/desktop/patch-windows-remote-peer.py') }}-
       - name: Update Hackage index
         working-directory: ${{ runner.temp }}
         run: cabal update
@@ -113,17 +113,26 @@ jobs:
         continue-on-error: true
         with:
           path: .desktop-beta-build/core
-          key: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py') }}-${{ github.sha }}
+          key: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py', 'scripts/desktop/patch-windows-remote-peer.py') }}-${{ github.sha }}
+      - name: Create the native app image
+        shell: bash
+        working-directory: apps/multiplatform
+        run: ./gradlew --no-daemon --stacktrace :desktop:createDistributable -x :desktop:cmakeBuildAndCopy
+      - name: Check Windows native protocol before compressing the MSI
+        id: early-native
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python3 scripts/desktop/smoke-internal-beta.py --native-only
       - name: Package internal beta on its target OS
         shell: bash
         working-directory: apps/multiplatform
-        run: ./gradlew --no-daemon --stacktrace :desktop:createDistributable :desktop:${{ matrix.package }} -x :desktop:cmakeBuildAndCopy
+        run: ./gradlew --no-daemon --stacktrace :desktop:${{ matrix.package }} -x :desktop:cmakeBuildAndCopy
       - name: Verify packaged native database and actual GUI startup
         id: packaged-smoke
         shell: bash
         run: python3 scripts/desktop/smoke-internal-beta.py
       - name: Preserve failed Windows app image for isolated diagnosis
-        if: failure() && runner.os == 'Windows' && steps.packaged-smoke.outcome == 'failure'
+        if: failure() && runner.os == 'Windows' && (steps.early-native.outcome == 'failure' || steps.packaged-smoke.outcome == 'failure')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: xauxat-desktop-debug-windows-not-validated

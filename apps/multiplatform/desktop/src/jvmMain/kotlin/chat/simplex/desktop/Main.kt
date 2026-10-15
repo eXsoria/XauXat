@@ -46,7 +46,12 @@ fun main(args: Array<String>) {
       }
     } catch (e: Throwable) {
       e.printStackTrace()
-      // Avoid the GUI launcher modal blocking a failed CI probe on Windows.
+      // The Windows GUI launcher can show a modal even after System.exit(1).
+      // CI treats the marker as the result and reports this failure itself.
+      System.getenv("XAUXAT_DESKTOP_NATIVE_SMOKE_RESULT")?.let {
+        File(it).writeText("native-failed\n" + e.stackTraceToString())
+        exitProcess(0)
+      }
       exitProcess(1)
     }
     exitProcess(0)

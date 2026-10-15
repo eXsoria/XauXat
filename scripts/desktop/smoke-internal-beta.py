@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import platform
 import subprocess
+import sys
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
@@ -15,7 +16,9 @@ image = release / 'app' / ('xauxat' if system == 'Linux' else 'XauXat' + ('.app'
 exe = image / ('Contents/MacOS/XauXat' if system == 'Darwin' else 'XauXat.exe' if system == 'Windows' else 'bin/xauxat')
 assert exe.is_file(), f'Missing packaged executable: {exe}'
 results = {}
-for stage in ('native', 'ui'):
+native_only = sys.argv[1:] == ['--native-only']
+assert not sys.argv[1:] or native_only, 'Unknown smoke option'
+for stage in (('native',) if native_only else ('native', 'ui')):
     with tempfile.TemporaryDirectory(prefix='xauxat-package-smoke-') as tmp:
         home = Path(tmp)
         marker = home / 'result.txt'
@@ -38,9 +41,12 @@ for stage in ('native', 'ui'):
                 process.wait()
                 raise RuntimeError(f'{stage} smoke timed out: {log.read_text(encoding="utf-8", errors="replace")}')
         if code != 0 or not marker.exists() or marker.read_text() != f'{stage}-ok':
-            raise RuntimeError(f'{stage} packaged smoke failed ({code}): {log.read_text(encoding="utf-8", errors="replace")}')
+            status = marker.read_text(encoding='utf-8', errors='replace') if marker.exists() else 'no result marker'
+            raise RuntimeError(f'{stage} packaged smoke failed ({code}): {status}\n{log.read_text(encoding="utf-8", errors="replace")}')
         results[stage] = 'passed'
         print(f'Packaged {stage} smoke passed', flush=True)
+if native_only:
+    raise SystemExit(0)
 result = release / 'PACKAGED-SMOKE.json'
 result.write_text(json.dumps({'system': system, 'architecture': platform.machine(),
                              'image': image.name, 'checks': results,

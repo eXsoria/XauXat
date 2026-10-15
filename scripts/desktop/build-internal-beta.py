@@ -8,6 +8,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import urllib.request
 import zipfile
@@ -241,9 +242,19 @@ package direct-sqlcipher
         args += [f'--ghc-options=-optl-Wl,-rpath,@loader_path -optl-Wl,-install_name,@rpath/libsimplex.dylib -optl-Wl,-L{ghc_libdir}/{ARCH}-osx-ghc-{ghc} -optl-lHSrts_thr-ghc{ghc} -optl-lffi']
     else:
         args += ['--ghc-options=-optl-Wl,-rpath,$ORIGIN -optl-Wl,-soname,libsimplex.so -flink-rts -threaded']
-    local = ROOT / 'cabal.project.local'
-    if local.exists():
+    project = ROOT / 'cabal.project.xauxat-desktop' if WINDOWS else None
+    local = ROOT / ('cabal.project.xauxat-desktop.local' if WINDOWS else 'cabal.project.local')
+    if local.exists() or (project is not None and project.exists()):
         raise RuntimeError('Refusing to overwrite an existing cabal.project.local')
+    if project is not None:
+        patch = ROOT / 'scripts/desktop/patch-windows-remote-peer.py'
+        original = (ROOT / 'cabal.project').read_text(encoding='utf-8')
+        pin = '    tag: efaad8e73436d60f5052f07dda6b71151ad5039b\n'
+        if original.count(pin) != 1:
+            raise RuntimeError('Expected the reviewed MQ revision in cabal.project')
+        hook = f'    post-checkout-command: "{path(sys.executable)}" "{path(patch)}" {digest(patch)}\n'
+        project.write_text(original.replace(pin, pin + hook), encoding='utf-8')
+        args += [f'--project-file={project.name}']
     local.write_text(config, encoding='utf-8')
     settings = ghc_libdir / 'settings'
     original = settings.read_bytes() if WINDOWS else None
@@ -259,6 +270,8 @@ package direct-sqlcipher
         if original is not None:
             settings.write_bytes(original)
         local.unlink()
+        if project is not None:
+            project.unlink()
     LIBS.mkdir(parents=True, exist_ok=True)
     if WINDOWS:
         copy_file(ROOT / 'libsimplex.dll', LIBS / 'libsimplex.dll')
@@ -279,7 +292,7 @@ package direct-sqlcipher
 def cached_core(openssl):
     source = hashlib.sha256()
     source.update(run('git', 'rev-parse', 'HEAD:src', capture=True).strip().encode())
-    for name in ('cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py'):
+    for name in ('cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py', 'scripts/desktop/patch-windows-remote-peer.py'):
         source.update(name.encode())
         source.update((ROOT / name).read_bytes())
     inputs = {
@@ -380,6 +393,8 @@ def build_jni(core_origin):
         'core': 'built from this repository source; not an upstream app binary',
         'native_core_build_commit': core_origin['producer_commit'],
         'native_core_source_sha256': core_origin['inputs']['source_sha256'],
+        'simplexmq_commit': 'efaad8e73436d60f5052f07dda6b71151ad5039b',
+        'windows_rcp_adjustment_sha256': digest(ROOT / 'scripts/desktop/patch-windows-remote-peer.py') if WINDOWS else None,
         'ghc': '9.6.3', 'openssl': OPENSSL_VERSION, 'openssl_source_sha256': OPENSSL_HASH,
         'vlc': 'v3.0.23-2', 'vlc_archive_sha256': VLC_HASHES[f'{OS}-{ARCH}'],
         'target': f'{OS}-{ARCH}', 'distribution': 'internal beta; unsigned/ad-hoc macOS; not notarized',
