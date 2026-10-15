@@ -2788,12 +2788,7 @@ struct ChatView: View {
             Button(role: .destructive) {
                 var buttons = ReportReason.supportedReasons.map { reason in
                     ActionSheet.Button.default(Text(reason.text)) {
-                        safetyReport = xauXatMessageSafetyReport(
-                            displayName: contact.displayName,
-                            reason: reason,
-                            messageType: safetyReportMessageType(ci),
-                            selectedText: safetyReportMessageText(ci)
-                        )
+                        safetyReport = xauXatMessageSafetyReport(reason: reason)
                     }
                 }
                 buttons.append(.cancel())
@@ -2810,37 +2805,6 @@ struct ChatView: View {
             }
         }
 
-        private func safetyReportMessageText(_ ci: ChatItem) -> String? {
-            guard !xauxatIsOneTimePhoto(ci), !xauXatIsAnyCodeLockedContent(ci.content.text),
-                  let content = ci.content.msgContent else { return nil }
-            switch content {
-            case .text, .link: break
-            default: return nil
-            }
-            let text = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty ? nil : text
-        }
-
-        private func safetyReportMessageType(_ ci: ChatItem) -> String {
-            guard let content = ci.content.msgContent else { return "Unknown content" }
-            switch content {
-            case .text: return "Text"
-            case .link: return "Link"
-            case .image: return "Photo (not attached)"
-            case .xauXatImage: return xauxatIsOneTimePhoto(ci) ? "One-time photo (not attached)" : "Photo (not attached)"
-            case .video: return "Video (not attached)"
-            case .voice: return "Voice message (not attached)"
-            case .file: return "File (not attached)"
-            case .report: return "Report"
-            case .chat: return "Chat link"
-            case .unknown: return "Unknown content"
-            }
-        }
-
-        var deleteMessagesTitle: LocalizedStringKey {
-            let n = deletingItems.count
-            return n == 1 ? "Delete message?" : "Delete \(n) messages?"
-        }
 
         private func selectUnselectChatItem(select: Bool, _ ci: ChatItem) {
             selectedChatItems = selectedChatItems ?? []

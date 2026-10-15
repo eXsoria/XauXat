@@ -673,7 +673,7 @@ struct ChatInfoView: View {
         Button(role: .destructive) {
             var buttons = ReportReason.supportedReasons.map { reason in
                 ActionSheet.Button.default(Text(reason.text)) {
-                    safetyReport = xauXatContactSafetyReport(displayName: contact.displayName, reason: reason)
+                    safetyReport = xauXatContactSafetyReport(reason: reason)
                 }
             }
             buttons.append(.cancel())

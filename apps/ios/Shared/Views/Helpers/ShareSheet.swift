@@ -12,21 +12,15 @@ import SimpleXChat
 struct XauXatSafetyReport: Identifiable {
     let id = UUID()
     let title: LocalizedStringKey
-    let kind: XauXatSupportKind
     let reason: String
-    let contactName: String
-    let messageType: String?
-    let selectedText: String?
 }
 
-func xauXatContactSafetyReport(displayName: String, reason: ReportReason) -> XauXatSafetyReport {
-    XauXatSafetyReport(title: "Report contact", kind: .contactReport, reason: reason.text,
-                      contactName: displayName, messageType: nil, selectedText: nil)
+func xauXatContactSafetyReport(reason: ReportReason) -> XauXatSafetyReport {
+    XauXatSafetyReport(title: "Report contact", reason: reason.text)
 }
 
-func xauXatMessageSafetyReport(displayName: String, reason: ReportReason, messageType: String, selectedText: String?) -> XauXatSafetyReport {
-    XauXatSafetyReport(title: "Report selected content", kind: .messageReport, reason: reason.text,
-                      contactName: displayName, messageType: messageType, selectedText: selectedText)
+func xauXatMessageSafetyReport(reason: ReportReason) -> XauXatSafetyReport {
+    XauXatSafetyReport(title: "Report selected content", reason: reason.text)
 }
 
 func getTopViewController() -> UIViewController? {

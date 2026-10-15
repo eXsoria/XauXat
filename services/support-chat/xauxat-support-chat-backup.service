@@ -1,0 +1,11 @@
+[Unit]
+Description=Consistent encrypted backup of the XauXat support profile
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/opt/xauxat-support-chat/backup.sh
+Nice=15
+CPUQuota=25%
+MemoryMax=128M
+TimeoutStartSec=300
