@@ -18,3 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: bash scripts/ios/test-tor-recovery.sh
+  control-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: docker build -t xauxat-tor-control:test scripts/ios/tor-recovery-tests
+      - name: Verify real Tor control commands without Internet access
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --memory 128m --pids-limit 48 \
+            --tmpfs /tmp:size=16m \
+            --mount type=bind,src="$PWD/scripts/ios/tor-recovery-tests",dst=/tests,readonly \
+            xauxat-tor-control:test python3 /tests/control-contract.py

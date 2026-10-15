@@ -139,7 +139,7 @@ struct SimpleXApp: App {
         let appState = AppChatState.shared.value
         guard appState != .stopped else { return }
 
-        if hasChatCtrl() {
+        if hasChatCtrl(), chatModel.currentUser != nil {
             do { try setNetworkConfig(getNetCfg()) }
             catch {
                 logger.error("XauXat could not apply its verified Tor route before resuming")

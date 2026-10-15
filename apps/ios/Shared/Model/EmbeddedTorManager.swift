@@ -84,6 +84,8 @@ final class EmbeddedTorManager: ObservableObject {
         let generation = readinessGeneration
         do {
             guard try await routeProbe(port, timeout) else { throw EmbeddedTorError.checkFailed }
+            guard readinessGeneration == generation, case let .ready(currentPort) = state,
+                  currentPort == port else { throw EmbeddedTorError.routeNotReady }
             return true
         } catch {
             // A failed manual check must not leave a green Ready indicator.
@@ -563,7 +565,7 @@ enum TorSOCKSProbe {
                     throw TorSOCKSProbeError.failed(.destination)
                 }
 
-                let http = "GET /api/ip HTTP/1.1\r\nHost: check.torproject.org\r\nConnection: close\r\n\r\n"
+                let http = "HEAD / HTTP/1.1\r\nHost: check.torproject.org\r\nConnection: close\r\n\r\n"
                 stage = .response
                 try await send(Data(http.utf8), on: connection)
                 // TCP preserves byte order, not packet boundaries. Even "HTTP/" may

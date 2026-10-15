@@ -233,6 +233,9 @@ final class SOCKSFixture {
             request.append(try await read(connection, count: 1))
             guard request.count < 1024 else { fatalError("Unexpected route-check request") }
         }
+        guard String(data: request, encoding: .utf8)?.hasPrefix("HEAD / HTTP/1.1\r\n") == true else {
+            fatalError("The probe must request headers only, never the exit-IP API")
+        }
         if mode == .malformedHTTP { try await send(connection, Data("NOT HTTP\r\n".utf8)); return }
         try await send(connection, Data("H".utf8))
         try await Task.sleep(nanoseconds: 30_000_000)
