@@ -116,7 +116,8 @@ extension XauXatConnectionRecoveryManager {
         context: {
             Context(userId: ChatModel.shared.currentUser?.userId,
                     online: ChatModel.shared.networkInfo.online,
-                    active: hasChatCtrl() && ChatModel.shared.chatRunning == true && AppChatState.shared.value == .active)
+                    active: hasChatCtrl() && ChatModel.shared.chatRunning == true
+                        && AppChatState.shared.value == .active && AppSheetState.shared.scenePhaseActive)
         },
         ensureTor: { force in
             let previousPort: UInt16?
@@ -153,6 +154,7 @@ extension XauXatConnectionRecoveryManager {
                     // Never send a queued command against a newly selected profile.
                     guard ChatModel.shared.currentUser?.userId == relay.userId,
                           ChatModel.shared.networkInfo.online,
+                          AppSheetState.shared.scenePhaseActive,
                           AppChatState.shared.value == .active else { throw RecoveryError.superseded }
                     try await sendCommandOkResp(.reconnectServer(userId: relay.userId, smpServer: relay.server))
                 }

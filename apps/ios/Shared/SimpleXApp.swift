@@ -151,7 +151,7 @@ struct SimpleXApp: App {
         }
 
         startChatAndActivate {
-            guard chatModel.chatRunning == true else { return }
+            guard scenePhase == .active, chatModel.chatRunning == true else { return }
             if configurationReconnected { XauXatConnectionRecoveryManager.shared.configurationApplied() }
             XauXatConnectionRecoveryManager.shared.resume()
             if let ntfResponse = chatModel.notificationResponse {
