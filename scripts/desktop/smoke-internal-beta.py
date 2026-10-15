@@ -44,6 +44,7 @@ for stage in ('native', 'ui'):
 result = release / 'PACKAGED-SMOKE.json'
 result.write_text(json.dumps({'system': system, 'architecture': platform.machine(),
                              'image': image.name, 'checks': results,
+                             'native_loopback_pair_verify_query_disconnect_reconnect': results['native'],
                              'physical_iphone_pairing': 'pending', 'vps_operator_pairing': 'pending'}, indent=2) + '\n', encoding='utf-8')
 packages = [p for suffix in ('msi', 'dmg', 'deb') for p in (release / suffix).glob(f'*.{suffix}')]
 assert packages, 'No installer produced'

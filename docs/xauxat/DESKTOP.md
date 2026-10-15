@@ -13,7 +13,7 @@ Initial build targets:
 | macOS | Intel | DMG |
 | Linux | x86_64 | DEB initially |
 
-The workflow compiles actual Desktop Kotlin/Compose sources and runs JVM tests on all four runners. A separate job per target builds this fork's Haskell core and JNI, packages an internal MSI/DMG/DEB, and verifies native database migrations/commands and actual Compose window startup from the bundled app image. JVM checks alone do not prove native loading. A package is uploaded only after its packaged startup checks pass. Physical iPhone/CLI pairing remains a separate acceptance test. No GitHub Release or tester notification is created. The repository is public, so Actions artifacts must contain no credentials, profiles or user data.
+The workflow compiles actual Desktop Kotlin/Compose sources and runs JVM tests on all four runners. A separate job per target builds this fork's Haskell core and JNI, packages an internal MSI/DMG/DEB, and verifies native database migrations/commands, loopback remote-control pairing with matching codes, a command against the controlled profile, disconnect/stored-pair reconnect, and actual Compose window startup from the bundled app image. The two synthetic controllers do not start chat networking; the test listener binds to loopback. JVM checks alone do not prove native loading. A package is uploaded only after its packaged checks pass. Physical iPhone/CLI pairing remains a separate acceptance test. No GitHub Release or tester notification is created. The repository is public, so Actions artifacts must contain no credentials, profiles or user data.
 
 ## Product identity
 

@@ -34,6 +34,7 @@ fun main(args: Array<String>) {
       check(ctrl != 0L)
       try {
         check(chatSendCmdRetry(ctrl, "/users", 0).contains("usersList")) { "Native command failed" }
+        verifyInternalBetaRemoteAccess(dir, ctrl)
       } finally {
         chatCloseStore(ctrl)
       }
