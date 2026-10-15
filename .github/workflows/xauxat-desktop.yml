@@ -10,7 +10,8 @@ permissions:
   contents: read
 concurrency:
   group: xauxat-desktop-${{ github.ref }}
-  cancel-in-progress: true
+  # Let native builds finish and preserve their dependency cache before a new run.
+  cancel-in-progress: false
 jobs:
   desktop:
     name: Desktop JVM checks (${{ matrix.os }})

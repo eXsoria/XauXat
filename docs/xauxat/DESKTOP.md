@@ -56,6 +56,8 @@ A fresh checkout needs recursive submodules, including nanohttpd. The JVM task e
 
 Packages are unsigned (macOS native libraries are ad-hoc signed) and not notarized. Existing iOS signing credentials are not used for Desktop. Linux is initially built and tested on Ubuntu 24.04 x86_64; compatibility with older distributions is not claimed. `PACKAGED-SMOKE.json` distinguishes automated native/GUI checks from pending physical pairing. Smoke tests use temporary HOME/APPDATA/XDG locations and JVM user.home, not the operator's live profile. These tests exercise startup, not complete messaging or multimedia acceptance.
 
+On macOS, the builder selects an installed stable Xcode 26 toolchain when available and retargets GHC's baked-in Command Line Tools SDK references to that selected SDK. This avoids mixing a newer CLT SDK with an older linker. Changes to the ephemeral GHC configuration are restored after the build. Native compilation targets macOS 13; automated packaged startup is only evidence for the actual Intel/Apple Silicon runner OS, not acceptance on every older macOS version. The selected SDK and deployment target are recorded in provenance.
+
 ## Release gates
 
 A public XauXat desktop release still requires all of the following:

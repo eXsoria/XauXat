@@ -98,6 +98,37 @@ def copy_file(source, dest):
     dest.chmod(0o755)
 
 
+def configure_mac_sdk():
+    # GHC's bindist can retain absolute CLT SDK paths. The runner's CLT SDK may
+    # be newer than its selected Xcode/linker (e.g. SDK 27 versus Xcode 26).
+    # Retarget only this ephemeral compiler's text configuration, restoring it later.
+    xcodes = []
+    for app in Path('/Applications').glob('Xcode_26*.app'):
+        match = re.fullmatch(r'Xcode_(26(?:\.\d+)+)\.app', app.name)
+        if match:
+            xcodes.append((tuple(map(int, match[1].split('.'))), app))
+    if xcodes:
+        os.environ['DEVELOPER_DIR'] = str(max(xcodes)[1] / 'Contents/Developer')
+    sdk = run('xcrun', '--sdk', 'macosx', '--show-sdk-path', capture=True).strip()
+    if not Path(sdk).is_dir():
+        raise RuntimeError(f'Missing selected macOS SDK: {sdk}')
+    os.environ['SDKROOT'] = sdk
+    os.environ['MACOSX_DEPLOYMENT_TARGET'] = '13.0'
+    libdir = Path(run('ghc', '--print-libdir', capture=True).strip())
+    package_db = Path(run('ghc', '--print-global-package-db', capture=True).strip())
+    originals = {}
+    for path in [libdir / 'settings', *package_db.glob('*.conf')]:
+        original = path.read_bytes()
+        updated = re.sub(rb'/Library/Developer/CommandLineTools/SDKs/MacOSX[^/\s"\\]*\.sdk', sdk.encode(), original)
+        if updated != original:
+            originals[path] = original
+            path.write_bytes(updated)
+            print(f'Retargeted GHC SDK reference: {path.name}', flush=True)
+    if originals:
+        run('ghc-pkg', 'recache', '--global')
+    return originals
+
+
 def mac_dependencies(entry, ghc_libdir):
     """Relocate the full non-system dylib closure, without retaining runner paths."""
     search = {}
@@ -193,6 +224,7 @@ package direct-sqlcipher
     original = settings.read_bytes() if WINDOWS else None
     env = dict(os.environ)
     env['LD_LIBRARY_PATH'] = str(openssl / 'lib') + os.pathsep + env.get('LD_LIBRARY_PATH', '')
+    env['PKG_CONFIG_PATH'] = str(openssl / 'lib/pkgconfig') + os.pathsep + env.get('PKG_CONFIG_PATH', '')
     try:
         if WINDOWS:
             # GHC 9.6.3 upstream DLL export workaround, ephemeral runner only; always restore.
@@ -279,6 +311,8 @@ def build_jni():
         'ghc': '9.6.3', 'openssl': OPENSSL_VERSION, 'openssl_source_sha256': OPENSSL_HASH,
         'vlc': 'v3.0.23-2', 'vlc_archive_sha256': VLC_HASHES[f'{OS}-{ARCH}'],
         'target': f'{OS}-{ARCH}', 'distribution': 'internal beta; unsigned/ad-hoc macOS; not notarized',
+        'macos_sdk': Path(os.environ['SDKROOT']).name if MAC else None,
+        'macos_deployment_target': os.environ.get('MACOSX_DEPLOYMENT_TARGET') if MAC else None,
         'native_files': {p.name: digest(p) for p in LIBS.iterdir() if p.is_file()},
     }
     (common / 'BUILD-PROVENANCE.json').write_text(json.dumps(provenance, indent=2) + '\n', encoding='utf-8')
@@ -288,6 +322,13 @@ if __name__ == '__main__':
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise SystemExit('Run only in an ephemeral GitHub Actions checkout, not on a user workstation.')
     WORK.mkdir(exist_ok=True)
-    build_core(build_openssl())
-    prepare_vlc()
-    build_jni()
+    compiler_originals = configure_mac_sdk() if MAC else {}
+    try:
+        build_core(build_openssl())
+        prepare_vlc()
+        build_jni()
+    finally:
+        for path, original in compiler_originals.items():
+            path.write_bytes(original)
+        if compiler_originals:
+            run('ghc-pkg', 'recache', '--global')
