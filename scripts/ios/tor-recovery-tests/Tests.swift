@@ -29,6 +29,8 @@ import Tor
 
     static func main() async throws {
         try await readyMustBeRevalidated()
+        try await freshnessLeaseIsExplicitAndInvalidatable()
+        try await invalidationDuringCheckCannotCreateFreshLease()
         try await recoveryRebindsAndPublishesOnlyVerifiedPort()
         try await recoveryFailureIsBounded()
         try await interruptedRepairDoesNotStrandNextRetry()
@@ -61,6 +63,35 @@ import Tor
         let b = try second!.get()
         require(a == b && probe.calls == 2, "Concurrent starts must share one validation and both finish")
         require(TorTestState.threadStarts == 1, "Resume must reuse the existing Tor runtime")
+    }
+
+    static func freshnessLeaseIsExplicitAndInvalidatable() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager()
+        _ = try await manager.ensureReady()
+        _ = try await manager.ensureReady(maxAge: 15)
+        require(probe.calls == 1, "Only explicit coordinated follow-up may reuse a recent route check")
+        manager.invalidateReadiness()
+        _ = try await manager.ensureReady(maxAge: 15)
+        require(probe.calls == 2, "Network/lifecycle invalidation must force a new route probe")
+        _ = try await manager.ensureReady()
+        require(probe.calls == 3, "Default/manual readiness must still check a fresh route")
+    }
+
+    static func invalidationDuringCheckCannotCreateFreshLease() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager()
+        var held: CheckedContinuation<Bool, Error>?
+        probe.handler = { _ in try await withCheckedThrowingContinuation { held = $0 } }
+        let start = Task { try await manager.ensureReady() }
+        try await until { held != nil }
+        manager.invalidateReadiness()
+        probe.handler = { _ in true }
+        held!.resume(returning: true)
+        _ = try await start.value
+        require(probe.calls == 2 && publishedPorts == [19050], "Startup waiters must receive only a route verified after the last invalidation")
+        _ = try await manager.ensureReady(maxAge: 15)
+        require(probe.calls == 2, "A probe started before path invalidation cannot grant a reusable lease")
     }
 
     static func recoveryRebindsAndPublishesOnlyVerifiedPort() async throws {

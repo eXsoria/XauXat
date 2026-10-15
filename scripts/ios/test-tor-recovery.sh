@@ -13,3 +13,8 @@ swiftc -swift-version 5 -parse-as-library -I "$temp" -L "$temp" -lTor -lSimpleXC
   "$root/apps/ios/Shared/Model/EmbeddedTorManager.swift" "$tests/Tests.swift" \
   -o "$temp/tor-recovery-tests"
 "$temp/tor-recovery-tests"
+swiftc -swift-version 5 -parse-as-library \
+  "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
+  "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" \
+  "$tests/RecoveryTests.swift" -o "$temp/coordinated-recovery-tests"
+"$temp/coordinated-recovery-tests"

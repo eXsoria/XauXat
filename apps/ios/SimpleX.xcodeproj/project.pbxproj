@@ -223,6 +223,7 @@
 		8CC4ED902BD7B8530078AEE8 /* CallAudioDeviceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CC4ED8F2BD7B8530078AEE8 /* CallAudioDeviceManager.swift */; };
 		8CC956EE2BC0041000412A11 /* NetworkObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CC956ED2BC0041000412A11 /* NetworkObserver.swift */; };
 		8CE848A32C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */; };
+		A11E005233D7000100000052 /* XauXatConnectionRecoveryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E005133D7000100000051 /* XauXatConnectionRecoveryManager.swift */; };
 		A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000133D1000100000001 /* EmbeddedTorManager.swift */; };
 		A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000333D2000100000003 /* XauXatHomeView.swift */; };
 		A11E000533D2000200000005 /* XauXatRealtimeAudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000433D2000200000004 /* XauXatRealtimeAudioDevice.swift */; };
@@ -622,6 +623,7 @@
 		8CC4ED8F2BD7B8530078AEE8 /* CallAudioDeviceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAudioDeviceManager.swift; sourceTree = "<group>"; };
 		8CC956ED2BC0041000412A11 /* NetworkObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkObserver.swift; sourceTree = "<group>"; };
 		8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableChatItemToolbars.swift; sourceTree = "<group>"; };
+		A11E005133D7000100000051 /* XauXatConnectionRecoveryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatConnectionRecoveryManager.swift; sourceTree = "<group>"; };
 		A11E000133D1000100000001 /* EmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedTorManager.swift; sourceTree = "<group>"; };
 		A11E000333D2000100000003 /* XauXatHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatHomeView.swift; sourceTree = "<group>"; };
 		A11E000433D2000200000004 /* XauXatRealtimeAudioDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatRealtimeAudioDevice.swift; sourceTree = "<group>"; };
@@ -885,6 +887,7 @@
 			isa = PBXGroup;
 			children = (
 				A11E000133D1000100000001 /* EmbeddedTorManager.swift */,
+				A11E005133D7000100000051 /* XauXatConnectionRecoveryManager.swift */,
 				A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */,
 				A11E002133D4000100000021 /* XauXatGroupAccessRules.swift */,
 				A11E003133D5000100000031 /* XauXatPINAttemptPolicy.swift */,
@@ -1649,6 +1652,7 @@
 			files = (
 				A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */,
 				A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */,
+				A11E005233D7000100000052 /* XauXatConnectionRecoveryManager.swift in Sources */,
 				A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */,
 				A11E002233D4000100000022 /* XauXatGroupAccessRules.swift in Sources */,
 				A11E003233D5000100000032 /* XauXatPINAttemptPolicy.swift in Sources */,

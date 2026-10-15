@@ -12,20 +12,25 @@ import SimpleXChat
 
 class NetworkObserver {
     static let shared = NetworkObserver()
-    private let queue: DispatchQueue = DispatchQueue(label: "pt.exsoria.xauxat.NetworkObserver")
-    private var prevInfo: UserNetworkInfo? = nil
+    private let queue = DispatchQueue(label: "pt.exsoria.xauxat.NetworkObserver")
+    // All monitor state is owned by queue. Old monitor callbacks are ignored.
+    private var prevInfo: UserNetworkInfo?
     private var monitor: NWPathMonitor?
-    private let monitorLock: DispatchQueue = DispatchQueue(label: "pt.exsoria.xauxat.monitorLock")
+    private var monitorGeneration = UUID()
 
     func restartMonitor() {
-        monitorLock.sync {
+        queue.async { [self] in
             monitor?.cancel()
+            let generation = UUID()
+            monitorGeneration = generation
+            prevInfo = nil
             let mon = NWPathMonitor()
             mon.pathUpdateHandler = { [weak self] path in
-                self?.networkPathChanged(path: path)
+                guard let self, self.monitorGeneration == generation else { return }
+                self.networkPathChanged(path: path)
             }
-            mon.start(queue: queue)
             monitor = mon
+            mon.start(queue: queue)
         }
     }
 
@@ -34,9 +39,17 @@ class NetworkObserver {
             networkType: networkTypeFromPath(path),
             online: path.status == .satisfied
         )
-        if (prevInfo != info) {
-            prevInfo = info
-            setNetworkInfo(info)
+        let infoChanged = prevInfo != info
+        prevInfo = info
+        // A new path may still be Wi-Fi and online. Process every callback for
+        // recovery; send core network-info updates only when those values change.
+        DispatchQueue.main.async {
+            ChatModel.shared.networkInfo = info
+            XauXatConnectionRecoveryManager.shared.networkChanged(online: info.online)
+        }
+        if infoChanged, hasChatCtrl() {
+            do { try apiSetNetworkInfo(info) }
+            catch { logger.error("XauXat could not update core network availability") }
         }
     }
 
@@ -51,34 +64,6 @@ class NetworkObserver {
             .other
         } else {
             .none
-        }
-    }
-
-    private static var networkObserver: NetworkObserver? = nil
-
-    private func setNetworkInfo(_ info: UserNetworkInfo) {
-        logger.debug("setNetworkInfo Network changed: \(String(describing: info))")
-        DispatchQueue.main.sync {
-            ChatModel.shared.networkInfo = info
-        }
-        if !hasChatCtrl() { return }
-        self.monitorLock.sync {
-            do {
-                try apiSetNetworkInfo(info)
-            } catch let err {
-                logger.error("setNetworkInfo error: \(responseError(err))")
-            }
-        }
-        // Revalidate Tor when Wi-Fi/mobile connectivity changes while XauXat
-        // stays open; foreground-only checks miss this case. Initial bootstrap
-        // still belongs to SimpleXApp, before a chat controller exists.
-        DispatchQueue.main.async {
-            guard info.online, ChatModel.shared.chatRunning == true,
-                  AppChatState.shared.value == .active else { return }
-            Task {
-                do { try await reconnectAllServers() }
-                catch { logger.error("XauXat could not recover its private route after a network change") }
-            }
         }
     }
 }
