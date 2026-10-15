@@ -74,6 +74,11 @@ internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
   } catch (failure: Throwable) {
     // Keep the failing stage visible even if native cleanup itself blocks.
     failure.printStackTrace()
+    runCatching {
+      val hosts = smokeCommand(desktop, CC.ListRemoteHosts()) as CR.RemoteHostList
+      val ctrls = smokeCommand(controlled, CC.ListRemoteCtrls()) as CR.RemoteCtrlList
+      println("Native remote smoke failed; host states: ${hosts.remoteHosts.map { it.sessionState?.javaClass?.simpleName }}; controller states: ${ctrls.remoteCtrls.map { it.sessionState?.javaClass?.simpleName }}")
+    }
     throw failure
   } finally {
     runCatching { smokeCommand(controlled, CC.StopRemoteCtrl()) }
