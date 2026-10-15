@@ -2806,6 +2806,11 @@ struct ChatView: View {
         }
 
 
+        var deleteMessagesTitle: LocalizedStringKey {
+            let n = deletingItems.count
+            return n == 1 ? "Delete message?" : "Delete \(n) messages?"
+        }
+
         private func selectUnselectChatItem(select: Bool, _ ci: ChatItem) {
             selectedChatItems = selectedChatItems ?? []
             var itemIds: [Int64] = []
