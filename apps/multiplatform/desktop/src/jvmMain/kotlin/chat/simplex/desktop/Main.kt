@@ -23,7 +23,7 @@ import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
   if (args.contentEquals(arrayOf("--xauxat-native-smoke-test"))) {
-    // Exercise the packaged JNI/core and real SQLCipher migrations without starting networking.
+    // Exercise the packaged JNI/core and real SQLCipher migrations without external chat networking.
     // The CI launcher also isolates HOME/APPDATA/XDG and JVM user.home from operator data.
     try {
       initHaskell()
