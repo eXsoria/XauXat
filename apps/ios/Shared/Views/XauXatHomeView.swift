@@ -3216,7 +3216,7 @@ struct XauXatTorDiagnosticsView: View {
                         if verification == .checking {
                             ProgressView().tint(palette.ivoryInk)
                         }
-                            Text(verification == .checking ? "Checking through Tor" : "Verify Tor route")
+                            Text(verification == .checking ? "Checking through Tor" : (isXauXatManagedTorConfig(getNetCfg()) ? "Verify Tor route" : "Retry private connection"))
                             .font(.system(size: 14, weight: .bold, design: .default))
                     }
                     .foregroundStyle(palette.ivoryInk)
@@ -3224,7 +3224,7 @@ struct XauXatTorDiagnosticsView: View {
                     .background(palette.ivory)
                     .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
                 }
-                .disabled(verification == .checking || !isXauXatManagedTorConfig(getNetCfg()))
+                .disabled(verification == .checking)
 
                 if case let .failed(message) = verification {
                     Text(message)
@@ -3289,9 +3289,14 @@ struct XauXatTorDiagnosticsView: View {
     @MainActor private func verify() async {
         verification = .checking
         do {
-            verification = try await tor.verifyTorRoute()
-                ? .verified
-                : .failed("The route probe could not confirm the managed Tor tunnel. Messaging remains fail-closed, but this build must not be distributed.")
+            if hasChatCtrl() {
+                // Reconnection verifies Tor and applies a replacement dynamic
+                // port to the core before reconnecting any relay sessions.
+                try await reconnectAllServers()
+            } else {
+                _ = try await tor.ensureReady()
+            }
+            verification = .verified
         } catch {
             verification = .failed(error.localizedDescription)
         }

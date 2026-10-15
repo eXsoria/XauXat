@@ -69,5 +69,16 @@ class NetworkObserver {
                 logger.error("setNetworkInfo error: \(responseError(err))")
             }
         }
+        // Revalidate Tor when Wi-Fi/mobile connectivity changes while XauXat
+        // stays open; foreground-only checks miss this case. Initial bootstrap
+        // still belongs to SimpleXApp, before a chat controller exists.
+        DispatchQueue.main.async {
+            guard info.online, ChatModel.shared.chatRunning == true,
+                  AppChatState.shared.value == .active else { return }
+            Task {
+                do { try await reconnectAllServers() }
+                catch { logger.error("XauXat could not recover its private route after a network change") }
+            }
+        }
     }
 }
