@@ -39,6 +39,7 @@ jobs:
         run: ./gradlew --no-daemon --stacktrace :common:desktopTest :desktop:compileKotlinJvm -x :desktop:cmakeBuildAndCopy
   internal-beta:
     name: Internal beta package (${{ matrix.os }})
+    needs: desktop
     strategy:
       fail-fast: false
       matrix:
@@ -91,6 +92,13 @@ jobs:
           path: .desktop-beta-build/openssl
           key: xauxat-openssl359-${{ matrix.os }}-v1-${{ github.sha }}
           restore-keys: xauxat-openssl359-${{ matrix.os }}-v1-
+      - name: Restore matching native core cache
+        id: core-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .desktop-beta-build/core
+          key: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py') }}-${{ github.sha }}
+          restore-keys: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py') }}-
       - name: Update Hackage index
         working-directory: ${{ runner.temp }}
         run: cabal update
@@ -115,6 +123,13 @@ jobs:
         with:
           path: .desktop-beta-build/openssl
           key: xauxat-openssl359-${{ matrix.os }}-v1-${{ github.sha }}
+      - name: Preserve matching native core even when later packaging fails
+        if: always() && steps.core-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        continue-on-error: true
+        with:
+          path: .desktop-beta-build/core
+          key: xauxat-core-${{ matrix.os }}-v1-${{ hashFiles('src/**', 'cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py') }}-${{ github.sha }}
       - name: Package internal beta on its target OS
         shell: bash
         working-directory: apps/multiplatform

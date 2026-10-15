@@ -276,6 +276,51 @@ package direct-sqlcipher
             linux_dependencies(core)
 
 
+def cached_core(openssl):
+    source = hashlib.sha256()
+    source.update(run('git', 'rev-parse', 'HEAD:src', capture=True).strip().encode())
+    for name in ('cabal.project', 'simplex-chat.cabal', 'libsimplex.dll.def', 'scripts/desktop/build-internal-beta.py'):
+        source.update(name.encode())
+        source.update((ROOT / name).read_bytes())
+    inputs = {
+        'source_sha256': source.hexdigest(), 'target': f'{OS}-{ARCH}',
+        'ghc': run('ghc', '--numeric-version', capture=True).strip(),
+        'cabal': run('cabal', '--numeric-version', capture=True).strip(),
+        'compiler': run('gcc' if WINDOWS else 'cc', '--version', capture=True).splitlines()[0],
+        'openssl_sha256': OPENSSL_HASH, 'sdk': os.environ.get('SDKROOT') if MAC else None,
+        'deployment': os.environ.get('MACOSX_DEPLOYMENT_TARGET') if MAC else None,
+    }
+    cache = WORK / 'core'
+    manifest = cache / 'BUILD.json'
+    if manifest.is_file():
+        try:
+            saved = json.loads(manifest.read_text(encoding='utf-8'))
+            files = saved['files']
+            valid = saved['inputs'] == inputs and f'libsimplex.{EXT}' in files
+            valid = valid and all(Path(n).name == n and (cache / n).is_file() and digest(cache / n) == sha for n, sha in files.items())
+            if valid:
+                LIBS.mkdir(parents=True, exist_ok=True)
+                for name in files:
+                    copy_file(cache / name, LIBS / name)
+                print('Verified native core source/toolchain inputs and every cached runtime file.', flush=True)
+                return saved
+        except (ValueError, KeyError, OSError):
+            pass
+    build_core(openssl)
+    if cache.exists():
+        inside(cache, WORK)
+        shutil.rmtree(cache)
+    cache.mkdir()
+    files = {}
+    for path in LIBS.iterdir():
+        if path.is_file():
+            copy_file(path, cache / path.name)
+            files[path.name] = digest(path)
+    saved = {'inputs': inputs, 'files': files, 'producer_commit': run('git', 'rev-parse', 'HEAD', capture=True).strip()}
+    manifest.write_text(json.dumps(saved, indent=2) + '\n', encoding='utf-8')
+    return saved
+
+
 def prepare_vlc():
     key = f'{OS}-{ARCH}'
     name = f'vlc-{"macos" if MAC else "win" if WINDOWS else "linux"}-{ARCH}.{"appimage" if OS == "linux" else "zip"}'
@@ -312,7 +357,7 @@ def prepare_vlc():
     copy_file(license_file, dest / 'COPYING')
 
 
-def build_jni():
+def build_jni(core_origin):
     build = WORK / 'jni'
     args = ['cmake', '-S', MULTI / 'common/src/commonMain/cpp/desktop', '-B', build, '-DCMAKE_BUILD_TYPE=Release']
     if WINDOWS:
@@ -333,6 +378,8 @@ def build_jni():
     provenance = {
         'commit': run('git', 'rev-parse', 'HEAD', capture=True).strip(),
         'core': 'built from this repository source; not an upstream app binary',
+        'native_core_build_commit': core_origin['producer_commit'],
+        'native_core_source_sha256': core_origin['inputs']['source_sha256'],
         'ghc': '9.6.3', 'openssl': OPENSSL_VERSION, 'openssl_source_sha256': OPENSSL_HASH,
         'vlc': 'v3.0.23-2', 'vlc_archive_sha256': VLC_HASHES[f'{OS}-{ARCH}'],
         'target': f'{OS}-{ARCH}', 'distribution': 'internal beta; unsigned/ad-hoc macOS; not notarized',
@@ -350,9 +397,9 @@ if __name__ == '__main__':
     WORK.mkdir(exist_ok=True)
     compiler_originals = configure_mac_sdk() if MAC else {}
     try:
-        build_core(build_openssl())
+        core_origin = cached_core(build_openssl())
         prepare_vlc()
-        build_jni()
+        build_jni(core_origin)
     finally:
         for path, original in compiler_originals.items():
             path.write_bytes(original)
