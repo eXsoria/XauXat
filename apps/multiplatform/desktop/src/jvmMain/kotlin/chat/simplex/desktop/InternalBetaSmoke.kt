@@ -3,6 +3,7 @@ package chat.simplex.desktop
 import chat.simplex.common.model.API
 import chat.simplex.common.model.CC
 import chat.simplex.common.model.CR
+import chat.simplex.common.model.NetCfg
 import chat.simplex.common.model.Profile
 import chat.simplex.common.model.RemoteCtrlAddress
 import chat.simplex.common.model.json
@@ -17,8 +18,9 @@ import java.util.concurrent.TimeUnit
 import kotlinx.serialization.decodeFromString
 
 /** Two disposable native profiles exercise the same remote protocol used by mobile/CLI.
- * No chat networking or multicast discovery is started. Connections use a loopback
- * invitation; the inherited native listener still uses wildcard binding.
+ * The controlled core runs without subscriptions/file workers and with relay
+ * traffic forced through an unavailable loopback proxy. No multicast is used.
+ * Connections use a loopback invitation; the native listener uses wildcard binding.
  */
 internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
   val migrated = chatMigrateInit(File(dir, "controlled").absolutePath, "internal-beta-test-key", "yesUp")
@@ -32,6 +34,11 @@ internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
     check(smokeCommand(controlled, CC.SetLocalDeviceName("CI Controlled")) is CR.CmdOk)
     val profile = Profile(displayName = "CIRemote", fullName = "", shortDescr = null)
     check(smokeCommand(controlled, CC.CreateActiveUser(profile, false)) is CR.ActiveUser)
+    // Remote-control commands require the controlled chat core to be running.
+    // mainApp=false disables subscriptions, file workers and periodic relay work.
+    val blockedRelayConfig = NetCfg.defaults.copy(socksProxy = "127.0.0.1:1")
+    check(smokeCommand(controlled, CC.APISetNetworkConfig(blockedRelayConfig)) is CR.CmdOk)
+    check(smokeCommand(controlled, CC.StartChat(mainApp = false)) is CR.ChatStarted)
     var storedHostId: Long? = null
     repeat(2) {
       val started = smokeCommand(desktop, CC.StartRemoteHost(storedHostId, false, RemoteCtrlAddress("127.0.0.1", "lo"), null))
@@ -58,6 +65,7 @@ internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
     println("XAUXAT_LOOPBACK_REMOTE_PAIR_VERIFY_QUERY_DISCONNECT_RECONNECT_OK")
   } finally {
     runCatching { smokeCommand(controlled, CC.StopRemoteCtrl()) }
+    runCatching { smokeCommand(controlled, CC.ApiStopChat()) }
     chatCloseStore(controlled)
   }
 }
@@ -69,7 +77,7 @@ private fun configureSmokePaths(ctrl: ChatCtrl, dir: File) {
 
 private fun smokeCommand(ctrl: ChatCtrl, command: CC): CR {
   val response = json.decodeFromString<API>(chatSendCmdRetry(ctrl, command.cmdString, 0))
-  return response.result ?: error("Native smoke command ${command.cmdType} failed: ${response.responseType}")
+  return response.result ?: error("Native smoke command ${command.cmdType} failed: ${response.details}")
 }
 
 private inline fun <reified T : CR> awaitSmokeEvent(ctrl: ChatCtrl): T {
@@ -80,7 +88,7 @@ private inline fun <reified T : CR> awaitSmokeEvent(ctrl: ChatCtrl): T {
       val response = json.decodeFromString<API>(raw)
       val event = response.result
       if (event is T) return event
-      check(response !is API.Error) { "Native smoke event failed: ${response.responseType}" }
+      check(response !is API.Error) { "Native smoke event failed: ${response.details}" }
     }
   }
   error("Timed out waiting for ${T::class.simpleName}")
