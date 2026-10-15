@@ -11,7 +11,7 @@ These initial packages are unsigned/ad-hoc on macOS and not notarized. Linux ini
 ## Link a test iPhone
 
 1. Open XauXat Desktop and select **Link a mobile**. Set a custom local database passphrase, separate from the phone's passcode, and leave passphrase saving disabled. The inherited Desktop implementation stores any saved/random passphrase as plaintext in its settings; it does not use an OS keychain. Verify the app asks for your passphrase after reopening, before pairing a live support profile.
-2. Keep the iPhone and Desktop on the same trusted local Wi-Fi for the initial test. Allow XauXat local-network access on iOS and the Desktop application's local-network connection through the OS firewall. Do not forward this port on the router.
+2. Keep the iPhone and Desktop on the same trusted local Wi-Fi for the initial test. Allow XauXat local-network access on iOS/macOS and the Desktop application's connection on that trusted network through the OS firewall. Do not forward this port on the router.
 3. In the iPhone chat-list menu choose **Connect to desktop** and scan the Desktop pairing QR code. Compare the full pairing/verification code on both screens before accepting.
 4. Keep the phone online and XauXat open during the first test. The Desktop controls that running profile; it is not an independent cloud-synchronized copy.
 5. From a second owned profile send a plain-text message. Verify it appears on both phone and Desktop, reply from Desktop, and verify the reply on the sender. Test reconnect after briefly losing Wi-Fi, changing networks and restarting Desktop. Record observed behavior when the phone is locked or offline without assuming continuous iOS background availability.
@@ -21,6 +21,8 @@ These initial packages are unsigned/ad-hoc on macOS and not notarized. Linux ini
 
 1. Open XauXat Desktop, enable **Developer tools**, then **Linked mobile / Link a mobile**. If Settings is not yet available, first link your test iPhone or finish onboarding with a disposable local test profile; that local profile is separate from the VPS profile. Select loopback address `127.0.0.1` and a fixed unused port such as `12345`. The advanced address controls appear with Developer tools enabled.
 2. In the authenticated PuTTY connection to the support VPS, add a **Remote** SSH tunnel: source `127.0.0.1:12345`, destination `127.0.0.1:12345`. Keep remote connections restricted to loopback. Keep the SSH connection open; do not enable GatewayPorts or open a public firewall port.
+
+   Selecting `127.0.0.1` in Desktop sets the invitation address. The inherited Desktop listener still binds wildcard, so retain the Desktop firewall restrictions; the explicit loopback binding here is for the VPS's SSH-forwarded port.
 3. Copy the new Desktop pairing link. In the VPS support CLI, enter `/crc LINK`, replacing LINK with that link. To attach to the existing console:
 
    ```sh

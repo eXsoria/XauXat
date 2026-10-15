@@ -17,7 +17,8 @@ import java.util.concurrent.TimeUnit
 import kotlinx.serialization.decodeFromString
 
 /** Two disposable native profiles exercise the same remote protocol used by mobile/CLI.
- * No chat networking is started, and the controller binds only to loopback.
+ * No chat networking or multicast discovery is started. Connections use a loopback
+ * invitation; the inherited native listener still uses wildcard binding.
  */
 internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
   val migrated = chatMigrateInit(File(dir, "controlled").absolutePath, "internal-beta-test-key", "yesUp")
@@ -35,7 +36,7 @@ internal fun verifyInternalBetaRemoteAccess(dir: File, desktop: ChatCtrl) {
     repeat(2) {
       val started = smokeCommand(desktop, CC.StartRemoteHost(storedHostId, false, RemoteCtrlAddress("127.0.0.1", "lo"), null))
       check(started is CR.RemoteHostStarted)
-      check(started.localAddrs.first().address == "127.0.0.1") { "Remote smoke must bind to loopback" }
+      check(started.localAddrs.first().address == "127.0.0.1") { "Remote smoke must advertise loopback" }
       check(smokeCommand(controlled, CC.ConnectRemoteCtrl(started.invitation)) is CR.RemoteCtrlConnecting)
       val desktopCode = awaitSmokeEvent<CR.RemoteHostSessionCode>(desktop).sessionCode
       val controlledCode = awaitSmokeEvent<CR.RemoteCtrlSessionCode>(controlled).sessionCode

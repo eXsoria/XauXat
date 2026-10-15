@@ -13,7 +13,7 @@ Initial build targets:
 | macOS | Intel | DMG |
 | Linux | x86_64 | DEB initially |
 
-The workflow compiles actual Desktop Kotlin/Compose sources and runs JVM tests on all four runners. A separate job per target builds this fork's Haskell core and JNI, packages an internal MSI/DMG/DEB, and verifies native database migrations/commands, loopback remote-control pairing with matching codes, a command against the controlled profile, disconnect/stored-pair reconnect, and actual Compose window startup from the bundled app image. The two synthetic controllers do not start chat networking; the test listener binds to loopback. JVM checks alone do not prove native loading. A package is uploaded only after its packaged checks pass. Physical iPhone/CLI pairing remains a separate acceptance test. No GitHub Release or tester notification is created. The repository is public, so Actions artifacts must contain no credentials, profiles or user data.
+The workflow compiles actual Desktop Kotlin/Compose sources and runs JVM tests on all four runners. A separate job per target builds this fork's Haskell core and JNI, packages an internal MSI/DMG/DEB, and verifies native database migrations/commands, remote-control pairing over loopback with matching codes, a command against the controlled profile, disconnect/stored-pair reconnect, and actual Compose window startup from the bundled app image. The two synthetic controllers do not start chat networking or multicast discovery. The invitation selects loopback; this is not a test of listener isolation, as the inherited native listener binds wildcard. JVM checks alone do not prove native loading. A package is uploaded only after its packaged checks pass. Physical iPhone/CLI pairing remains a separate acceptance test. No GitHub Release or tester notification is created. The repository is public, so Actions artifacts must contain no credentials, profiles or user data.
 
 ## Product identity
 
@@ -37,6 +37,8 @@ The upstream native client already implements both a local desktop profile and a
 For a linked iPhone, the phone remains the running profile and must be reachable. Use the normal native linking UI on the same local network; verify the pairing code on both devices. This is remote access to a live profile, not independent cloud synchronization or a promise of an offline desktop copy.
 
 For XauXat support, the existing VPS CLI remains the owner of its dedicated business profile. Desktop can control it via the documented native remote-control protocol and a loopback-only SSH reverse tunnel. Pair only after comparing verification codes. Do not expose the controller port or clone the live CLI databases into another networked client.
+
+The address selected in the native linking UI controls the invitation address, not the Desktop listener's bind scope: the pinned upstream core starts a wildcard listener. Keep the Desktop firewall restricted to the intended trusted network. The SSH reverse-forwarded port on the VPS must explicitly bind to `127.0.0.1`; selecting loopback in Desktop alone does not enforce that rule. The macOS package declares local-network usage for iPhone linking; local-network permission and actual LAN behavior still need physical acceptance.
 
 Sources: [SimpleX desktop downloads/linking](https://simplex.chat/downloads/), [SimpleX team's cloud support setup](https://simplex.chat/docs/business.html).
 

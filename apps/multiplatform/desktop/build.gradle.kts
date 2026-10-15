@@ -88,6 +88,8 @@ compose {
             extraKeysRawXml = """
               <key>NSMicrophoneUsageDescription</key>
               <string>XauXat needs microphone access to record voice messages</string>
+              <key>NSLocalNetworkUsageDescription</key>
+              <string>XauXat uses your local network to connect to your iPhone and other linked profiles.</string>
             """
           }
           val identity = rootProject.extra["desktop.mac.signing.identity"] as String?
