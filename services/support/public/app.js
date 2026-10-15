@@ -2,6 +2,13 @@
 const $ = id => document.getElementById(id);
 let policy, pending, tracked, pendingFollowup;
 const bytesToToken = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+function randomID() {
+  // UUIDv4 using the older Web Crypto API, including Safari before randomUUID().
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+}
 const privateReceipt = () => pending.id + '.' + pending.secret;
 async function api(path, options = {}) {
   const controller = new AbortController();
@@ -25,7 +32,7 @@ $('review').addEventListener('click', () => {
   if (kind !== 'support' && $('include-name').checked) payload.contactName = $('contact-name').value.trim();
   if (kind === 'message_report' && $('include-text').checked) payload.selectedText = $('selected-text').value.trim();
   if ((payload.contactName !== undefined && !payload.contactName) || (payload.selectedText !== undefined && !payload.selectedText)) { $('request-status').textContent = 'Complete the optional fields you chose to include.'; return; }
-  pending = {...payload, version: 1, id: crypto.randomUUID(), secret: bytesToToken(crypto.getRandomValues(new Uint8Array(32))), consent: true, consentVersion: policy.consentVersion};
+  pending = {...payload, version: 1, id: randomID(), secret: bytesToToken(crypto.getRandomValues(new Uint8Array(32))), consent: true, consentVersion: policy.consentVersion};
   $('preview').textContent = JSON.stringify(payload, null, 2);
   $('request-fields').disabled = true; $('review-panel').hidden = false; $('consent').checked = false; $('request-status').textContent = '';
 });
@@ -74,7 +81,7 @@ $('track-form').addEventListener('submit', async event => {
 $('followup-form').addEventListener('submit', async event => {
   event.preventDefault();
   if (!tracked || !$('followup-consent').checked || !policy) { $('track-status').textContent = 'Review the text and confirm consent first.'; return; }
-  if (!pendingFollowup) pendingFollowup = {id: crypto.randomUUID(), text: $('followup-text').value.trim(), consent: true, consentVersion: policy.consentVersion};
+  if (!pendingFollowup) pendingFollowup = {id: randomID(), text: $('followup-text').value.trim(), consent: true, consentVersion: policy.consentVersion};
   const body = JSON.stringify(pendingFollowup);
   if (!pendingFollowup.text || new TextEncoder().encode(body).length > 24576) { pendingFollowup = undefined; $('track-status').textContent = 'Enter a shorter description.'; return; }
   $('followup-send').disabled = true; $('followup-text').disabled = true; $('followup-consent').disabled = true;
