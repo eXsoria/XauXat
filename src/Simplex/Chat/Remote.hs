@@ -208,7 +208,12 @@ startRemoteHost rh_ rcAddrPrefs_ port_ = do
         toView $ CEvtNewRemoteHost rhi
       -- set up HTTP transport and remote profile protocol
       disconnected <- toIO $ onDisconnected rhKey' sseq
-      httpClient <- liftError' (httpError remoteHostId) $ attachRevHTTP2Client disconnected tls
+      -- sendRequestDirect can invoke this callback on pollAction itself.
+      -- Clean up on a separate thread so cancelling pollAction cannot abort
+      -- its own cleanup before RemoteHostStopped is emitted. The session
+      -- sequence guard still ignores duplicate/stale disconnect callbacks.
+      let notifyDisconnected = void . forkIO $ disconnected `catchAny` (logError . tshow)
+      httpClient <- liftError' (httpError remoteHostId) $ attachRevHTTP2Client notifyDisconnected tls
       rhClient <- mkRemoteHostClient httpClient sessionKeys sessId storePath hostInfo
       pollAction <- async $ pollEvents remoteHostId rhClient
       withRemoteHostSession rhKey' sseq $ \case
