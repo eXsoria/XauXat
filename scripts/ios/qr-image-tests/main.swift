@@ -97,4 +97,15 @@ expect(delivery.failures == 1, "An unreadable photo uses the shared error callba
 delivery.deliver()
 expect(delivery.failures == 1, "Cancellation or an empty result never retries the old image")
 
+delivery.photoResult = .success("foreground_fixture")
+delivery.scenePhase = .background
+delivery.deliver()
+expect(delivery.values.last == "second_fixture", "A background app cannot present a connection confirmation")
+delivery.scenePhase = .inactive
+delivery.deliver()
+expect(delivery.values.last == "second_fixture", "A transient inactive state also keeps the photo queued")
+delivery.scenePhase = .active
+delivery.deliver()
+expect(delivery.values.last == "foreground_fixture", "Returning to the foreground releases the queued photo once")
+
 print("\(checks) QR image, export and photo-delivery checks passed.")

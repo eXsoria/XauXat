@@ -1419,7 +1419,10 @@ struct ScannerInView: View {
             refreshCameraAuthorization()
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .active { refreshCameraAuthorization() }
+            if phase == .active {
+                refreshCameraAuthorization()
+                deliverPhotoResult()
+            }
         }
         .onDisappear {
             photoTask?.cancel()
@@ -1521,7 +1524,8 @@ struct ScannerInView: View {
     private func deliverPhotoResult() {
         // Planning a connection can present a confirmation sheet. Wait until
         // the system photo picker is fully dismissed before reusing that flow.
-        guard photoLibraryDismissed, !readingPhoto, let result = photoResult else { return }
+        guard scenePhase == .active, photoLibraryDismissed, !readingPhoto,
+              let result = photoResult else { return }
         photoResult = nil
         processQRCode(result)
     }

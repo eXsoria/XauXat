@@ -35,7 +35,9 @@ delivery = declaration(scanner, 'private func deliverPhotoResult()')
 (temp / 'main.swift').write_text('import Foundation\nimport CoreImage.CIFilterBuiltins\nimport ImageIO\n' + core + '\n' + fixtures + '\n', encoding='utf-8')
 (temp / 'Delivery.swift').write_text('''
 import Foundation
+enum TestScenePhase { case active, inactive, background }
 final class PhotoDelivery {
+    var scenePhase: TestScenePhase = .active
     var photoLibraryDismissed = false
     var readingPhoto = false
     var photoResult: Result<String, Error>?
