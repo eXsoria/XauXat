@@ -69,11 +69,15 @@ struct ContentView: View {
     }
 
     private var contentAuthenticationReady: Bool {
-        guard scenePhase == .active, case .ready = tor.state,
-              isXauXatTorReady(), !chatModel.ctrlInitInProgress else { return false }
+        guard scenePhase == .active, !chatModel.ctrlInitInProgress else { return false }
         // Both Face ID and PIN wait for the same startup boundary. A decoy or
         // duress PIN must still select the store before it can be initialized.
-        if xauXatRequiresUnlockBeforeInitialization() { return true }
+        if xauXatRequiresUnlockBeforeInitialization() && !chatModel.chatInitialized {
+            guard case .ready = tor.state, isXauXatTorReady() else { return false }
+            return true
+        }
+        // An already prepared local screen can be unlocked offline too. Relay
+        // reconnection remains separate from authorization to read local data.
         guard let status = chatModel.chatDbStatus else { return false }
         return status != .ok || !chatModel.v3DBMigration.startChat || chatModel.onboardingStage != nil
     }

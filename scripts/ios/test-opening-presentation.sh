@@ -150,6 +150,11 @@ checks_source = r'''
         expect(requests == 0, "normal auth waits for an initial screen")
         check(true, "missing initial screen stays covered")
         chatModel.onboardingStage = .complete
+        socksReady = false
+        tor.state = .starting
+        expect(contentAuthenticationReady, "prepared local screen stays unlockable offline")
+        tor.state = .ready(12345)
+        socksReady = true
         result = nil
         authenticateContentWhenReady()
         expect(requests == 1 && automaticAuthenticationAttempted, "Face ID at prepared unlock stage")
@@ -198,6 +203,9 @@ checks_source = r'''
         chatModel.contentViewAccessAuthenticated = false
         kcAppPassword.value = "test-only"
         kcDecoyPassword.value = "test-only-decoy"
+        tor.state = .starting
+        expect(!contentAuthenticationReady, "cold alternate PIN waits for startup before selecting store")
+        tor.state = .ready(12345)
         expect(contentAuthenticationReady, "decoy PIN must precede database selection")
         result = nil
         authenticateContentViewAccess()
