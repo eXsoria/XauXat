@@ -51,6 +51,14 @@ jobs:
       - run: ./scripts/ios/verify-nse-tor-policy.sh
       - run: ./scripts/ios/validate-notification-matrix.sh --allow-pending docs/xauxat/ios-notification-test-matrix.json
 
+  qr-images:
+    name: QR images and photo library
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: bash scripts/ios/test-qr-images.sh
+
   native-core:
     name: XauXat native core (arm64)
     runs-on: macos-26
@@ -113,7 +121,7 @@ jobs:
     name: Latest iOS Release device (arm64)
     runs-on: macos-26
     timeout-minutes: 60
-    needs: native-core
+    needs: [native-core, qr-images]
 
     steps:
       - name: Check out fork and submodules
@@ -195,7 +203,7 @@ jobs:
     name: Latest iOS Simulator (arm64 launch)
     runs-on: macos-26
     timeout-minutes: 75
-    needs: native-core
+    needs: [native-core, qr-images]
 
     steps:
       - name: Check out fork and submodules

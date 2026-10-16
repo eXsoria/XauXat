@@ -200,8 +200,7 @@ struct MigrateToDevice: View {
                 Section(header: Text("Scan QR code").foregroundColor(theme.colors.secondary)) {
                     ScannerInView(showQRCodeScanner: $showQRCodeScanner) { resp in
                         switch resp {
-                        case let .success(r):
-                            let link = r.string
+                        case let .success(link):
                             if strHasSimplexFileLink(link.trimmingCharacters(in: .whitespaces)) {
                                 migrationState = .linkDownloading(link: link.trimmingCharacters(in: .whitespaces))
                             } else {

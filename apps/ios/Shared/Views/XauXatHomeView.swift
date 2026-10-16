@@ -1051,7 +1051,7 @@ private struct XauXatContactsView: View {
                 XauXatEmptyState(
                     palette: palette,
                     title: "No contacts yet.",
-                    subtitle: "Create a private link to connect.",
+                    subtitle: "Create a private QR code to connect.",
                     action: { showNewChatSheet = true }
                 )
                 .offset(y: -5)
@@ -1970,13 +1970,13 @@ private struct XauXatHelpDestination: View {
                         palette: palette,
                         number: "02",
                         title: "Choose how to connect",
-                        detail: "Start a conversation, create a private link, or scan a QR code."
+                        detail: "Create a private QR code, scan one, or choose a QR image from your photo library."
                     )
                     XauXatHelpStep(
                         palette: palette,
                         number: "03",
                         title: "Share privately",
-                        detail: "Only send invitation links and QR codes to people you intend to connect with."
+                        detail: "Only share invitation QR codes with people you intend to connect with."
                     )
                 }
 
@@ -3110,8 +3110,8 @@ private struct XauXatNewChatSheet: View {
                         } label: {
                             XauXatSettingsRow(
                                 palette: palette,
-                                symbol: "link",
-                                title: "Create private link",
+                                symbol: "qrcode",
+                                title: "Create private QR code",
                                 value: "Share to connect"
                             )
                         }

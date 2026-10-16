@@ -17,7 +17,7 @@ struct AddContactLearnMore: View {
     var body: some View {
         List {
             if showTitle {
-                Text("One-time invitation link")
+                Text("Invitation QR code")
                     .font(.largeTitle)
                     .bold()
                     .fixedSize(horizontal: false, vertical: true)
@@ -27,8 +27,8 @@ struct AddContactLearnMore: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
             }
             VStack(alignment: .leading, spacing: 18) {
-                Text("To connect, your contact can scan QR code or use the link in the app.")
-                Text("If you can't meet in person, show QR code in a video call, or share the link.")
+                Text("To connect, your contact can scan your QR code with XauXat.")
+                Text("You can share the QR image privately or show it in a video call. To read a saved image, choose it from the photo library on the QR scanner screen.")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .listRowBackground(Color.clear)

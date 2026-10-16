@@ -11,6 +11,68 @@ import PhotosUI
 import SwiftyGif
 import SimpleXChat
 
+// The system picker grants access only to the image selected by the user.
+// It does not ask for camera access or read the rest of the photo library.
+struct QRCodePhotoPicker: UIViewControllerRepresentable {
+    let completion: (Result<UIImage, Error>?) -> Void
+
+    class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let completion: (Result<UIImage, Error>?) -> Void
+        private var selectionID: UUID?
+
+        init(completion: @escaping (Result<UIImage, Error>?) -> Void) {
+            self.completion = completion
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            let id = UUID()
+            selectionID = id
+            guard let provider = results.first?.itemProvider else {
+                finish(nil, id: id)
+                return
+            }
+            guard provider.canLoadObject(ofClass: UIImage.self) else {
+                finish(.failure(XauXatQRCodeImageError.unreadableImage), id: id)
+                return
+            }
+            provider.loadObject(ofClass: UIImage.self) { image, _ in
+                if let image = image as? UIImage {
+                    self.finish(.success(image), id: id)
+                } else {
+                    self.finish(.failure(XauXatQRCodeImageError.unreadableImage), id: id)
+                }
+            }
+        }
+
+        private func finish(_ result: Result<UIImage, Error>?, id: UUID) {
+            DispatchQueue.main.async {
+                guard self.selectionID == id else { return }
+                self.selectionID = nil
+                self.completion(result)
+            }
+        }
+
+        func cancel() { selectionID = nil }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var configuration = PHPickerConfiguration()
+        configuration.filter = .images
+        configuration.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: PHPickerViewController, context: Context) {}
+
+    static func dismantleUIViewController(_ controller: PHPickerViewController, coordinator: Coordinator) {
+        coordinator.cancel()
+    }
+}
+
 struct LibraryImagePicker: View {
     @Binding var image: UIImage?
     var didFinishPicking: (_ didSelectImage: Bool) async -> Void

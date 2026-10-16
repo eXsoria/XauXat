@@ -11,6 +11,83 @@ import SwiftUI
 import CoreImage.CIFilterBuiltins
 import SimpleXChat
 
+enum XauXatQRCodeImageError: LocalizedError {
+    case unreadableImage
+    case detectorUnavailable
+    case noCode
+    case multipleCodes
+
+    var errorDescription: String? {
+        switch self {
+        case .unreadableImage:
+            return NSLocalizedString("This image could not be opened. Choose another QR image.", comment: "QR image error")
+        case .detectorUnavailable:
+            return NSLocalizedString("The QR reader is unavailable. Please try again.", comment: "QR image error")
+        case .noCode:
+            return NSLocalizedString("No readable QR code was found. Choose a clearer image containing the whole QR code.", comment: "QR image error")
+        case .multipleCodes:
+            return NSLocalizedString("This image contains different QR codes. Choose an image containing only the code you want to scan.", comment: "QR image error")
+        }
+    }
+}
+
+func xauXatReadQRCode(in image: CIImage) throws -> String {
+    guard let detector = CIDetector(
+        ofType: CIDetectorTypeQRCode,
+        context: nil,
+        options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]
+    ) else { throw XauXatQRCodeImageError.detectorUnavailable }
+    let strings = Set(detector.features(in: image).compactMap {
+        ($0 as? CIQRCodeFeature)?.messageString
+    }.filter { !$0.isEmpty })
+    guard !strings.isEmpty else { throw XauXatQRCodeImageError.noCode }
+    guard strings.count == 1, let string = strings.first else { throw XauXatQRCodeImageError.multipleCodes }
+    return string
+}
+
+func xauXatQRCodeExportImage(_ image: CIImage) -> CIImage {
+    // Keep modules on whole pixels and leave four extra white modules around
+    // the code, so the shared image can be scanned after saving or resizing.
+    let scale = max(1, floor(1024 / (max(image.extent.width, image.extent.height) + 8)))
+    let size = CGSize(width: (image.extent.width + 8) * scale, height: (image.extent.height + 8) * scale)
+    let code = image
+        .transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        .transformed(by: CGAffineTransform(translationX: 4 * scale, y: 4 * scale))
+    return code.composited(over: CIImage(color: .white)).cropped(to: CGRect(origin: .zero, size: size))
+}
+
+func xauXatReadQRCodePhoto(_ image: UIImage) async -> Result<String, Error> {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result: Result<String, Error> = autoreleasepool {
+                Result {
+                    guard let source = image.cgImage.map({ CIImage(cgImage: $0) }) ?? image.ciImage else {
+                        throw XauXatQRCodeImageError.unreadableImage
+                    }
+                    let oriented = source.oriented(forExifOrientation: xauXatQRCodeExifOrientation(image.imageOrientation))
+                    return try xauXatReadQRCode(in: oriented)
+                }
+            }
+            continuation.resume(returning: result)
+        }
+    }
+}
+
+private func xauXatQRCodeExifOrientation(_ orientation: UIImage.Orientation) -> Int32 {
+    switch orientation {
+    case .up: return 1
+    case .upMirrored: return 2
+    case .down: return 3
+    case .downMirrored: return 4
+    case .leftMirrored: return 5
+    case .right: return 6
+    case .rightMirrored: return 7
+    case .left: return 8
+    @unknown default: return 1
+    }
+}
+
 struct MutableQRCode: View {
     @Binding var uri: String
     var small: Bool = false
@@ -53,7 +130,7 @@ struct QRCode: View {
     var tintColor = UIColor(red: 0.023, green: 0.176, blue: 0.337, alpha: 1)
     var onShare: (() -> Void)? = nil
     @State private var image: UIImage? = nil
-    @State private var makeScreenshotFunc: () -> Void = {}
+    @State private var generationFailed = false
     @State private var width: CGFloat = .infinity
 
     var body: some View {
@@ -75,21 +152,58 @@ struct QRCode: View {
                     }
                     .onAppear {
                         width = w
-                        makeScreenshotFunc = {
-                            let size = CGSizeMake(1024 / UIScreen.main.scale, 1024 / UIScreen.main.scale)
-                            showShareSheet(items: [makeScreenshot(g.frame(in: .local).origin, size)])
-                            onShare?()
-                        }
                     }
                     .frame(width: g.size.width, height: g.size.height)
                 }
+            } else if generationFailed {
+                Text("QR code unavailable. Try creating a smaller invitation.")
+                    .font(.footnote)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(1, contentMode: .fit)
             } else {
                 Color.clear.aspectRatio(small ? 1 / smallQRRatio : 1, contentMode: .fit)
             }
         }
-        .onTapGesture(perform: makeScreenshotFunc)
-        .task { image = await generateImage(uri, tintColor: tintColor, errorLevel: withLogo ? "H" : (small ? "M" : "L")) }
+        .onTapGesture(perform: shareQRCodeImage)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(generationFailed ? "QR code unavailable" : "QR code")
+        .accessibilityHint(generationFailed ? "" : "Double-tap to share the QR code as an image.")
+        .accessibilityAddTraits(generationFailed ? [] : .isButton)
+        .accessibilityAction { shareQRCodeImage() }
+        .task(id: uri) {
+            generationFailed = false
+            image = await generateImage(uri, tintColor: tintColor, errorLevel: withLogo ? "H" : (small ? "M" : "L"))
+            generationFailed = image == nil
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func shareQRCodeImage() {
+        guard !generationFailed, let source = image?.cgImage else { return }
+        let export = xauXatQRCodeExportImage(CIImage(cgImage: source))
+        guard let rendered = CIContext().createCGImage(export, from: export.extent) else { return }
+        var sharedImage = UIImage(cgImage: rendered)
+        if withLogo {
+            let size = sharedImage.size
+            let logoSide = floor(size.width * (small ? 0.195 : 0.16))
+            let logoSize = CGSize(width: logoSide, height: logoSide)
+            let logo = XauXatQRCodeLogo()
+                .frame(width: logoSide, height: logoSide)
+                .makeScreenshot(nil, logoSize)
+            let imageWithoutLogo = sharedImage
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            sharedImage = UIGraphicsImageRenderer(size: size, format: format).image { context in
+                imageWithoutLogo.draw(in: CGRect(origin: .zero, size: size))
+                let rect = CGRect(x: (size.width - logoSide) / 2, y: (size.height - logoSide) / 2, width: logoSide, height: logoSide)
+                UIColor.white.setFill()
+                context.cgContext.fillEllipse(in: rect.insetBy(dx: -3, dy: -3))
+                logo.draw(in: rect)
+            }
+        }
+        showShareSheet(items: [sharedImage])
+        onShare?()
     }
 }
 
