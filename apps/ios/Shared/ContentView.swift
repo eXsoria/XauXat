@@ -57,6 +57,16 @@ struct ContentView: View {
         chatModel.contentViewAccessAuthenticated || contentAccessAuthenticationExtended
     }
 
+    private var showsInitializationView: Bool {
+        guard AppChatState.shared.value != .stopped, waitingForOrPassedAuth else { return false }
+        if chatModel.chatDbStatus == nil { return true }
+        // Opening the database is only the first part of initialization. Keep
+        // the public opening animation until contentView can render a screen.
+        // Database errors and migration screens must remain accessible.
+        guard chatModel.chatDbStatus == .ok, chatModel.v3DBMigration.startChat else { return false }
+        return chatModel.ctrlInitInProgress || chatModel.onboardingStage == nil
+    }
+
     var body: some View {
         Group {
             if #available(iOS 16.0, *) {
@@ -67,7 +77,7 @@ struct ContentView: View {
                 allViews()
             }
         }
-        .modifier(XauXatAppSwitcherProtection())
+        .modifier(XauXatAppSwitcherProtection(showsOpeningAnimation: true))
     }
 
     func allViews() -> some View {
@@ -112,7 +122,7 @@ struct ContentView: View {
                     showSetPasscode = false
                     alertManager.showAlert(laPasscodeNotSetAlert())
                 }
-            } else if chatModel.chatDbStatus == nil && AppChatState.shared.value != .stopped && waitingForOrPassedAuth {
+            } else if showsInitializationView {
                 initializationView()
             }
         }
@@ -385,20 +395,26 @@ struct ContentView: View {
         dismissAllSheets(animated: false) {
             logger.debug("DEBUGGING: authenticateContentViewAccess, in dismissAllSheets callback")
             chatModel.chatId = nil
+            waitingForOrPassedAuth = true
 
             authenticate(reason: NSLocalizedString("Unlock app", comment: "authentication reason"), selfDestruct: true) { laResult in
                 logger.debug("DEBUGGING: authenticate callback: \(String(describing: laResult))")
                 switch (laResult) {
                 case .success:
+                    waitingForOrPassedAuth = true
                     chatModel.contentViewAccessAuthenticated = true
                     canConnectViewCall = true
                     lastSuccessfulUnlock = ProcessInfo.processInfo.systemUptime
                 case .failed:
+                    // System Face ID has no LocalAuthView.onDisappear event.
+                    // Restore the retry button on cancellation/failure too.
+                    waitingForOrPassedAuth = false
                     chatModel.contentViewAccessAuthenticated = false
                     if privacyLocalAuthModeDefault.get() == .passcode {
                         AlertManager.shared.showAlert(laFailedAlert())
                     }
                 case .unavailable:
+                    waitingForOrPassedAuth = true
                     prefPerformLA = false
                     canConnectViewCall = true
                     AlertManager.shared.showAlert(laUnavailableTurningOffAlert())
@@ -555,7 +571,7 @@ func mkAlert(title: LocalizedStringKey, message: LocalizedStringKey? = nil) -> A
 //}
 
 
-private struct XauXatOpeningView: View {
+struct XauXatOpeningView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var gazeX: CGFloat = 0

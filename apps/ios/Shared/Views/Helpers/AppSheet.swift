@@ -21,14 +21,25 @@ class AppSheetState: ObservableObject {
 
 struct XauXatAppSwitcherProtection: ViewModifier {
     @ObservedObject private var appSheetState = AppSheetState.shared
+    var showsOpeningAnimation = false
 
     func body(content: Content) -> some View {
         ZStack {
             content
+                .accessibilityHidden(!appSheetState.scenePhaseActive)
+                .allowsHitTesting(appSheetState.scenePhaseActive)
             if !appSheetState.scenePhaseActive {
-                Color.black
-                    .ignoresSafeArea()
-                    .accessibilityLabel("XauXat is hidden while inactive")
+                // Face ID temporarily makes the app inactive. The root may
+                // show public branding instead of a black frame; sheets and
+                // protected media retain the opaque black default.
+                Group {
+                    if showsOpeningAnimation {
+                        XauXatOpeningView()
+                    } else {
+                        Color.black.ignoresSafeArea()
+                    }
+                }
+                .accessibilityLabel("XauXat is hidden while inactive")
             }
         }
     }
