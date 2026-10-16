@@ -29,7 +29,6 @@ class NtfManager: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
 
     public var navigatingToChat = false
     private var granted = false
-    private var prevNtfTime: Dictionary<ChatId, Date> = [:]
 
     override init() {
         super.init()
@@ -105,55 +104,11 @@ class NtfManager: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
                                 willPresent notification: UNNotification,
                                 withCompletionHandler handler: (UNNotificationPresentationOptions) -> Void) {
         logger.debug("NtfManager.userNotificationCenter: willPresent")
-        handler(presentationOptions(notification.request.content))
-    }
-
-    private func presentationOptions(_ content: UNNotificationContent) -> UNNotificationPresentationOptions {
-        let model = ChatModel.shared
-        if UIApplication.shared.applicationState == .active {
-            switch content.categoryIdentifier {
-            case ntfCategoryMessageReceived:
-                let recent = recentInTheSameChat(content)
-                let userId = content.userInfo["userId"] as? Int64
-                if let userId = userId, let user = model.getUser(userId), !user.showNotifications {
-                    // ... inactive user with disabled notifications
-                    return []
-                } else if model.chatId == nil {
-                    // in the chat list...
-                    if model.currentUser?.userId == userId {
-                        // ... of the active user
-                        return recent ? [] : [.sound, .list]
-                    } else {
-                        // ... of inactive user
-                        return recent ? [.banner] : [.sound, .banner, .list]
-                    }
-                } else if model.chatId == content.targetContentIdentifier {
-                    // in the current chat
-                    return recent ? [] : [.sound, .list]
-                } else {
-                    // in another chat
-                    return recent ? [.banner, .list] : [.sound, .banner, .list]
-                }
-                // this notification is deliverd from the notifications server
-                // when the app is in foreground it does not need to be shown
-            case ntfCategoryCheckMessage: return []
-            case ntfCategoryCallInvitation: return []
-            default: return [.sound, .banner, .list]
-            }
-        } else {
-            return content.categoryIdentifier == ntfCategoryCheckMessage ? [] : [.sound, .banner, .list]
-        }
-    }
-
-    private func recentInTheSameChat(_ content: UNNotificationContent) -> Bool {
-        let now = Date.now
-        if let chatId = content.targetContentIdentifier {
-            var res: Bool = false
-            if let t = prevNtfTime[chatId] { res = t.distance(to: now) < 30 }
-            prevNtfTime[chatId] = now
-            return res
-        }
-        return false
+        // iOS calls willPresent only while the app is in the foreground.
+        // Silence both local alerts and pushes, including generic NSE fallbacks,
+        // regardless of the current chat/profile or temporary inactive state.
+        // Background alerts and CallKit are delivered through separate paths.
+        handler([])
     }
 
     // Spec: spec/services/notifications.md#registerCategories

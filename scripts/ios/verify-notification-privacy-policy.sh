@@ -26,3 +26,19 @@ if grep -Eq '"displayName":[[:space:]]*.*contact\.(displayName|chatViewName)' "$
 fi
 
 echo "Notification privacy policy invariants verified."
+
+# Check the foreground delegate itself: local messages and generic NSE fallbacks
+# must use the same silent policy without relying on cached app/chat state.
+python3 - "$repo_root/apps/ios/Shared/Model/NtfManager.swift" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+start = source.index("willPresent notification: UNNotification,")
+end = source.index("    // Spec:", start)
+body = source[start:end]
+assert "handler([])" in body, "Foreground notifications must be silent."
+assert "presentationOptions(" not in body, "Conditional foreground banners must not return."
+assert "applicationState" not in body, "Use the system foreground callback, not a racing state read."
+print("Foreground local/push notification presentation guard verified.")
+PY
