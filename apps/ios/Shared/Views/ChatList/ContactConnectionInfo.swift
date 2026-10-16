@@ -14,7 +14,6 @@ struct ContactConnectionInfo: View {
     @EnvironmentObject var theme: AppTheme
     @Environment(\.dismiss) var dismiss: DismissAction
     @State var contactConnection: PendingContactConnection
-    @State private var showShortLink: Bool = true
     @State private var alert: CCInfoAlert?
     @State private var localAlias = ""
     @State private var showIncognitoSheet = false
@@ -89,21 +88,19 @@ struct ContactConnectionInfo: View {
                         }
                         if policies.isEmpty || policies.contains(where: { $0.state == .active }) {
                             let links = inviteConnectionLinks(policy, fallback: connLinkInv)
-                            if let shareLink = xauXatContactInviteShareLink(links, short: showShortLink, policy: policy) {
-                                QRCode(uri: shareLink)
-                                    .id("simplex-invitation-qrcode-\(shareLink)")
+                            if let shareLink = xauXatContactInviteShareLink(links, short: true, policy: policy) {
+                                QRCode(uri: shareLink, withLogo: false)
+                                    .id("xauxat-invitation-qrcode-\(shareLink)")
+                                Text("Tap the QR code to share its image.")
+                                    .font(.footnote)
+                                    .foregroundColor(theme.colors.secondary)
                                 incognitoEnabled()
-                                shareLinkButton(shareLink)
                             }
                         }
                         oneTimeLinkLearnMoreButton()
                     } else {
                         incognitoEnabled()
                         oneTimeLinkLearnMoreButton()
-                    }
-                } header: {
-                    if let connLinkInv = contactConnection.connLinkInv, connLinkInv.connShortLink != nil {
-                        ToggleShortLinkHeader(text: Text(""), link: connLinkInv, short: $showShortLink)
                     }
                 } footer: {
                     sharedProfileInfo(contactConnection.incognito)
@@ -216,18 +213,10 @@ struct ContactConnectionInfo: View {
     }
 }
 
-private func shareLinkButton(_ link: String) -> some View {
-    Button {
-        showShareSheet(items: [link])
-    } label: {
-        Label("Share 1-time link", systemImage: "square.and.arrow.up")
-    }
-}
-
 private func oneTimeLinkLearnMoreButton() -> some View {
     NavigationLink {
         AddContactLearnMore(showTitle: false)
-            .navigationTitle("One-time invitation link")
+            .navigationTitle("Invitation QR code")
             .modifier(ThemedBackground())
             .navigationBarTitleDisplayMode(.large)
     } label: {

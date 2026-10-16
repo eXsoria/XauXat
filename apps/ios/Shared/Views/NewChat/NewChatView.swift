@@ -52,7 +52,7 @@ func showKeepInvitationAlert() {
        !showingInvitation.connChatUsed {
         showAlert(
             NSLocalizedString("Keep unused invitation?", comment: "alert title"),
-            message: NSLocalizedString("You can view invitation link again in connection details.", comment: "alert message"),
+            message: NSLocalizedString("You can view the invitation QR code again in connection details.", comment: "alert message"),
             actions: {[
                 UIAlertAction(
                     title: NSLocalizedString("Keep", comment: "alert action"),
@@ -86,10 +86,8 @@ struct NewChatView: View {
     var xauXatStyle: Bool = false
     @State private var invitationUsed: Bool = false
     @State private var connLinkInvitation: CreatedConnLink = CreatedConnLink(connFullLink: "", connShortLink: nil)
-    @State private var showShortLink = true
     @State private var creatingConnReq = false
     @State var choosingProfile = false
-    @State private var pastedLink: String = ""
     @State private var alert: NewChatViewAlert?
     @State private var contactConnection: PendingContactConnection? = nil
     @State private var contactConnections: [PendingContactConnection] = []
@@ -111,9 +109,9 @@ struct NewChatView: View {
         VStack(alignment: .leading) {
             if !onboarding {
                 Picker("New chat", selection: $selection) {
-                    Label("1-time link", systemImage: "link")
+                    Label("Create QR code", systemImage: "qrcode")
                         .tag(NewChatOption.invite)
-                    Label("Connect via link", systemImage: "qrcode")
+                    Label("Scan QR code", systemImage: "qrcode.viewfinder")
                         .tag(NewChatOption.connect)
                 }
                 .pickerStyle(.segmented)
@@ -138,7 +136,6 @@ struct NewChatView: View {
                 if case .connect = selection {
                     ConnectView(
                         showQRCodeScanner: $showQRCodeScanner,
-                        pastedLink: $pastedLink,
                         alert: $alert,
                         onboarding: onboarding,
                         xauXatStyle: xauXatStyle
@@ -287,7 +284,6 @@ struct NewChatView: View {
                     contactConnections: $contactConnections,
                     connLinkInvitation: $connLinkInvitation,
                     connLinkInvitations: $connLinkInvitations,
-                    showShortLink: $showShortLink,
                     choosingProfile: $choosingProfile,
                     invitePolicy: $invitePolicy,
                     onboarding: onboarding
@@ -475,7 +471,7 @@ struct NewChatView: View {
                         Text(
                             inviteMaximumUses == 1
                                 ? "The invite can create one contact."
-                                : "XauXat combines independent one-time links so concurrent use cannot exceed this limit."
+                                : "The QR code contains independent invitations so concurrent use cannot exceed this limit."
                         )
                         .font(.system(size: 13))
                         .foregroundStyle(secondary)
@@ -714,7 +710,7 @@ struct NewChatView: View {
 
     // Rectangle here and in retryButton are needed for gesture to work
     private func creatingLinkProgressView() -> some View {
-        ProgressView("Creating link…")
+        ProgressView("Creating QR code…")
             .progressViewStyle(.circular)
     }
 
@@ -808,7 +804,6 @@ private struct InviteView: View {
     @Binding var contactConnections: [PendingContactConnection]
     @Binding var connLinkInvitation: CreatedConnLink
     @Binding var connLinkInvitations: [CreatedConnLink]
-    @Binding var showShortLink: Bool
     @Binding var choosingProfile: Bool
     @Binding var invitePolicy: XauXatContactInvitePolicy?
     var onboarding: Bool = false
@@ -818,11 +813,6 @@ private struct InviteView: View {
 
     var body: some View {
         List {
-            Section(header: sectionHeader) {
-                shareLinkView()
-            }
-            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 10))
-
             if let policy = observedPolicy {
                 Section {
                     infoRow("Invite status", inviteStatus)
@@ -878,7 +868,6 @@ private struct InviteView: View {
             setInvitationUsed()
         }
         .onAppear(perform: refreshAuthenticatedShareLink)
-        .onChange(of: showShortLink) { _ in refreshAuthenticatedShareLink() }
         .onChange(of: invitePolicy) { _ in refreshAuthenticatedShareLink() }
         .onReceive(chatModel.$chats) { _ in refreshAuthenticatedShareLink() }
     }
@@ -931,36 +920,19 @@ private struct InviteView: View {
 
     @ViewBuilder private var sectionHeaderText: some View {
         if onboarding {
-            Text("Send the link via any messenger - it's secure. Ask the recipient to paste it into XauXat.")
+            Text("Share this QR code privately. The recipient can scan it or choose its image from their photo library in XauXat.")
                 .font(.body).foregroundColor(theme.colors.onBackground).textCase(nil)
         } else {
-            Text((observedPolicy?.maxUses ?? 1) > 1 ? "Share this limited-use invite link" : "Share this 1-time invite link")
+            Text((observedPolicy?.maxUses ?? 1) > 1 ? "Share this limited-use QR code" : "Share this 1-time QR code")
                 .foregroundColor(theme.colors.secondary)
         }
-    }
-
-    private func shareLinkView() -> some View {
-        HStack(spacing: 8) {
-            linkTextView(authenticatedShareLink ?? NSLocalizedString("Authenticated link unavailable", comment: "invite link error"))
-            Button {
-                guard let authenticatedShareLink else { return }
-                showShareSheet(items: [authenticatedShareLink])
-                setInvitationUsed()
-            } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .padding(.top, -7)
-                    .padding(.horizontal, 8)
-            }
-            .disabled(!inviteAvailable || authenticatedShareLink == nil)
-        }
-        .frame(maxWidth: .infinity)
     }
 
     private func qrCodeView() -> some View {
         Section {
             if let authenticatedShareLink {
-                QRCode(uri: authenticatedShareLink, onShare: setInvitationUsed)
-                    .id("simplex-qrcode-view-for-\(authenticatedShareLink)")
+                QRCode(uri: authenticatedShareLink, withLogo: false, onShare: setInvitationUsed)
+                    .id("xauxat-invitation-qr-\(authenticatedShareLink)")
                 .padding()
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -970,13 +942,13 @@ private struct InviteView: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+            } else {
+                Text("Invitation QR code unavailable")
             }
         } header: {
-            if onboarding {
-                Text("Or show QR in person or via video call.").font(.body).foregroundColor(theme.colors.onBackground).textCase(nil)
-            } else {
-                ToggleShortLinkHeader(text: Text("Or show this code"), link: connLinkInvitation, short: $showShortLink)
-            }
+            sectionHeader
+        } footer: {
+            Text("Tap the QR code to share its image. You can also show it in person or in a video call.")
         }
     }
 
@@ -987,7 +959,7 @@ private struct InviteView: View {
         }
         authenticatedShareLink = xauXatContactInviteShareLink(
             activeLinks.isEmpty ? (connLinkInvitations.isEmpty ? [connLinkInvitation] : connLinkInvitations) : activeLinks,
-            short: showShortLink,
+            short: true,
             policy: observedPolicy
         )
     }
@@ -1273,12 +1245,10 @@ private struct ConnectView: View {
     @Environment(\.dismiss) var dismiss: DismissAction
     @EnvironmentObject var theme: AppTheme
     @Binding var showQRCodeScanner: Bool
-    @Binding var pastedLink: String
     @Binding var alert: NewChatViewAlert?
     var onboarding: Bool = false
     var xauXatStyle: Bool = false
     @State var scannerPaused: Bool = false
-    @State private var pasteboardHasStrings = UIPasteboard.general.hasStrings
 
     private var xauXatAccent: Color {
         colorScheme == .dark
@@ -1310,20 +1280,8 @@ private struct ConnectView: View {
                 xauXatConnectView
             } else {
                 List {
-                    Section(header: connectSectionHeader) {
-                        pasteLinkView()
-                    }
-                    .listRowInsets(
-                        EdgeInsets(
-                            top: 0,
-                            leading: 20,
-                            bottom: 0,
-                            trailing: 20
-                        )
-                    )
-
                     Section(
-                        header: Text("Or scan QR code")
+                        header: Text("Scan a QR code or choose an image")
                             .foregroundColor(theme.colors.secondary)
                     ) {
                         ScannerInView(
@@ -1345,32 +1303,11 @@ private struct ConnectView: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Paste the link you received")
+                    Text("Scan a QR code or choose an image")
                         .font(.system(size: 13, weight: .regular))
                         .textCase(.uppercase)
                         .foregroundStyle(xauXatSecondary)
                         .padding(.horizontal, 25)
-
-                    pasteLinkView()
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .padding(.horizontal, 18)
-                        .background(
-                            xauXatSurface,
-                            in: RoundedRectangle(
-                                cornerRadius: 12,
-                                style: .continuous
-                            )
-                        )
-                        .padding(.horizontal, 20)
-                        .padding(.top, 7)
-
-                    Text("Or scan QR code")
-                        .font(.system(size: 13, weight: .regular))
-                        .textCase(.uppercase)
-                        .foregroundStyle(xauXatSecondary)
-                        .padding(.horizontal, 25)
-                        .padding(.top, 35)
 
                     ScannerInView(
                         showQRCodeScanner: $showQRCodeScanner,
@@ -1379,9 +1316,14 @@ private struct ConnectView: View {
                         xauXatStyle: true
                     )
                     .frame(maxWidth: .infinity)
-                    .aspectRatio(1, contentMode: .fit)
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
+
+                    if connectProgressManager.showConnectProgress != nil {
+                        ProgressView("Connecting…")
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 16)
+                    }
 
                     Spacer(minLength: 24)
                 }
@@ -1396,56 +1338,10 @@ private struct ConnectView: View {
         )
     }
 
-    @ViewBuilder private func pasteLinkView() -> some View {
-        if pastedLink == "" {
-            ZStack(alignment: .trailing) {
-                Button {
-                    if let str = UIPasteboard.general.string {
-                        let candidate = str.trimmingCharacters(in: .whitespaces)
-                        if xauXatIsProtectedGroupInviteLink(candidate) {
-                            pastedLink = candidate
-                            connect(candidate)
-                            return
-                        }
-                        switch strConnectTarget(candidate) {
-                        case let .link(text, _, _):
-                            pastedLink = text
-                            connect(candidate)
-                        case let .name(text, _):
-                            pastedLink = text
-                            connect(pastedLink)
-                        case .none:
-                            alert = .newChatSomeAlert(alert: SomeAlert(
-                    alert: mkAlert(title: "Invalid link", message: "The text you pasted is not a valid connection link."),
-                                id: "pasteLinkView: code is not a SimpleX link"
-                            ))
-                        }
-                    }
-                } label: {
-                    Text("Tap to paste link")
-                        .foregroundColor(xauXatStyle ? xauXatAccent : theme.colors.primary)
-                }
-                .disabled(!pasteboardHasStrings)
-                .frame(maxWidth: .infinity, alignment: .center)
-                if connectProgressManager.showConnectProgress != nil {
-                    ProgressView()
-                }
-            }
-        } else {
-            HStack {
-                linkTextView(pastedLink)
-                if connectProgressManager.showConnectProgress != nil {
-                    ProgressView()
-                }
-            }
-        }
-    }
-
-    private func processQRCode(_ resp: Result<ScanResult, ScanError>) {
+    private func processQRCode(_ resp: Result<String, Error>) {
         switch resp {
-        case let .success(r):
-            let link = r.string
-            if strIsSimplexLink(r.string) || xauXatIsProtectedGroupInviteLink(r.string) {
+        case let .success(link):
+            if strIsSimplexLink(link) || xauXatIsProtectedGroupInviteLink(link) {
                 connect(link)
             } else {
                 alert = .newChatSomeAlert(alert: SomeAlert(
@@ -1462,28 +1358,6 @@ private struct ConnectView: View {
         }
     }
 
-    private var connectSectionHeader: some View {
-        #if SIMPLEX_ASSETS
-        VStack(alignment: .leading, spacing: 0) {
-            Image(colorScheme == .light
-                ? (onboarding ? "connect-via-link" : "connect-via-link-small")
-                : (onboarding ? "connect-via-link-light" : "connect-via-link-small-light"))
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity)
-            Text("Paste the link you received").foregroundColor(theme.colors.secondary)
-        }
-        .padding(.bottom, 4)
-        #else
-        Text("Paste the link you received")
-            .foregroundColor(
-                xauXatStyle
-                    ? xauXatSecondary
-                    : theme.colors.secondary
-            )
-        #endif
-    }
-
     private func connect(_ link: String) {
         scannerPaused = true
         planAndConnect(
@@ -1491,7 +1365,6 @@ private struct ConnectView: View {
             theme: theme,
             dismiss: true,
             cleanup: {
-                pastedLink = ""
                 scannerPaused = false
             }
         )
@@ -1499,17 +1372,90 @@ private struct ConnectView: View {
 }
 
 struct ScannerInView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @Binding var showQRCodeScanner: Bool
     var scannerPaused: Binding<Bool>? = nil
-    let processQRCode: (_ resp: Result<ScanResult, ScanError>) -> Void
+    let processQRCode: (_ resp: Result<String, Error>) -> Void
     @State private var cameraAuthorizationStatus: AVAuthorizationStatus?
+    @State private var showPhotoLibrary = false
+    @State private var photoLibraryDismissed = true
+    @State private var readingPhoto = false
+    @State private var photoResult: Result<String, Error>?
+    @State private var photoTask: Task<Void, Never>?
     var scanMode: ScanMode = .continuous
     var xauXatStyle: Bool = false
 
     var body: some View {
+        VStack(spacing: 16) {
+            cameraView
+                .aspectRatio(1, contentMode: .fit)
+
+            Button {
+                photoResult = nil
+                photoLibraryDismissed = false
+                showPhotoLibrary = true
+            } label: {
+                Label("Choose QR image from library", systemImage: "photo.on.rectangle")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .disabled(readingPhoto || (scannerPaused?.wrappedValue ?? false))
+
+            if readingPhoto {
+                ProgressView("Reading QR code…")
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .sheet(isPresented: $showPhotoLibrary, onDismiss: {
+            photoLibraryDismissed = true
+            deliverPhotoResult()
+        }) {
+            QRCodePhotoPicker(completion: readSelectedPhoto)
+                .modifier(XauXatAppSwitcherProtection())
+        }
+        .onAppear {
+            refreshCameraAuthorization()
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                refreshCameraAuthorization()
+                deliverPhotoResult()
+            }
+        }
+        .onDisappear {
+            photoTask?.cancel()
+            photoTask = nil
+            readingPhoto = false
+            photoResult = nil
+        }
+    }
+
+    private func refreshCameraAuthorization() {
+        let previous = cameraAuthorizationStatus
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        cameraAuthorizationStatus = status
+        // Choosing a saved image never requires permission to use the camera.
+        if status != .authorized {
+            showQRCodeScanner = false
+        } else if previous == .denied {
+            showQRCodeScanner = true
+        }
+    }
+
+    private var cameraView: some View {
         Group {
             if showQRCodeScanner, case .authorized = cameraAuthorizationStatus {
-                CodeScannerView(codeTypes: [.qr], scanMode: scanMode, isPaused: scannerPaused?.wrappedValue ?? false, completion: processQRCode)
+                CodeScannerView(
+                    codeTypes: [.qr],
+                    scanMode: scanMode,
+                    isPaused: !photoLibraryDismissed || readingPhoto || (scannerPaused?.wrappedValue ?? false)
+                ) { result in
+                    guard photoLibraryDismissed, !readingPhoto,
+                          !(scannerPaused?.wrappedValue ?? false) else { return }
+                    processQRCode(result.map { $0.string }.mapError { $0 as Error })
+                }
                     .aspectRatio(1, contentMode: .fit)
                     .cornerRadius(12)
                     .listRowBackground(Color.clear)
@@ -1532,7 +1478,7 @@ struct ScannerInView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .foregroundColor(Color.clear)
                         switch cameraAuthorizationStatus {
-                        case .authorized, nil: EmptyView()
+                        case .authorized, nil: Label("Tap to scan", systemImage: "qrcode.viewfinder")
                         case .restricted: Text("Camera not available")
                         case .denied:  Label("Enable camera access", systemImage: "camera")
                         default: Label("Tap to scan", systemImage: "qrcode")
@@ -1554,30 +1500,42 @@ struct ScannerInView: View {
                 .disabled(cameraAuthorizationStatus == .restricted)
             }
         }
-        .task {
-            let status = AVCaptureDevice.authorizationStatus(for: .video)
-            cameraAuthorizationStatus = status
-            if showQRCodeScanner {
-                switch status {
-                case .notDetermined: await askCameraAuthorizationAsync()
-                case .restricted: showQRCodeScanner = false
-                case .denied: showQRCodeScanner = false
-                case .authorized: ()
-                @unknown default: await askCameraAuthorizationAsync()
-                }
+    }
+
+    private func readSelectedPhoto(_ selection: Result<UIImage, Error>?) {
+        showPhotoLibrary = false
+        guard let selection else { return }
+        readingPhoto = true
+        photoTask?.cancel()
+        photoTask = Task {
+            let result: Result<String, Error>
+            switch selection {
+            case let .success(image): result = await xauXatReadQRCodePhoto(image)
+            case let .failure(error): result = .failure(error)
             }
+            guard !Task.isCancelled else { return }
+            photoResult = result
+            readingPhoto = false
+            photoTask = nil
+            deliverPhotoResult()
         }
     }
 
-    func askCameraAuthorizationAsync() async {
-        await AVCaptureDevice.requestAccess(for: .video)
-        cameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+    private func deliverPhotoResult() {
+        // Planning a connection can present a confirmation sheet. Wait until
+        // the system photo picker is fully dismissed before reusing that flow.
+        guard scenePhase == .active, photoLibraryDismissed, !readingPhoto,
+              let result = photoResult else { return }
+        photoResult = nil
+        processQRCode(result)
     }
 
     func askCameraAuthorization(_ cb: (() -> Void)? = nil) {
         AVCaptureDevice.requestAccess(for: .video) { allowed in
-            cameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
-            if allowed { cb?() }
+            DispatchQueue.main.async {
+                cameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+                if allowed { cb?() }
+            }
         }
     }
 }
