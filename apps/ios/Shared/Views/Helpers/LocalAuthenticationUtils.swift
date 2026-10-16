@@ -16,6 +16,11 @@ enum LAResult {
     case unavailable(authError: String?)
 }
 
+func xauXatRequiresUnlockBeforeInitialization() -> Bool {
+    kcAppPassword.get() != nil &&
+        (kcSelfDestructPassword.get() != nil || kcDecoyPassword.get() != nil)
+}
+
 enum XauXatDuressScope: String, CaseIterable, Identifiable {
     case primary
     case decoy

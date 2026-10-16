@@ -12,6 +12,7 @@ import sys
 root, temp = map(Path, sys.argv[1:])
 content = (root / 'apps/ios/Shared/ContentView.swift').read_text()
 sheet = (root / 'apps/ios/Shared/Views/Helpers/AppSheet.swift').read_text()
+auth = (root / 'apps/ios/Shared/Views/Helpers/LocalAuthenticationUtils.swift').read_text()
 
 def declaration(source, marker):
     start = source.index(marker)
@@ -29,12 +30,32 @@ assert 'if !prefPerformLA || accessAuthenticated {' in content
 assert '.accessibilityHidden(!appSheetState.scenePhaseActive)' in sheet
 assert '.allowsHitTesting(appSheetState.scenePhaseActive)' in sheet
 assert 'var showsOpeningAnimation = false' in sheet
+assert '.disabled(!contentAuthenticationReady)' in content
+for event in ['tor.state', 'chatModel.ctrlInitInProgress', 'chatModel.chatDbStatus']:
+    assert '.onChange(of: ' + event + ')' in content
 
 adapters = r'''
 import Foundation
 @propertyWrapper final class State<Value> {
     var wrappedValue: Value
     init(wrappedValue: Value) { self.wrappedValue = wrappedValue }
+}
+enum Phase: Equatable { case active, inactive, background }
+enum TorState { case starting, ready(UInt16) }
+final class Tor { var state: TorState = .starting }
+var socksReady = false
+func isXauXatTorReady() -> Bool { socksReady }
+final class Key {
+    var value: String?
+    func get() -> String? { value }
+}
+let kcAppPassword = Key()
+let kcSelfDestructPassword = Key()
+let kcDecoyPassword = Key()
+var checks = 0
+func expect(_ condition: Bool, _ name: String) {
+    precondition(condition, name)
+    checks += 1
 }
 enum DBStatus: Equatable { case ok, error }
 enum Onboarding: Equatable { case complete, createProfile }
@@ -51,6 +72,19 @@ final class Model {
     var v3DBMigration = Migration()
     var chatId: String? = "test"
     var contentViewAccessAuthenticated = false
+    var chatInitialized = false
+    var showCallView = false
+    var activeCall: Int?
+}
+var activeModel: Model?
+var initializations = 0
+func initChatAndMigrate() {
+    precondition(activeModel?.contentViewAccessAuthenticated == true)
+    initializations += 1
+    activeModel?.chatInitialized = true
+}
+struct CallController {
+    static func useCallKit() -> Bool { true }
 }
 enum LAResult { case success, failed, unavailable }
 enum Mode: Equatable { case system, passcode }
@@ -58,8 +92,10 @@ struct ModeDefault { func get() -> Mode { mode } }
 var mode: Mode = .system
 let privacyLocalAuthModeDefault = ModeDefault()
 var result: LAResult?
+var requests = 0
 func authenticate(reason: String, selfDestruct: Bool, completed: (LAResult) -> Void) {
     precondition(selfDestruct)
+    requests += 1
     if let result { completed(result) }
 }
 func dismissAllSheets(animated: Bool, _ completed: () -> Void) { completed() }
@@ -74,6 +110,10 @@ func laFailedAlert() -> String { "failed" }
 func laUnavailableTurningOffAlert() -> String { "unavailable" }
 struct Harness {
     let chatModel = Model()
+    let tor = Tor()
+    @State var scenePhase: Phase = .active
+    @State var contentAccessAuthenticationExtended = false
+    @State var automaticAuthenticationAttempted = false
     @State var waitingForOrPassedAuth = true
     @State var prefPerformLA = true
     @State var canConnectViewCall = false
@@ -81,63 +121,138 @@ struct Harness {
 '''
 predicate = declaration(content, 'private var showsInitializationView: Bool')
 callback = declaration(content, 'private func authenticateContentViewAccess()')
-checks = r'''
+readiness = declaration(content, 'private var contentAuthenticationReady: Bool')
+automatic = declaration(content, 'private func authenticateContentWhenReady()')
+selection = declaration(auth, 'func xauXatRequiresUnlockBeforeInitialization()')
+checks_source = r'''
     func check(_ expected: Bool, _ name: String) {
-        precondition(showsInitializationView == expected, name)
+        expect(showsInitializationView == expected, name)
     }
     func run() {
-        result = nil
+        activeModel = chatModel
+        authenticateContentWhenReady()
         authenticateContentViewAccess()
-        check(true, "cold Face ID request keeps opening visible")
-        precondition(!chatModel.contentViewAccessAuthenticated)
-        result = .success
-        authenticateContentViewAccess()
-        check(true, "Face ID success while database pending")
-        precondition(chatModel.contentViewAccessAuthenticated)
-        precondition(lastSuccessfulUnlock != nil)
+        expect(requests == 0, "neither automatic nor manual auth before Tor")
+        check(true, "cold loading remains visible")
+        tor.state = .ready(12345)
+        authenticateContentWhenReady()
+        expect(requests == 0, "published Tor state alone is insufficient")
+        socksReady = true
+        authenticateContentWhenReady()
+        expect(requests == 0, "normal auth waits for database initialization")
         chatModel.chatDbStatus = .ok
         chatModel.ctrlInitInProgress = true
-        check(true, "database opened but initialization still running")
+        authenticateContentWhenReady()
+        expect(requests == 0, "no auth while initialization runs")
+        check(true, "database open is not content ready")
         chatModel.ctrlInitInProgress = false
-        check(true, "database ready but no initial content yet")
+        authenticateContentWhenReady()
+        expect(requests == 0, "normal auth waits for an initial screen")
+        check(true, "missing initial screen stays covered")
         chatModel.onboardingStage = .complete
-        check(false, "ready chats replace opening")
-        chatModel.onboardingStage = .createProfile
-        check(false, "onboarding must remain accessible")
-        chatModel.chatDbStatus = .error
-        check(false, "database error must remain accessible")
-        chatModel.chatDbStatus = .ok
-        chatModel.onboardingStage = nil
-        chatModel.v3DBMigration.startChat = false
-        check(false, "migration must remain accessible")
-        chatModel.v3DBMigration.startChat = true
-        AppChatState.shared.value = .stopped
-        check(false, "explicitly stopped chat is not loading")
-        AppChatState.shared.value = .suspended
-        chatModel.chatDbStatus = nil
+        result = nil
+        authenticateContentWhenReady()
+        expect(requests == 1 && automaticAuthenticationAttempted, "Face ID at prepared unlock stage")
+        expect(!chatModel.contentViewAccessAuthenticated, "request alone never grants access")
+        authenticateContentWhenReady()
+        expect(requests == 1, "one automatic request per foreground attempt")
+        scenePhase = .inactive
+        authenticateContentViewAccess()
+        expect(requests == 1, "no nested request during native Face ID inactivity")
+        scenePhase = .active
         result = .failed
         authenticateContentViewAccess()
-        check(false, "cancelled Face ID restores unlock instead of infinite loading")
-        precondition(!chatModel.contentViewAccessAuthenticated)
-        precondition(AlertManager.shared.alerts.isEmpty)
+        check(false, "Face ID cancellation restores unlock")
+        expect(!chatModel.contentViewAccessAuthenticated, "Face ID failure stays locked")
+        let cancelledRequests = requests
+        authenticateContentWhenReady()
+        expect(requests == cancelledRequests, "cancel does not loop Face ID automatically")
         mode = .passcode
+        automaticAuthenticationAttempted = false
+        result = nil
+        authenticateContentWhenReady()
+        expect(requests == cancelledRequests + 1, "PIN uses the same prepared unlock stage")
+        result = .failed
         authenticateContentViewAccess()
-        check(false, "PIN failure also restores unlock")
-        precondition(AlertManager.shared.alerts == ["failed"])
+        expect(AlertManager.shared.alerts == ["failed"], "PIN failure keeps its existing alert")
         result = .success
         authenticateContentViewAccess()
-        check(true, "retry resumes pending opening")
+        expect(chatModel.contentViewAccessAuthenticated && lastSuccessfulUnlock != nil, "successful unlock grants access")
+        expect(initializations == 0, "prepared normal database is not initialized twice")
+        check(false, "ready chats replace opening")
+        chatModel.onboardingStage = .createProfile
+        check(false, "onboarding is accessible")
+        chatModel.chatDbStatus = .error
+        chatModel.onboardingStage = nil
+        check(false, "database errors are accessible")
+        expect(contentAuthenticationReady, "authentication can unlock an error screen")
+        chatModel.chatDbStatus = .ok
+        chatModel.v3DBMigration.startChat = false
+        check(false, "migration is accessible")
+        expect(contentAuthenticationReady, "authentication can unlock migration")
+        chatModel.v3DBMigration.startChat = true
+        AppChatState.shared.value = .stopped
+        check(false, "stopped chat is not loading")
+        AppChatState.shared.value = .suspended
+        chatModel.chatDbStatus = nil
+        chatModel.contentViewAccessAuthenticated = false
+        kcAppPassword.value = "test-only"
+        kcDecoyPassword.value = "test-only-decoy"
+        expect(contentAuthenticationReady, "decoy PIN must precede database selection")
+        result = nil
+        authenticateContentViewAccess()
+        expect(initializations == 0, "a pending PIN does not open a store")
+        // The real PIN view initializes the selected primary/decoy store before
+        // completing authentication. The callback must preserve that choice.
+        chatModel.chatInitialized = true
+        result = .success
+        authenticateContentViewAccess()
+        expect(initializations == 0, "selected PIN store is not reopened or replaced")
+        kcDecoyPassword.value = nil
+        kcSelfDestructPassword.value = "test-only-duress"
+        chatModel.chatInitialized = false
+        chatModel.contentViewAccessAuthenticated = false
+        result = nil
+        authenticateContentViewAccess()
+        expect(initializations == 0, "deferred system startup waits for successful auth")
+        result = .success
+        authenticateContentViewAccess()
+        expect(initializations == 1 && chatModel.chatInitialized, "system success releases deferred primary startup")
+        kcAppPassword.value = nil
+        expect(!xauXatRequiresUnlockBeforeInitialization(), "alternate PIN without app PIN does not defer startup")
+        kcSelfDestructPassword.value = nil
+        chatModel.chatDbStatus = .ok
+        chatModel.onboardingStage = .complete
+        chatModel.contentViewAccessAuthenticated = false
+        automaticAuthenticationAttempted = false
+        chatModel.ctrlInitInProgress = true
+        let busyRequests = requests
+        authenticateContentWhenReady()
+        expect(requests == busyRequests, "restart initialization also delays auth")
+        chatModel.ctrlInitInProgress = false
+        chatModel.showCallView = true
+        chatModel.activeCall = 1
+        authenticateContentWhenReady()
+        expect(requests == busyRequests, "CallKit view retains authentication exception")
+        chatModel.showCallView = false
+        AppChatState.shared.value = .stopped
+        authenticateContentWhenReady()
+        expect(requests == busyRequests, "stopped chat does not prompt automatically")
+        AppChatState.shared.value = .suspended
+        scenePhase = .background
+        authenticateContentWhenReady()
+        expect(requests == busyRequests, "background never prompts")
+        scenePhase = .active
+        contentAccessAuthenticationExtended = true
+        authenticateContentWhenReady()
+        expect(requests == busyRequests && chatModel.contentViewAccessAuthenticated, "existing unlock grace is preserved")
         result = .unavailable
         authenticateContentViewAccess()
-        check(true, "unavailable authentication preserves existing fallback")
-        precondition(!prefPerformLA)
-        precondition(AlertManager.shared.alerts.last == "unavailable")
+        expect(!prefPerformLA && AlertManager.shared.alerts.last == "unavailable", "existing unavailable fallback is preserved")
     }
 }
-Harness().run()
-print("13 opening/authentication transition checks passed.")
 '''
-(temp / 'main.swift').write_text(adapters + predicate + '\n' + callback + '\n' + checks)
+(temp / 'main.swift').write_text(adapters + predicate + '\n' + readiness + '\n' + automatic + '\n' + callback + '\n' + checks_source + '\n' + selection + '\nHarness().run()\nprint("\(checks) opening/authentication transition checks passed.")\n')
 ui = 'import SwiftUI\n' + declaration(sheet, 'class AppSheetState: ObservableObject')
 ui += '\n' + declaration(sheet, 'struct XauXatAppSwitcherProtection: ViewModifier')
 ui += '\n' + declaration(content, 'struct XauXatOpeningView: View')

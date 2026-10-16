@@ -34,7 +34,7 @@ struct XauXatAppSwitcherProtection: ViewModifier {
                 // protected media retain the opaque black default.
                 Group {
                     if showsOpeningAnimation {
-                        XauXatOpeningView()
+                        XauXatOpeningView(showsProgress: false)
                     } else {
                         Color.black.ignoresSafeArea()
                     }

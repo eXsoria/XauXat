@@ -27,6 +27,7 @@ struct ContentView: View {
     @ObservedObject var callController = CallController.shared
     // Spec: spec/client/navigation.md#AppSheetState
     @ObservedObject var appSheetState = AppSheetState.shared
+    @ObservedObject private var tor = EmbeddedTorManager.shared
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var theme: AppTheme
     @EnvironmentObject var sceneDelegate: SceneDelegate
@@ -67,6 +68,16 @@ struct ContentView: View {
         return chatModel.ctrlInitInProgress || chatModel.onboardingStage == nil
     }
 
+    private var contentAuthenticationReady: Bool {
+        guard scenePhase == .active, case .ready = tor.state,
+              isXauXatTorReady(), !chatModel.ctrlInitInProgress else { return false }
+        // Both Face ID and PIN wait for the same startup boundary. A decoy or
+        // duress PIN must still select the store before it can be initialized.
+        if xauXatRequiresUnlockBeforeInitialization() { return true }
+        guard let status = chatModel.chatDbStatus else { return false }
+        return status != .ok || !chatModel.v3DBMigration.startChat || chatModel.onboardingStage != nil
+    }
+
     var body: some View {
         Group {
             if #available(iOS 16.0, *) {
@@ -89,8 +100,14 @@ struct ContentView: View {
                 contentView()
                     .padding(.top, showCallArea ? callTopPadding : 0)
             } else {
-                lockButton()
-                    .padding(.top, showCallArea ? callTopPadding : 0)
+                ZStack {
+                    XauXatOpeningView(showsProgress: false)
+                    VStack {
+                        Spacer()
+                        lockButton().padding(.bottom, 40)
+                    }
+                }
+                .padding(.top, showCallArea ? callTopPadding : 0)
             }
 
             if showCallArea, let call = chatModel.activeCall {
@@ -141,32 +158,23 @@ struct ContentView: View {
                 canConnectViewCall = false
             case .active:
                 canConnectViewCall = !prefPerformLA || contentAccessAuthenticationExtended || unlockedRecently()
-                
-                // condition `!chatModel.contentViewAccessAuthenticated` is required for when authentication is enabled in settings or on initial notice
-                if prefPerformLA && !chatModel.contentViewAccessAuthenticated {
-                    if AppChatState.shared.value != .stopped {
-                        if contentAccessAuthenticationExtended {
-                            chatModel.contentViewAccessAuthenticated = true
-                        } else {
-                            if !automaticAuthenticationAttempted {
-                                automaticAuthenticationAttempted = true
-                                // authenticate if call kit call is not in progress
-                                if !(CallController.useCallKit() && chatModel.showCallView && chatModel.activeCall != nil) {
-                                    authenticateContentViewAccess()
-                                }
-                            }
-                        }
-                    } else {
-                        // when app is stopped automatic authentication is not attempted
-                        chatModel.contentViewAccessAuthenticated = contentAccessAuthenticationExtended
-                    }
-                }
+                authenticateContentWhenReady()
             default:
                 break
             }
         }
         .onAppear {
             reactOnDarkThemeChanges(systemInDarkThemeCurrently)
+            authenticateContentWhenReady()
+        }
+        .onChange(of: tor.state) { _ in
+            authenticateContentWhenReady()
+        }
+        .onChange(of: chatModel.ctrlInitInProgress) { _ in
+            authenticateContentWhenReady()
+        }
+        .onChange(of: chatModel.chatDbStatus) { _ in
+            authenticateContentWhenReady()
         }
         .onChange(of: colorScheme) { scheme in
             // It's needed to update UI colors when iOS wants to make screenshot after going to background,
@@ -251,6 +259,7 @@ struct ContentView: View {
     // Spec: spec/client/navigation.md#lockButton
     private func lockButton() -> some View {
         Button(action: authenticateContentViewAccess) { Label("Unlock", systemImage: "lock") }
+            .disabled(!contentAuthenticationReady)
     }
 
     private func initializationView() -> some View {
@@ -390,9 +399,27 @@ struct ContentView: View {
         }
     }
 
+    private func authenticateContentWhenReady() {
+        guard scenePhase == .active, prefPerformLA, !chatModel.contentViewAccessAuthenticated else { return }
+        if AppChatState.shared.value == .stopped {
+            chatModel.contentViewAccessAuthenticated = contentAccessAuthenticationExtended
+        } else if contentAccessAuthenticationExtended {
+            chatModel.contentViewAccessAuthenticated = true
+        } else if contentAuthenticationReady && !automaticAuthenticationAttempted &&
+                    !(CallController.useCallKit() && chatModel.showCallView && chatModel.activeCall != nil) {
+            authenticateContentViewAccess()
+        }
+    }
+
     private func authenticateContentViewAccess() {
+        guard contentAuthenticationReady else { return }
+        automaticAuthenticationAttempted = true
         logger.debug("DEBUGGING: authenticateContentViewAccess")
         dismissAllSheets(animated: false) {
+            guard contentAuthenticationReady else {
+                automaticAuthenticationAttempted = false
+                return
+            }
             logger.debug("DEBUGGING: authenticateContentViewAccess, in dismissAllSheets callback")
             chatModel.chatId = nil
             waitingForOrPassedAuth = true
@@ -405,6 +432,12 @@ struct ContentView: View {
                     chatModel.contentViewAccessAuthenticated = true
                     canConnectViewCall = true
                     lastSuccessfulUnlock = ProcessInfo.processInfo.systemUptime
+                    if xauXatRequiresUnlockBeforeInitialization() && !chatModel.chatInitialized {
+                        // PIN selection already initializes its chosen store.
+                        // System authentication may instead release a deferred
+                        // primary-store startup after successful verification.
+                        initChatAndMigrate()
+                    }
                 case .failed:
                     // System Face ID has no LocalAuthView.onDisappear event.
                     // Restore the retry button on cancellation/failure too.
@@ -573,6 +606,7 @@ func mkAlert(title: LocalizedStringKey, message: LocalizedStringKey? = nil) -> A
 
 struct XauXatOpeningView: View {
     @Environment(\.colorScheme) private var colorScheme
+    var showsProgress = true
 
     @State private var gazeX: CGFloat = 0
     @State private var gazeY: CGFloat = 0
@@ -726,11 +760,13 @@ struct XauXatOpeningView: View {
                 }
                 .frame(height: 78, alignment: .top)
                 .padding(.top, 4)
+                .opacity(showsProgress ? 1 : 0)
+                .accessibilityHidden(!showsProgress)
             }
         }
         .onAppear {
             startEyeAnimation()
-            startLoadingMessages()
+            if showsProgress { startLoadingMessages() }
         }
         .onDisappear {
             animationTask?.cancel()
