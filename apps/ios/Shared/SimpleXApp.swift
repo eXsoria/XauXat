@@ -68,9 +68,8 @@ struct SimpleXApp: App {
                         chatModel.onboardingStage = onboardingStageDefault.get()
                     }
                     startEmbeddedTor(showError: true) {
-                        let hasAlternatePIN = kcSelfDestructPassword.get() != nil || kcDecoyPassword.get() != nil
                         if chatModel.migrationState == nil &&
-                           (kcAppPassword.get() == nil || !hasAlternatePIN) {
+                           !xauXatRequiresUnlockBeforeInitialization() {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                                 initChatAndMigrate()
                             }
