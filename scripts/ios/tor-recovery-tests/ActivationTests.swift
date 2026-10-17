@@ -109,8 +109,9 @@ let logger = Logger()
                 kcDecoyPassword.value = "TEST_PIN"
                 ChatModel.shared.contentViewAccessAuthenticated = false
             }
-            nseWaiter!(true)
+            nseWaiter!(false)
             require(activations == 0 && completions == 1, "A late NSE callback cannot activate a stale, stopped or protected session and cannot strand its waiter")
+            require(nseStateGroupDefault.value == .active, "A stale NSE timeout must not rewrite the newer extension state")
         }
         reset()
         nseStateGroupDefault.value = .active
@@ -118,6 +119,12 @@ let logger = Logger()
         startChatAndActivate(ifAllowed: { true }) { completions += 1 }
         nseWaiter!(true)
         require(activations == 1 && completions == 1, "A current NSE callback must activate exactly once")
+        reset()
+        nseStateGroupDefault.value = .active
+        completions = 0
+        startChatAndActivate(ifAllowed: { true }) { completions += 1 }
+        nseWaiter!(false)
+        require(activations == 1 && completions == 1 && nseStateGroupDefault.value == .suspended, "A current NSE timeout must retain the existing bounded activation fallback")
         print("Production activation regression checks passed: \(checks)")
     }
 }

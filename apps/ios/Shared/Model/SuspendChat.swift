@@ -178,6 +178,7 @@ func startChatAndActivate(ifAllowed: @escaping () -> Bool = { true }, _ completi
         // setting app state to "activating" to notify NSE that it should suspend
         setAppState(.activating)
         waitNSESuspended(timeout: nseSuspendTimeout) { ok in
+            guard ifAllowed() else { completion(); return }
             if !ok {
                 // if for some reason NSE failed to suspend,
                 // e.g., it crashed previously without setting its state to "suspended",
