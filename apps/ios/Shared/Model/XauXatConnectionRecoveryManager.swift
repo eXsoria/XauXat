@@ -47,6 +47,9 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         // Foreground availability must not depend on the chat being resumed:
         // resuming the chat itself requires a verified Tor route first.
         var active: Bool
+        // A local store switch can reuse numeric profile IDs. Keep it in the
+        // operation identity, but never include this flag in diagnostics.
+        var alternateStore: Bool = false
     }
 
     enum SessionState: String {
@@ -233,6 +236,12 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     private func perform(_ requested: Scope, reason: Reason, force: Bool, context: Context, epoch operationEpoch: Int) async throws {
         do {
             try requireCurrent(context, operationEpoch, reason: reason)
+            if case let .relays(relays) = requested {
+                guard !relays.isEmpty, relays.allSatisfy({ $0.userId == context.userId }) else {
+                    record(reason, "invalid_targets")
+                    throw RecoveryError.superseded
+                }
+            }
             var scope = requested
             if dependencies.sessionState() == .suspended {
                 // A suspended core cannot provide a reliable relay summary.

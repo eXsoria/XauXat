@@ -81,6 +81,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
 
     static func main() async throws {
         try await suspendedChatVerifiesTorBeforeResuming()
+        try await suspendedChatCannotWidenStaleProfileTargets()
         try await blockedRequestsExplainWhy()
         try await routeOnlyDoesNotActivateAStoppedOrMissingProfile()
         try await routeOnlyRejectsLateResults()
@@ -152,6 +153,14 @@ typealias Recovery = XauXatConnectionRecoveryManager
         }
     }
 
+    static func suspendedChatCannotWidenStaleProfileTargets() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        let stale = Recovery.Relay(userId: 2, server: "smp://old-profile.example")
+        await failed(Task { try await f.manager.reconnect(.relays([stale])) }, "Stale profile targets cannot become a global repair when suspended")
+        require(f.forces.isEmpty && f.applyCount == 0 && f.resumeCount == 0 && f.commands.isEmpty, "Validate requested profile before widening recovery")
+    }
+
     static func routeOnlyDoesNotActivateAStoppedOrMissingProfile() async throws {
         for state in [Recovery.SessionState.stopped, .uninitialized, .unlockRequired] {
             let f = RecoveryFixture()
@@ -183,7 +192,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
     }
 
     static func changedContextCannotResumeAfterTor() async throws {
-        for change in 0..<3 {
+        for change in 0..<4 {
             let f = RecoveryFixture()
             f.sessionState = .suspended
             var held: CheckedContinuation<Void, Never>?
@@ -193,11 +202,13 @@ typealias Recovery = XauXatConnectionRecoveryManager
             switch change {
             case 0: f.context.active = false; f.manager.pause()
             case 1: f.context.userId = 2
+            case 2: f.context.alternateStore = true
             default: f.context.online = false; f.manager.networkChanged(online: false)
             }
             held!.resume()
             await failed(operation, "An NSE activation waiter must reject stale foreground/profile/path state")
             require(f.sessionState == .suspended && f.commands.isEmpty, "Invalidated activation cannot resume or reconnect the core")
+            require(!f.manager.diagnosticText.contains("alternateStore"), "Diagnostics must not disclose local store selection")
         }
     }
 

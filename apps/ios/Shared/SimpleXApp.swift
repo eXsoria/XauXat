@@ -151,14 +151,17 @@ struct SimpleXApp: App {
         }
 
         let userId = chatModel.currentUser?.userId
+        let storageScope = xauXatStorageScope()
         startChatAndActivate(ifAllowed: {
             scenePhase == .active && isXauXatTorReady()
                 && chatModel.currentUser?.userId == userId
+                && xauXatStorageScope() == storageScope
                 && AppChatState.shared.value != .stopped
                 && (kcDecoyPassword.get() == nil || chatModel.contentViewAccessAuthenticated)
         }) {
             guard scenePhase == .active, chatModel.chatRunning == true else { return }
             guard isXauXatTorReady(), chatModel.currentUser?.userId == userId,
+                  xauXatStorageScope() == storageScope,
                   AppChatState.shared.value == .active else { return }
             if configurationReconnected { XauXatConnectionRecoveryManager.shared.configurationApplied() }
             XauXatConnectionRecoveryManager.shared.resume()

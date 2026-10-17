@@ -125,7 +125,8 @@ extension XauXatConnectionRecoveryManager {
         context: {
             Context(userId: ChatModel.shared.currentUser?.userId,
                     online: ChatModel.shared.networkInfo.online,
-                    active: UIApplication.shared.applicationState == .active && AppSheetState.shared.scenePhaseActive)
+                    active: UIApplication.shared.applicationState == .active && AppSheetState.shared.scenePhaseActive,
+                    alternateStore: xauXatStorageScope() == .decoy)
         },
         ensureTor: { force in
             let previousPort: UInt16?
