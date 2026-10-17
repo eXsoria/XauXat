@@ -125,6 +125,12 @@ let logger = Logger()
         startChatAndActivate(ifAllowed: { true }) { completions += 1 }
         nseWaiter!(false)
         require(activations == 1 && completions == 1 && nseStateGroupDefault.value == .suspended, "A current NSE timeout must retain the existing bounded activation fallback")
+        // A duplicate callback must neither resume a checked continuation twice
+        // nor mistake a newer activation for its own operation.
+        setAppState(.activating)
+        nseStateGroupDefault.value = .active
+        nseWaiter!(false)
+        require(activations == 1 && completions == 1 && nseStateGroupDefault.value == .active, "Completed activation callbacks must be idempotent and leave newer NSE state alone")
         print("Production activation regression checks passed: \(checks)")
     }
 }
