@@ -178,7 +178,12 @@ func startChatAndActivate(ifAllowed: @escaping () -> Bool = { true }, _ completi
         // setting app state to "activating" to notify NSE that it should suspend
         setAppState(.activating)
         waitNSESuspended(timeout: nseSuspendTimeout) { ok in
-            guard ifAllowed() else { completion(); return }
+            // The core can have moved on while the extension was suspending.
+            // Do not overwrite shared NSE state on behalf of an old activation.
+            guard AppChatState.shared.value == .activating, ifAllowed() else {
+                completion()
+                return
+            }
             if !ok {
                 // if for some reason NSE failed to suspend,
                 // e.g., it crashed previously without setting its state to "suspended",
@@ -186,13 +191,7 @@ func startChatAndActivate(ifAllowed: @escaping () -> Bool = { true }, _ completi
                 // does not have to wait when activating.
                 nseStateGroupDefault.set(.suspended)
             }
-            if AppChatState.shared.value == .activating {
-                activate()
-            } else {
-                // Always finish the waiter, even if a background/profile change
-                // invalidated activation while waiting for the extension.
-                completion()
-            }
+            activate()
         }
     }
 
