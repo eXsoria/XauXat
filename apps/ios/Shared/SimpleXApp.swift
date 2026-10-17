@@ -60,6 +60,7 @@ struct SimpleXApp: App {
                     }
                 }
                 .onAppear() {
+                    AppSheetState.shared.scenePhaseActive = scenePhase == .active
                     plusEntitlements.start()
                     // Present screen for continue migration if it wasn't finished yet
                     if chatModel.migrationState != nil {
@@ -149,8 +150,16 @@ struct SimpleXApp: App {
             }
         }
 
-        startChatAndActivate {
+        let userId = chatModel.currentUser?.userId
+        startChatAndActivate(ifAllowed: {
+            scenePhase == .active && isXauXatTorReady()
+                && chatModel.currentUser?.userId == userId
+                && AppChatState.shared.value != .stopped
+                && (kcDecoyPassword.get() == nil || chatModel.contentViewAccessAuthenticated)
+        }) {
             guard scenePhase == .active, chatModel.chatRunning == true else { return }
+            guard isXauXatTorReady(), chatModel.currentUser?.userId == userId,
+                  AppChatState.shared.value == .active else { return }
             if configurationReconnected { XauXatConnectionRecoveryManager.shared.configurationApplied() }
             XauXatConnectionRecoveryManager.shared.resume()
             if let ntfResponse = chatModel.notificationResponse {

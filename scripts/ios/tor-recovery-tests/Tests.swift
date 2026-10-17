@@ -41,8 +41,28 @@ import Tor
         try await deadlineCannotPublishLateSuccess()
         try await deadlineCancelsOutstandingProbe()
         try await terminatedRuntimeIsNotStartedTwice()
+        try await diagnosticsCaptureInitialFailureWithoutPrivateData()
         try await realSOCKSProbeCases()
         print("Tor recovery regression checks passed: \(checks)")
+    }
+
+    static func diagnosticsCaptureInitialFailureWithoutPrivateData() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager()
+        probe.handler = { _ in throw TorSOCKSProbeError.timedOut(.handshake) }
+        do { _ = try await manager.ensureReady(); fatalError("Failed probe must not become ready") } catch { }
+        require(manager.diagnosticText.contains("socks_timeout_handshake") && manager.diagnosticText.contains("repair"), "Export must include initial Tor failures and repair stages before any manual retry")
+        require(!manager.diagnosticText.contains("19050") && !manager.diagnosticText.contains("19051"), "Diagnostics must not expose socket ports")
+        for _ in 0..<100 { manager.invalidateReadiness() }
+        require(manager.diagnosticText.split(separator: "\n").filter { $0.hasPrefix("+") }.count == 80, "Tor diagnostics must remain bounded")
+        require(manager.diagnosticText.contains("last_failure=socks_timeout_handshake"), "Snapshot must retain the failure even after old events roll out")
+
+        reset()
+        let privateProbe = ScriptedProbe(), privateManager = privateProbe.manager()
+        privateProbe.handler = { _ in throw NSError(domain: "smp://private-address.example/key", code: 17, userInfo: [NSLocalizedDescriptionKey: "PRIVATE_MESSAGE_AND_KEY"]) }
+        do { _ = try await privateManager.ensureReady(); fatalError("Synthetic failure must not become ready") } catch { }
+        let text = privateManager.diagnosticText
+        require(text.contains("failure=other") && !text.contains("private-address") && !text.contains("PRIVATE_MESSAGE") && !text.contains("/key"), "Raw error messages, addresses and secrets must never enter the exported journal")
     }
 
     static func readyMustBeRevalidated() async throws {

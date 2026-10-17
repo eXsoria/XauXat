@@ -163,8 +163,9 @@ func startChatForCall() {
     }
 }
 
-func startChatAndActivate(_ completion: @escaping () -> Void) {
+func startChatAndActivate(ifAllowed: @escaping () -> Bool = { true }, _ completion: @escaping () -> Void) {
     logger.debug("DEBUGGING: startChatAndActivate")
+    guard ifAllowed() else { completion(); return }
     if ChatModel.shared.chatRunning == true {
         ChatReceiver.shared.start()
         logger.debug("DEBUGGING: startChatAndActivate: after ChatReceiver.shared.start")
@@ -186,11 +187,16 @@ func startChatAndActivate(_ completion: @escaping () -> Void) {
             }
             if AppChatState.shared.value == .activating {
                 activate()
+            } else {
+                // Always finish the waiter, even if a background/profile change
+                // invalidated activation while waiting for the extension.
+                completion()
             }
         }
     }
 
     func activate() {
+        guard ifAllowed() else { completion(); return }
         logger.debug("DEBUGGING: startChatAndActivate: before activateChat")
         activateChat()
         completion()

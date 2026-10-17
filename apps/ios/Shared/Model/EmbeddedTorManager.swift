@@ -28,6 +28,68 @@ final class EmbeddedTorManager: ObservableObject {
 
     @Published private(set) var state: State = .stopped
 
+    private enum DiagnosticStage: String {
+        case start, joined, invalidated, controlReopened, authenticated, bootstrap
+        case circuitCheck, probe, probeFailed, repair, failed, ready, manualProbe, manualProbeFailed, manualVerified
+    }
+    private let startedAt = ProcessInfo.processInfo.systemUptime
+    private var diagnosticEvents: [String] = []
+    private var lastFailureCode: String?
+    private var lastBootstrapBucket: Int?
+
+    // Only enum stages, boolean state and aggregate numbers are exported.
+    // Never export a port, configuration, raw error, control reply or cookie.
+    var diagnosticText: String {
+        let status: String
+        switch state {
+        case .stopped: status = "stopped"
+        case .starting: status = "starting"
+        case let .bootstrapping(progress): status = "bootstrapping_\(max(0, min(100, progress)))"
+        case .verifying: status = "verifying"
+        case .ready: status = "ready"
+        case .failed: status = "failed"
+        }
+        return "Embedded Tor (current app process)\n"
+            + "state=\(status) runtime_started=\(thread != nil) runtime_finished=\(thread?.isFinished == true) last_failure=\(lastFailureCode ?? "none")\n"
+            + diagnosticEvents.joined(separator: "\n")
+    }
+
+    private func record(_ stage: DiagnosticStage, error: Error? = nil, count: Int? = nil) {
+        let elapsed = Int(max(0, ProcessInfo.processInfo.systemUptime - startedAt))
+        let failure = error.map(Self.diagnosticFailure)
+        if let failure { lastFailureCode = failure }
+        diagnosticEvents.append("+\(elapsed)s tor \(stage.rawValue)"
+            + (failure.map { " failure=\($0)" } ?? "") + (count.map { " count=\($0)" } ?? ""))
+        if diagnosticEvents.count > 80 { diagnosticEvents.removeFirst(diagnosticEvents.count - 80) }
+    }
+
+    private static func diagnosticFailure(_ error: Error) -> String {
+        if error is CancellationError { return "cancelled" }
+        if let error = error as? TorSOCKSProbeError {
+            switch error {
+            case let .failed(stage): return "socks_failed_" + stage.diagnosticCode
+            case let .timedOut(stage): return "socks_timeout_" + stage.diagnosticCode
+            case let .rejected(code): return "socks_rejected_\(code)"
+            }
+        }
+        if let error = error as? EmbeddedTorError {
+            switch error {
+            case .backupProtection: return "backup_protection"
+            case .timeout: return "startup_timeout"
+            case .processStopped: return "runtime_stopped"
+            case .missingControlPort: return "control_port_missing"
+            case .controlConnection: return "control_connection"
+            case .controlTimeout: return "control_timeout"
+            case .authentication: return "control_authentication"
+            case .invalidSocksPort: return "socks_listener_invalid"
+            case .routeNotReady: return "route_not_ready"
+            case .checkFailed: return "route_check_failed"
+            case .circuitReset: return "circuit_reset"
+            }
+        }
+        return "other"
+    }
+
     private var thread: TorThread?
     private var controller: TorController?
     private var configuration: TorConfiguration?
@@ -63,6 +125,7 @@ final class EmbeddedTorManager: ObservableObject {
         callbacks.append(completion)
         switch state {
         case .starting, .bootstrapping, .verifying:
+            record(.joined)
             return
         case .stopped, .ready, .failed:
             begin()
@@ -84,6 +147,7 @@ final class EmbeddedTorManager: ObservableObject {
     }
 
     func invalidateReadiness() {
+        record(.invalidated)
         routeRevision += 1
         verifiedAt = nil
     }
@@ -95,15 +159,20 @@ final class EmbeddedTorManager: ObservableObject {
     func verifyTorRoute(timeout: TimeInterval = 30) async throws -> Bool {
         guard case let .ready(port) = state,
               isXauXatManagedTorConfig(getNetCfg()) else {
+            record(.manualProbeFailed, error: EmbeddedTorError.routeNotReady)
             throw EmbeddedTorError.routeNotReady
         }
         let generation = readinessGeneration
+        record(.manualProbe)
         do {
             guard try await routeProbe(port, timeout) else { throw EmbeddedTorError.checkFailed }
             guard readinessGeneration == generation, case let .ready(currentPort) = state,
                   currentPort == port else { throw EmbeddedTorError.routeNotReady }
+            lastFailureCode = nil
+            record(.manualVerified)
             return true
         } catch {
+            record(.manualProbeFailed, error: error)
             // A failed manual check must not leave a green Ready indicator.
             // Do not invalidate an unrelated, newer startup attempt.
             if case let .ready(currentPort) = state, currentPort == port,
@@ -123,6 +192,8 @@ final class EmbeddedTorManager: ObservableObject {
         attemptRevision = routeRevision
         verifiedAt = nil
         state = .starting
+        lastBootstrapBucket = nil
+        record(.start)
         routeTask?.cancel()
         routeTask = nil
         requestingPort = false
@@ -204,6 +275,7 @@ final class EmbeddedTorManager: ObservableObject {
                     return
                 } catch {
                     guard attempt == id else { return }
+                    record(.controlReopened, error: error)
                     removeObservers()
                     // TorController.disconnect() sends SIGNAL SHUTDOWN in the
                     // pinned framework. Releasing its socket must not kill Tor.
@@ -250,6 +322,7 @@ final class EmbeddedTorManager: ObservableObject {
                     return
                 }
                 self.authenticated = true
+                self.record(.authenticated)
                 do {
                     // Reauthentication can follow a repair interrupted while
                     // DisableNetwork was set. Restore Tor before waiting for
@@ -265,6 +338,7 @@ final class EmbeddedTorManager: ObservableObject {
     }
 
     private func observeCircuit(_ control: TorController, id: UUID) {
+        record(.circuitCheck)
         removeObservers()
         statusObserver = control.addObserver(forStatusEvents: { [weak self] type, _, action, arguments in
             guard type == "STATUS_CLIENT" else { return false }
@@ -272,6 +346,11 @@ final class EmbeddedTorManager: ObservableObject {
                 guard let self, self.attempt == id, !self.requestingPort else { return }
                 if action == "BOOTSTRAP", let value = arguments?["PROGRESS"], let progress = Int(value) {
                     self.state = .bootstrapping(progress)
+                    let bounded = max(0, min(100, progress))
+                    if self.lastBootstrapBucket != bounded / 10 {
+                        self.lastBootstrapBucket = bounded / 10
+                        self.record(.bootstrap, count: bounded)
+                    }
                 } else if action == "CIRCUIT_ESTABLISHED" {
                     self.requestingPort = true
                     self.requestSocksPort(control, id: id)
@@ -320,6 +399,7 @@ final class EmbeddedTorManager: ObservableObject {
         // until traffic has actually crossed that endpoint and reached Tor.
         for attemptNumber in 1...3 {
             guard attempt == id else { return }
+            record(.probe, count: attemptNumber)
             do {
                 guard try await routeProbe(port, 30) else {
                     throw EmbeddedTorError.checkFailed
@@ -329,7 +409,8 @@ final class EmbeddedTorManager: ObservableObject {
             } catch {
                 guard attempt == id else { return }
                 lastError = error
-                logger.error("XauXat Tor: startup route probe \(attemptNumber, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+                record(.probeFailed, error: error)
+                logger.error("XauXat Tor: startup route probe \(attemptNumber, privacy: .public) failed: \(Self.diagnosticFailure(error), privacy: .public)")
             }
 
             if attemptNumber < 3 {
@@ -379,18 +460,21 @@ final class EmbeddedTorManager: ObservableObject {
 
         switch result {
         case let .success(port):
+            lastFailureCode = nil
+            record(.ready)
             if attemptRevision == routeRevision { verifiedAt = ProcessInfo.processInfo.systemUptime }
             setXauXatTorSocksPort(port)
             state = .ready(port)
             logger.notice("XauXat Tor: embedded client is ready")
         case let .failure(error):
+            record(.failed, error: error)
             setXauXatTorSocksPort(nil)
             // Dropping the controller closes only its socket. Its disconnect()
             // method would shut down the entire embedded Tor runtime.
             controller = nil
             authenticated = false
             state = .failed(error.localizedDescription)
-            logger.error("XauXat Tor: startup failed: \(error.localizedDescription, privacy: .public)")
+            logger.error("XauXat Tor: startup failed: \(Self.diagnosticFailure(error), privacy: .public)")
         }
 
         let pending = callbacks
@@ -399,6 +483,7 @@ final class EmbeddedTorManager: ObservableObject {
     }
 
     private func recover(_ control: TorController, id: UUID) async {
+        record(.repair)
         do {
             logger.notice("XauXat Tor: rebuilding private connection after failed route check")
             // Reset only the live client's networking and loopback listener.
@@ -533,6 +618,15 @@ enum TorSOCKSProbeError: LocalizedError, Equatable {
         case handshake = "negotiating with the local Tor SOCKS proxy"
         case destination = "connecting through Tor to the route-check service"
         case response = "reading the route-check response through Tor"
+
+        var diagnosticCode: String {
+            switch self {
+            case .localSocket: "local_socket"
+            case .handshake: "handshake"
+            case .destination: "destination"
+            case .response: "response"
+            }
+        }
     }
     case failed(Stage)
     case timedOut(Stage)
