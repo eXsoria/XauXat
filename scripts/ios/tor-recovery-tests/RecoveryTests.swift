@@ -15,6 +15,9 @@ typealias Recovery = XauXatConnectionRecoveryManager
     var invalidations = 0
     var clock: TimeInterval = 100
     var route = Recovery.Route(port: 19050, replaced: false)
+    var sessionState: Recovery.SessionState = .running
+    var resumeCount = 0
+    var resume: (() async throws -> Void)?
     var ensure: (() async throws -> Void)?
     var applyFailure = false
     var configurationReconnected = false
@@ -45,6 +48,13 @@ typealias Recovery = XauXatConnectionRecoveryManager
             await self.onReconnect?(scope)
             if let relay = self.relayFailure, scope == .relays([relay]) { throw Failure.synthetic }
         },
+        sessionState: { self.sessionState },
+        resumeChat: { isCurrent in
+            self.resumeCount += 1
+            try await self.resume?()
+            guard isCurrent() else { throw Recovery.RecoveryError.superseded }
+            self.sessionState = .running
+        },
         now: { self.clock },
         sleep: { try await self.sleep($0) }
     ), networkSettleDelay: 0.02)
@@ -70,6 +80,15 @@ typealias Recovery = XauXatConnectionRecoveryManager
     }
 
     static func main() async throws {
+        try await suspendedChatVerifiesTorBeforeResuming()
+        try await suspendedChatCannotWidenStaleProfileTargets()
+        try await blockedRequestsExplainWhy()
+        try await routeOnlyDoesNotActivateAStoppedOrMissingProfile()
+        try await routeOnlyRejectsLateResults()
+        try await changedContextCannotResumeAfterTor()
+        try await failedRouteCannotResumeChat()
+        try await failedResumeCannotReconnect()
+        try await unlockDuringVerificationPreventsCoreCommands()
         try await identicalRequestsShareWholeOperation()
         try await cancelledWaiterCannotAbortSharedOperation()
         relayHealthSelection()
@@ -92,6 +111,129 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await pathFlapsSettleOnce()
         try await diagnosticJournalIsBounded()
         print("Coordinated recovery regression checks passed: \(checks)")
+    }
+
+    static func suspendedChatVerifiesTorBeforeResuming() async throws {
+        for reason in [Recovery.Reason.manual, .networkChange, .pendingWork] {
+            let f = RecoveryFixture()
+            f.sessionState = .suspended
+            f.ensure = {
+                require(f.resumeCount == 0 && f.commands.isEmpty, "Tor must be checked before chat activation")
+            }
+            f.resume = {
+                require(f.forces.count == 1 && f.applyCount == 1, "Verified routing must be applied before activation")
+                require(f.commands.isEmpty, "No relay commands may precede activation")
+            }
+            try await f.manager.reconnect(reason == .pendingWork ? .automatic : .all, reason: reason)
+            require(f.sessionState == .running && f.resumeCount == 1 && f.commands == [.all], "Foreground recovery must resume a suspended chat")
+            require(f.summaryCount == 0, "A suspended core cannot be queried for relay health first")
+            require(f.manager.diagnosticText.contains("chat_resumed"), "Export must explain successful chat resumption")
+        }
+    }
+
+    static func blockedRequestsExplainWhy() async throws {
+        for blocker in [Recovery.Blocker.appInactive, .networkOffline, .noActiveProfile, .chatStopped, .unlockRequired, .chatUninitialized] {
+            let f = RecoveryFixture()
+            switch blocker {
+            case .appInactive: f.context.active = false
+            case .networkOffline: f.context.online = false
+            case .noActiveProfile: f.context.userId = nil
+            case .chatStopped: f.sessionState = .stopped
+            case .unlockRequired: f.sessionState = .unlockRequired
+            case .chatUninitialized: f.sessionState = .uninitialized
+            default: fatalError("Unexpected fixture blocker")
+            }
+            do { try await f.manager.reconnect(); fatalError("Unavailable context must fail") }
+            catch let error as Recovery.RecoveryError {
+                guard case let .blocked(actual) = error else { fatalError("Expected specific blocker") }
+                require(actual == blocker, "UI error must identify the actual preflight blocker")
+            }
+            require(f.manager.diagnosticText.contains("blocked_" + blocker.rawValue), "Preflight failures must not disappear from diagnostics")
+            require(f.forces.isEmpty && f.applyCount == 0 && f.resumeCount == 0 && f.commands.isEmpty, "Unavailable context must do no core work")
+        }
+    }
+
+    static func suspendedChatCannotWidenStaleProfileTargets() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        let stale = Recovery.Relay(userId: 2, server: "smp://old-profile.example")
+        await failed(Task { try await f.manager.reconnect(.relays([stale])) }, "Stale profile targets cannot become a global repair when suspended")
+        require(f.forces.isEmpty && f.applyCount == 0 && f.resumeCount == 0 && f.commands.isEmpty, "Validate requested profile before widening recovery")
+    }
+
+    static func routeOnlyDoesNotActivateAStoppedOrMissingProfile() async throws {
+        for state in [Recovery.SessionState.stopped, .uninitialized, .unlockRequired] {
+            let f = RecoveryFixture()
+            f.context.userId = nil
+            f.sessionState = state
+            try await f.manager.verifyRouteOnly()
+            require(f.forces == [true] && f.applyCount == 0 && f.resumeCount == 0 && f.commands.isEmpty, "Route diagnostics must never activate/open a protected or stopped chat")
+        }
+        for online in [true, false] {
+            let f = RecoveryFixture()
+            f.context.active = !online
+            f.context.online = online
+            await failed(Task { try await f.manager.verifyRouteOnly() }, "Route-only checks require foreground and network")
+            require(f.forces.isEmpty, "Background/offline diagnostic checks must not start Tor work")
+        }
+    }
+
+    static func routeOnlyRejectsLateResults() async throws {
+        let f = RecoveryFixture()
+        var held: CheckedContinuation<Void, Never>?
+        f.ensure = { await withCheckedContinuation { held = $0 } }
+        let operation = Task { try await f.manager.verifyRouteOnly() }
+        try await until { held != nil }
+        f.context.online = false
+        f.manager.networkChanged(online: false)
+        held!.resume()
+        await failed(operation, "A stale route-only check cannot report success")
+        require(!f.manager.diagnosticText.contains("route_verified"), "No green route result may survive a network change")
+    }
+
+    static func changedContextCannotResumeAfterTor() async throws {
+        for change in 0..<4 {
+            let f = RecoveryFixture()
+            f.sessionState = .suspended
+            var held: CheckedContinuation<Void, Never>?
+            f.resume = { await withCheckedContinuation { held = $0 } }
+            let operation = Task { try await f.manager.reconnect() }
+            try await until { held != nil }
+            switch change {
+            case 0: f.context.active = false; f.manager.pause()
+            case 1: f.context.userId = 2
+            case 2: f.context.alternateStore = true
+            default: f.context.online = false; f.manager.networkChanged(online: false)
+            }
+            held!.resume()
+            await failed(operation, "An NSE activation waiter must reject stale foreground/profile/path state")
+            require(f.sessionState == .suspended && f.commands.isEmpty, "Invalidated activation cannot resume or reconnect the core")
+            require(!f.manager.diagnosticText.contains("alternateStore"), "Diagnostics must not disclose local store selection")
+        }
+    }
+
+    static func failedRouteCannotResumeChat() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        f.ensure = { throw RecoveryFixture.Failure.synthetic }
+        await failed(Task { try await f.manager.reconnect() }, "Tor failure must propagate")
+        require(f.resumeCount == 0 && f.applyCount == 0 && f.commands.isEmpty, "Chat must stay suspended until Tor is verified")
+    }
+
+    static func failedResumeCannotReconnect() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        f.resume = { throw RecoveryFixture.Failure.synthetic }
+        await failed(Task { try await f.manager.reconnect() }, "Activation failure must propagate")
+        require(f.commands.isEmpty && f.manager.diagnosticText.contains("resume_failed"), "Failed activation must not send relay commands")
+    }
+
+    static func unlockDuringVerificationPreventsCoreCommands() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        f.ensure = { f.sessionState = .unlockRequired }
+        await failed(Task { try await f.manager.reconnect() }, "A protected store becoming locked must stop recovery")
+        require(f.applyCount == 0 && f.resumeCount == 0 && f.commands.isEmpty, "A late Tor result cannot bypass store authentication")
     }
 
     static func identicalRequestsShareWholeOperation() async throws {
@@ -353,6 +495,6 @@ typealias Recovery = XauXatConnectionRecoveryManager
     static func diagnosticJournalIsBounded() async throws {
         let f = RecoveryFixture()
         for _ in 0..<100 { try await f.manager.reconnect(.automatic, reason: .pendingWork) }
-        require(f.manager.diagnosticText.split(separator: "\n").count == 81, "Diagnostic journal must retain at most 80 events plus its header")
+        require(f.manager.diagnosticText.split(separator: "\n").filter { $0.hasPrefix("+") }.count == 80, "Diagnostic journal must retain at most 80 events plus its snapshot")
     }
 }

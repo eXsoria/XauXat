@@ -163,20 +163,36 @@ func startChatForCall() {
     }
 }
 
-func startChatAndActivate(_ completion: @escaping () -> Void) {
+func startChatAndActivate(ifAllowed: @escaping () -> Bool = { true }, _ completion: @escaping () -> Void) {
+    // Callers and NSE callbacks run on the main queue. Complete this operation
+    // only once, even if a late/duplicate extension callback reaches it.
+    var finished = false
+    func finish() {
+        guard !finished else { return }
+        finished = true
+        completion()
+    }
     logger.debug("DEBUGGING: startChatAndActivate")
+    guard ifAllowed() else { finish(); return }
     if ChatModel.shared.chatRunning == true {
         ChatReceiver.shared.start()
         logger.debug("DEBUGGING: startChatAndActivate: after ChatReceiver.shared.start")
     }
     if case .active = AppChatState.shared.value {
-        completion()
+        finish()
     } else if nseStateGroupDefault.get().inactive {
         activate()
     } else {
         // setting app state to "activating" to notify NSE that it should suspend
         setAppState(.activating)
         waitNSESuspended(timeout: nseSuspendTimeout) { ok in
+            guard !finished else { return }
+            // The core can have moved on while the extension was suspending.
+            // Do not overwrite shared NSE state on behalf of an old activation.
+            guard AppChatState.shared.value == .activating, ifAllowed() else {
+                finish()
+                return
+            }
             if !ok {
                 // if for some reason NSE failed to suspend,
                 // e.g., it crashed previously without setting its state to "suspended",
@@ -184,16 +200,15 @@ func startChatAndActivate(_ completion: @escaping () -> Void) {
                 // does not have to wait when activating.
                 nseStateGroupDefault.set(.suspended)
             }
-            if AppChatState.shared.value == .activating {
-                activate()
-            }
+            activate()
         }
     }
 
     func activate() {
+        guard ifAllowed() else { finish(); return }
         logger.debug("DEBUGGING: startChatAndActivate: before activateChat")
         activateChat()
-        completion()
+        finish()
         logger.debug("DEBUGGING: startChatAndActivate: after activateChat")
     }
 }

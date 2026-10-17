@@ -3200,6 +3200,7 @@ struct XauXatTorDiagnosticsView: View {
         case idle
         case checking
         case verified
+        case blocked(String)
         case failed(String)
     }
 
@@ -3236,7 +3237,7 @@ struct XauXatTorDiagnosticsView: View {
                 }
                 .disabled(verification == .checking)
 
-                if case let .failed(message) = verification {
+                if let message = verificationMessage {
                     Text(message)
                         .font(.system(size: 12, weight: .regular, design: .default))
                         .foregroundStyle(palette.danger)
@@ -3251,12 +3252,12 @@ struct XauXatTorDiagnosticsView: View {
                 Button("Copy connection diagnostics") {
                     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
                     let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-                    UIPasteboard.general.string = "XauXat \(version) (\(build))\n" + recovery.diagnosticText
+                    UIPasteboard.general.string = "XauXat \(version) (\(build))\n" + recovery.diagnosticText + "\n\n" + tor.diagnosticText
                 }
                 .font(.system(size: 14, weight: .bold, design: .default))
                 .foregroundStyle(palette.ink)
 
-                Text("Copies recent recovery stages from this app session. No messages, contacts, server addresses or keys are included. Nothing is uploaded automatically.")
+                Text("Copies connection states, recovery blockers and Tor failure stages from this app session. No messages, contacts, server addresses or keys are included. Nothing is uploaded automatically.")
                     .font(.system(size: 12, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -3305,21 +3306,33 @@ struct XauXatTorDiagnosticsView: View {
         case .idle: "Not run"
         case .checking: "Checking"
         case .verified: "Passed"
+        case .blocked: "Blocked"
         case .failed: "Failed"
+        }
+    }
+
+    private var verificationMessage: String? {
+        switch verification {
+        case let .blocked(message), let .failed(message): message
+        default: nil
         }
     }
 
     @MainActor private func verify() async {
         verification = .checking
         do {
-            if hasChatCtrl() {
+            if hasChatCtrl(), ChatModel.shared.currentUser != nil,
+               ChatModel.shared.chatRunning == true, AppChatState.shared.value != .stopped {
                 // Reconnection verifies Tor and applies a replacement dynamic
                 // port to the core before reconnecting any relay sessions.
                 try await reconnectAllServers()
             } else {
-                _ = try await tor.ensureReady()
+                try await recovery.verifyRouteOnly()
             }
             verification = .verified
+        } catch let error as XauXatConnectionRecoveryManager.RecoveryError {
+            if case .blocked = error { verification = .blocked(error.localizedDescription) }
+            else { verification = .failed(error.localizedDescription) }
         } catch {
             verification = .failed(error.localizedDescription)
         }

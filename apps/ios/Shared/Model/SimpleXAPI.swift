@@ -111,13 +111,22 @@ func beginBGTask(_ handler: (() -> Void)? = nil) -> (() -> Void) {
 }
 
 @MainActor
+func xauXatRecoverySessionState() -> XauXatConnectionRecoveryManager.SessionState {
+    let model = ChatModel.shared
+    if kcDecoyPassword.get() != nil && !model.contentViewAccessAuthenticated { return .unlockRequired }
+    if AppChatState.shared.value == .stopped { return .stopped }
+    guard hasChatCtrl(), !model.ctrlInitInProgress, model.chatRunning == true else { return .uninitialized }
+    return AppChatState.shared.value == .active ? .running : .suspended
+}
+
+@MainActor
 extension XauXatConnectionRecoveryManager {
     static let shared = XauXatConnectionRecoveryManager(dependencies: Dependencies(
         context: {
             Context(userId: ChatModel.shared.currentUser?.userId,
                     online: ChatModel.shared.networkInfo.online,
-                    active: hasChatCtrl() && ChatModel.shared.chatRunning == true
-                        && AppChatState.shared.value == .active && AppSheetState.shared.scenePhaseActive)
+                    active: UIApplication.shared.applicationState == .active && AppSheetState.shared.scenePhaseActive,
+                    alternateStore: xauXatStorageScope() == .decoy)
         },
         ensureTor: { force in
             let previousPort: UInt16?
@@ -160,6 +169,15 @@ extension XauXatConnectionRecoveryManager {
                 }
             case .automatic:
                 preconditionFailure("Automatic scope must be resolved before reconnecting")
+            }
+        },
+        sessionState: { xauXatRecoverySessionState() },
+        resumeChat: { isCurrent in
+            await withCheckedContinuation { continuation in
+                startChatAndActivate(ifAllowed: {
+                    isCurrent() && isXauXatTorReady()
+                        && xauXatRecoverySessionState() == .suspended
+                }) { continuation.resume() }
             }
         }
     ))

@@ -5,7 +5,7 @@ import Combine
 /// native core still owns its outbox, acknowledgements and normal reconnects.
 @MainActor
 final class XauXatConnectionRecoveryManager: ObservableObject {
-    enum State: Equatable {
+    enum State: String, Equatable {
         case idle, waiting, waitingForNetwork, verifyingTor, reconnectingRelays, monitoring, delayed
     }
 
@@ -44,7 +44,34 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     struct Context: Equatable {
         var userId: Int64?
         var online: Bool
+        // Foreground availability must not depend on the chat being resumed:
+        // resuming the chat itself requires a verified Tor route first.
         var active: Bool
+        // A local store switch can reuse numeric profile IDs. Keep it in the
+        // operation identity, but never include this flag in diagnostics.
+        var alternateStore: Bool = false
+    }
+
+    enum SessionState: String {
+        case running, suspended, stopped, unlockRequired, uninitialized
+        var canRecover: Bool { self == .running || self == .suspended }
+    }
+
+    enum Blocker: String {
+        case appInactive, networkOffline, noActiveProfile, chatStopped
+        case unlockRequired, chatUninitialized, chatSuspended
+
+        var message: String {
+            switch self {
+            case .appInactive: NSLocalizedString("Open XauXat to recover the private connection.", comment: "connection recovery error")
+            case .networkOffline: NSLocalizedString("Waiting for a network connection. Try Wi-Fi or mobile data.", comment: "connection recovery error")
+            case .noActiveProfile: NSLocalizedString("Open a chat profile before reconnecting messages.", comment: "connection recovery error")
+            case .chatStopped: NSLocalizedString("Chat is stopped. Start it before reconnecting messages.", comment: "connection recovery error")
+            case .unlockRequired: NSLocalizedString("Unlock XauXat before reconnecting messages.", comment: "connection recovery error")
+            case .chatUninitialized: NSLocalizedString("Chat is still opening. Retry when initialization finishes.", comment: "connection recovery error")
+            case .chatSuspended: NSLocalizedString("Chat could not resume after verifying Tor. Please retry.", comment: "connection recovery error")
+            }
+        }
     }
 
     struct Route {
@@ -62,6 +89,8 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         // may use zero; still-connecting sessions need their native time budget.
         var failedRelays: () async throws -> [Relay: TimeInterval]
         var reconnect: (Scope) async throws -> Void
+        var sessionState: () -> SessionState = { .running }
+        var resumeChat: (_ isCurrent: @escaping () -> Bool) async throws -> Void = { _ in }
         var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
         var sleep: (TimeInterval) async throws -> Void = {
             try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000))
@@ -69,10 +98,10 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     }
 
     enum RecoveryError: LocalizedError {
-        case unavailable, superseded
+        case blocked(Blocker), superseded
         var errorDescription: String? {
             switch self {
-            case .unavailable: NSLocalizedString("Recovery is waiting for an active app and a network connection.", comment: "connection recovery error")
+            case let .blocked(reason): reason.message
             case .superseded: NSLocalizedString("The connection changed during recovery. Please retry.", comment: "connection recovery error")
             }
         }
@@ -119,7 +148,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         while true {
             try Task.checkCancellation()
             let context = dependencies.context()
-            guard context.active, context.online, context.userId != nil else { throw RecoveryError.unavailable }
+            try requireAvailable(context, reason: reason)
             if let current = flight {
                 let covered = current.epoch == epoch && current.context == context
                     && current.scope.covers(scope) && (!force || current.force)
@@ -128,7 +157,8 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 if covered { return try result.get() }
                 continue
             }
-            if reason != .manual, let lastGlobal, lastGlobal.epoch == epoch,
+            if reason != .manual, dependencies.sessionState() == .running,
+               let lastGlobal, lastGlobal.epoch == epoch,
                lastGlobal.context == context, dependencies.now() - lastGlobal.time < cooldown {
                 record(reason, "coalesced_recent_global")
                 return
@@ -145,23 +175,87 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         }
     }
 
-    private func requireCurrent(_ context: Context, _ operationEpoch: Int) throws {
+    private func requireForegroundNetwork(_ context: Context, reason: Reason) throws {
+        let blocker: Blocker? = !context.active ? .appInactive : (!context.online ? .networkOffline : nil)
+        if let blocker {
+            record(reason, "blocked_" + blocker.rawValue)
+            throw RecoveryError.blocked(blocker)
+        }
+    }
+
+    /// Diagnostic route checks also work before a profile exists or while the
+    /// user intentionally stopped chat. They never activate a store or core.
+    func verifyRouteOnly() async throws {
+        let context = dependencies.context(), operationEpoch = epoch
+        try requireForegroundNetwork(context, reason: .manual)
+        record(.manual, "route_only")
+        do { _ = try await dependencies.ensureTor(true) }
+        catch { record(.manual, "route_failed"); throw error }
         try Task.checkCancellation()
-        guard epoch == operationEpoch, dependencies.context() == context else { throw RecoveryError.superseded }
-        guard context.active, context.online, context.userId != nil else { throw RecoveryError.unavailable }
+        guard operationEpoch == epoch, dependencies.context() == context else {
+            record(.manual, "superseded")
+            throw RecoveryError.superseded
+        }
+        record(.manual, "route_verified")
+    }
+
+    private func requireAvailable(_ context: Context, reason: Reason) throws {
+        try requireForegroundNetwork(context, reason: reason)
+        let blocker: Blocker?
+        if context.userId == nil { blocker = .noActiveProfile }
+        else {
+            switch dependencies.sessionState() {
+            case .running, .suspended: blocker = nil
+            case .stopped: blocker = .chatStopped
+            case .unlockRequired: blocker = .unlockRequired
+            case .uninitialized: blocker = .chatUninitialized
+            }
+        }
+        if let blocker {
+            record(reason, "blocked_" + blocker.rawValue)
+            throw RecoveryError.blocked(blocker)
+        }
+    }
+
+    private func requireCurrent(_ context: Context, _ operationEpoch: Int, reason: Reason) throws {
+        try Task.checkCancellation()
+        guard epoch == operationEpoch, dependencies.context() == context else {
+            record(reason, "superseded")
+            throw RecoveryError.superseded
+        }
+        try requireAvailable(context, reason: reason)
+    }
+
+    private func requireResumed(reason: Reason) throws {
+        guard dependencies.sessionState() == .running else {
+            record(reason, "blocked_chatSuspended")
+            throw RecoveryError.blocked(.chatSuspended)
+        }
     }
 
     private func perform(_ requested: Scope, reason: Reason, force: Bool, context: Context, epoch operationEpoch: Int) async throws {
         do {
-            try requireCurrent(context, operationEpoch)
+            try requireCurrent(context, operationEpoch, reason: reason)
+            if case let .relays(relays) = requested {
+                guard !relays.isEmpty, relays.allSatisfy({ $0.userId == context.userId }) else {
+                    record(reason, "invalid_targets")
+                    throw RecoveryError.superseded
+                }
+            }
             var scope = requested
+            if dependencies.sessionState() == .suspended {
+                // A suspended core cannot provide a reliable relay summary.
+                // Verify Tor first, then resume the existing profile/session.
+                scope = .all
+                record(reason, "chat_resume_required")
+            }
             if scope == .automatic {
                 // No failed/pending session is evidence for leaving healthy
                 // sessions alone, even when a delivery receipt is delayed.
                 let failed: [Relay: TimeInterval]
                 do { failed = try await dependencies.failedRelays() }
                 catch { record(reason, "summary_failed"); throw error }
-                try requireCurrent(context, operationEpoch)
+                try requireCurrent(context, operationEpoch, reason: reason)
                 let now = dependencies.now()
                 firstObserved = firstObserved.filter { failed[$0.key] != nil }
                 var targets: Set<Relay> = []
@@ -189,14 +283,26 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             let route: Route
             do { route = try await dependencies.ensureTor(force) }
             catch { record(reason, "route_failed"); throw error }
-            try requireCurrent(context, operationEpoch)
+            try requireCurrent(context, operationEpoch, reason: reason)
             // A replaced listener invalidates every old core session. This is
             // a reason to widen a relay repair to all servers.
             if route.replaced { scope = .all; record(reason, "endpoint_replaced") }
             let configurationReconnected: Bool
             do { configurationReconnected = try dependencies.applyTor() }
             catch { record(reason, "configuration_failed"); throw error }
-            try requireCurrent(context, operationEpoch)
+            try requireCurrent(context, operationEpoch, reason: reason)
+            if dependencies.sessionState() != .running {
+                record(reason, "resume_chat")
+                do {
+                    try await dependencies.resumeChat { [self] in
+                        epoch == operationEpoch && dependencies.context() == context
+                    }
+                }
+                catch { record(reason, "resume_failed"); throw error }
+                try requireCurrent(context, operationEpoch, reason: reason)
+                try requireResumed(reason: reason)
+                record(reason, "chat_resumed")
+            }
             state = .reconnectingRelays
             if configurationReconnected {
                 scope = .all
@@ -218,16 +324,19 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             } else if case let .relays(relays) = scope {
                 var failure: Error?
                 for relay in relays.sorted(by: { $0.server < $1.server }) {
-                    try requireCurrent(context, operationEpoch)
+                    try requireCurrent(context, operationEpoch, reason: reason)
+                    try requireResumed(reason: reason)
                     do { try await dependencies.reconnect(.relays([relay])) }
                     catch { record(reason, "relay_command_failed"); failure = error }
                 }
                 if let failure { throw failure }
             } else {
+                try requireResumed(reason: reason)
                 do { try await dependencies.reconnect(scope) }
                 catch { record(reason, "relay_command_failed"); throw error }
             }
-            try requireCurrent(context, operationEpoch)
+            try requireCurrent(context, operationEpoch, reason: reason)
+            try requireResumed(reason: reason)
             if scope == .all {
                 lastGlobal = (operationEpoch, context, dependencies.now())
                 firstObserved.removeAll()
@@ -246,7 +355,12 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
 
     private func updateLoop() {
         guard hasPendingWork else { stopLoop(); return }
-        guard loop == nil, dependencies.context().active else { return }
+        guard loop == nil else { return }
+        let context = dependencies.context()
+        guard context.active, context.userId != nil, dependencies.sessionState().canRecover else {
+            try? requireAvailable(context, reason: .pendingWork)
+            return
+        }
         let id = UUID()
         loopId = id
         loop = Task { [weak self] in
@@ -255,6 +369,10 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             while self.hasPendingWork && !Task.isCancelled {
                 let context = self.dependencies.context()
                 guard context.active else { break }
+                guard context.userId != nil, self.dependencies.sessionState().canRecover else {
+                    try? self.requireAvailable(context, reason: .pendingWork)
+                    break
+                }
                 if !context.online || self.networkSettling {
                     self.state = context.online ? .waiting : .waitingForNetwork
                     do { try await self.dependencies.sleep(1) } catch { break }
@@ -303,13 +421,15 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             do { try await self.dependencies.sleep(self.networkSettleDelay) } catch { return }
             guard self.epoch == expectedEpoch, !Task.isCancelled else { return }
             self.networkSettling = false
-            guard self.dependencies.context().active else { return }
+            do { try self.requireAvailable(self.dependencies.context(), reason: .networkChange) }
+            catch { return }
             do { try await self.reconnect(.all, reason: .networkChange) } catch { }
             self.updateLoop()
         }
     }
 
     func pause() {
+        record(.foreground, "paused")
         epoch += 1
         dependencies.invalidateTor()
         networkTask?.cancel()
@@ -344,6 +464,9 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     }
 
     var diagnosticText: String {
-        "Connection recovery (current app process)\n" + events.joined(separator: "\n")
+        let context = dependencies.context()
+        return "Connection recovery (current app process)\n"
+            + "foreground=\(context.active) online=\(context.online) profile_available=\(context.userId != nil) session=\(dependencies.sessionState().rawValue) recovery=\(state.rawValue)\n"
+            + events.joined(separator: "\n")
     }
 }
