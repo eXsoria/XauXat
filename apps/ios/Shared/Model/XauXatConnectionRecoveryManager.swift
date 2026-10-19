@@ -376,6 +376,14 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         let context = dependencies.context()
         guard context.active, context.online, context.userId != nil,
               dependencies.sessionState().canRecover else { return }
+        if !needsRouteRetry {
+            // An old outbox check may be sleeping for 90 seconds. Promoting
+            // it to a failed-route repair must start the short backoff now.
+            // Cancel the scheduler only, never a caller's shared flight.
+            loop?.cancel()
+            loop = nil
+            loopId = nil
+        }
         routeRetry = (epoch, context)
         lastGlobal = nil
         record(.routeRetry, "scheduled")

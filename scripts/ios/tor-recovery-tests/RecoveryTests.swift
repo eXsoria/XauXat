@@ -115,6 +115,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await routeRetriesRespectContextAndSessionGates()
         try await clearingOutboxDoesNotCancelRouteRecovery()
         try await verifiedConfigurationStopsRouteRetries()
+        try await failedRouteInterruptsAnOlderOutboxBackoff()
         routeRetryTimingIsBounded()
         try await diagnosticJournalIsBounded()
         print("Coordinated recovery regression checks passed: \(checks)")
@@ -583,6 +584,26 @@ typealias Recovery = XauXatConnectionRecoveryManager
         sleeping!.resume()
         try await Task.sleep(nanoseconds: 15_000_000)
         require(f.forces.isEmpty && f.manager.diagnosticText.contains("route_retry=false"), "A verified foreground configuration reconnect must satisfy pending route recovery")
+        f.manager.pause()
+    }
+
+    static func failedRouteInterruptsAnOlderOutboxBackoff() async throws {
+        let f = RecoveryFixture()
+        var oldSleep: CheckedContinuation<Void, Error>?
+        var delays: [TimeInterval] = []
+        f.sleep = { delay in
+            delays.append(delay)
+            if delay == 8 { try await withCheckedThrowingContinuation { oldSleep = $0 } }
+            else { try await Task.sleep(nanoseconds: 2_000_000) }
+        }
+        f.manager.setOutboundPending(true)
+        try await until { oldSleep != nil }
+        f.ensure = { if f.forces.count == 1 { throw RecoveryFixture.Failure.synthetic } }
+        await failed(Task { try await f.manager.reconnect() }, "Failed manual route must schedule prompt recovery")
+        try await until { f.commands == [.all] }
+        require(Array(delays.prefix(2)) == [8, 2], "Route failure must replace an older outbox backoff immediately")
+        f.manager.setOutboundPending(false)
+        oldSleep!.resume()
         f.manager.pause()
     }
 
