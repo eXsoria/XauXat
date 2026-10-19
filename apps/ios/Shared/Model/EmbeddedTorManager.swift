@@ -29,7 +29,7 @@ final class EmbeddedTorManager: ObservableObject {
     @Published private(set) var state: State = .stopped
 
     private enum DiagnosticStage: String {
-        case start, joined, invalidated, controlReopened, authenticated, bootstrap
+        case start, joined, invalidated, superseded, waiterCancelled, controlReopened, authenticated, bootstrap
         case circuitCheck, probe, probeFailed, repair, failed, ready, manualProbe, manualProbeFailed, manualVerified
     }
     private let startedAt = ProcessInfo.processInfo.systemUptime
@@ -96,7 +96,7 @@ final class EmbeddedTorManager: ObservableObject {
     private var authenticated = false
     private var statusObserver: Any?
     private var attempt: UUID?
-    private var callbacks: [(Result<UInt16, Error>) -> Void] = []
+    private var callbacks: [UUID: (Result<UInt16, Error>) -> Void] = [:]
     private var deadline: Task<Void, Never>?
     private var routeTask: Task<Void, Never>?
     private var requestingPort = false
@@ -122,9 +122,20 @@ final class EmbeddedTorManager: ObservableObject {
     }
 
     func start(_ completion: @escaping (Result<UInt16, Error>) -> Void) {
-        callbacks.append(completion)
+        start(waiter: UUID(), completion)
+    }
+
+    private func start(waiter: UUID, _ completion: @escaping (Result<UInt16, Error>) -> Void) {
+        callbacks[waiter] = completion
         switch state {
         case .starting, .bootstrapping, .verifying:
+            // A settled new path must not wait for up to three old-path SOCKS
+            // timeouts. Keep all callers, but replace only the stale check.
+            if attemptRevision != routeRevision, routeTask != nil {
+                record(.superseded)
+                begin()
+                return
+            }
             record(.joined)
             return
         case .stopped, .ready, .failed:
@@ -136,13 +147,29 @@ final class EmbeddedTorManager: ObservableObject {
     /// Foreground/manual callers retain the default fresh check. Network and
     /// lifecycle changes invalidate this lease even while a check is running.
     func ensureReady(maxAge: TimeInterval = 0) async throws -> UInt16 {
+        try Task.checkCancellation()
         if maxAge > 0, case let .ready(port) = state,
            thread?.isFinished == false, isXauXatManagedTorConfig(getNetCfg()),
            let verifiedAt, ProcessInfo.processInfo.systemUptime - verifiedAt < maxAge {
             return port
         }
-        return try await withCheckedThrowingContinuation { continuation in
-            start { continuation.resume(with: $0) }
+        let waiter = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                start(waiter: waiter) { continuation.resume(with: $0) }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                guard let self, let callback = self.callbacks.removeValue(forKey: waiter) else { return }
+                self.record(.waiterCancelled)
+                // Detach this caller only. Foreground startup and other callers
+                // may still need the shared Tor attempt and its completion.
+                callback(.failure(CancellationError()))
+            }
         }
     }
 
@@ -163,10 +190,11 @@ final class EmbeddedTorManager: ObservableObject {
             throw EmbeddedTorError.routeNotReady
         }
         let generation = readinessGeneration
+        let revision = routeRevision
         record(.manualProbe)
         do {
             guard try await routeProbe(port, timeout) else { throw EmbeddedTorError.checkFailed }
-            guard readinessGeneration == generation, case let .ready(currentPort) = state,
+            guard readinessGeneration == generation, routeRevision == revision, case let .ready(currentPort) = state,
                   currentPort == port else { throw EmbeddedTorError.routeNotReady }
             lastFailureCode = nil
             record(.manualVerified)
@@ -176,7 +204,7 @@ final class EmbeddedTorManager: ObservableObject {
             // A failed manual check must not leave a green Ready indicator.
             // Do not invalidate an unrelated, newer startup attempt.
             if case let .ready(currentPort) = state, currentPort == port,
-               attempt == nil, readinessGeneration == generation {
+               attempt == nil, readinessGeneration == generation, routeRevision == revision {
                 invalidateReadiness()
                 setXauXatTorSocksPort(nil)
                 state = .failed(error.localizedDescription)
@@ -382,6 +410,9 @@ final class EmbeddedTorManager: ObservableObject {
             do {
                 let value = try await info(control, "net/listeners/socks")
                 guard attempt == id else { return }
+                // Let outstanding mutable control commands finish in order;
+                // once they are done, never probe on their old path revision.
+                guard attemptRevision == routeRevision else { begin(); return }
                 guard let port = Self.loopbackPort(value) else { throw EmbeddedTorError.invalidSocksPort }
                 state = .verifying
                 routeTask = Task { await self.verifyStartupRoute(port: port, id: id) }
@@ -477,7 +508,7 @@ final class EmbeddedTorManager: ObservableObject {
             logger.error("XauXat Tor: startup failed: \(Self.diagnosticFailure(error), privacy: .public)")
         }
 
-        let pending = callbacks
+        let pending = Array(callbacks.values)
         callbacks.removeAll()
         pending.forEach { $0(result) }
     }

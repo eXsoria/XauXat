@@ -31,6 +31,10 @@ import Tor
         try await readyMustBeRevalidated()
         try await freshnessLeaseIsExplicitAndInvalidatable()
         try await invalidationDuringCheckCannotCreateFreshLease()
+        try await newPathDoesNotWaitForOldProbe()
+        try await cancelledWaiterKeepsSharedStartupAlive()
+        try await manualCheckCannotVerifyAnOldPath()
+        try await mobileHandoverCancelsOnlyObsoleteRecovery()
         try await recoveryRebindsAndPublishesOnlyVerifiedPort()
         try await recoveryFailureIsBounded()
         try await interruptedRepairDoesNotStrandNextRetry()
@@ -112,6 +116,93 @@ import Tor
         require(probe.calls == 2 && publishedPorts == [19050], "Startup waiters must receive only a route verified after the last invalidation")
         _ = try await manager.ensureReady(maxAge: 15)
         require(probe.calls == 2, "A probe started before path invalidation cannot grant a reusable lease")
+    }
+
+    static func newPathDoesNotWaitForOldProbe() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager()
+        var oldProbe: CheckedContinuation<Bool, Error>?
+        probe.handler = { _ in try await withCheckedThrowingContinuation { oldProbe = $0 } }
+        let original = Task { try await manager.ensureReady() }
+        try await until { oldProbe != nil }
+        manager.invalidateReadiness()
+        probe.handler = { _ in true }
+        let port = try await manager.ensureReady()
+        require(try await original.value == port, "Existing startup callers must follow the fresh path")
+        require(probe.calls == 2 && publishedPorts == [19050], "New path must become usable before an unresponsive old probe finishes")
+        require(TorTestState.threadStarts == 1, "A path handover must reuse the Tor runtime")
+        oldProbe!.resume(returning: true)
+        _ = try await manager.ensureReady(maxAge: 15)
+        require(probe.calls == 2 && publishedPorts == [19050], "Late old-path success must not publish twice or invalidate fresh readiness")
+    }
+
+    static func cancelledWaiterKeepsSharedStartupAlive() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager()
+        var held: CheckedContinuation<Bool, Error>?
+        probe.handler = { _ in try await withCheckedThrowingContinuation { held = $0 } }
+        var cancelled = false
+        let waiter = Task {
+            do { _ = try await manager.ensureReady(); fatalError("Cancelled waiter must not succeed") }
+            catch is CancellationError { cancelled = true }
+            catch { fatalError("Expected cancellation") }
+        }
+        try await until { held != nil }
+        var startup: Result<UInt16, Error>?
+        manager.start { startup = $0 }
+        waiter.cancel()
+        try await until { cancelled }
+        require(startup == nil && publishedTorPort == nil, "Cancellation must finish its waiter promptly without finishing shared startup")
+        held!.resume(returning: true)
+        try await until { startup != nil }
+        require(try startup!.get() == 19050 && probe.calls == 1, "Other callers must retain the original shared startup")
+        require(!TorTestState.commands.contains("SETCONF SocksPort=0"), "Cancelling a waiter must not reset Tor networking")
+    }
+
+    static func manualCheckCannotVerifyAnOldPath() async throws {
+        for success in [true, false] {
+            reset()
+            let probe = ScriptedProbe(), manager = probe.manager()
+            _ = try await manager.ensureReady()
+            var held: CheckedContinuation<Bool, Error>?
+            probe.handler = { _ in try await withCheckedThrowingContinuation { held = $0 } }
+            let manual = Task { try await manager.verifyTorRoute() }
+            try await until { held != nil }
+            manager.invalidateReadiness()
+            if success { held!.resume(returning: true) }
+            else { held!.resume(throwing: TorSOCKSProbeError.failed(.response)) }
+            do { _ = try await manual.value; fatalError("An old-path diagnostic cannot verify a new path") } catch { }
+            require(publishedTorPort == 19050, "Old diagnostic completion must not withdraw the current Tor endpoint")
+            probe.handler = { _ in true }
+            _ = try await manager.ensureReady(maxAge: 15)
+            require(probe.calls == 3, "An old manual check must not grant readiness to the new path")
+        }
+    }
+
+    static func mobileHandoverCancelsOnlyObsoleteRecovery() async throws {
+        reset()
+        let probe = ScriptedProbe(), tor = probe.manager()
+        var oldProbe: CheckedContinuation<Bool, Error>?
+        probe.handler = { _ in try await withCheckedThrowingContinuation { oldProbe = $0 } }
+        var commands = 0
+        let recovery = XauXatConnectionRecoveryManager(dependencies: .init(
+            context: { .init(userId: 1, online: true, active: true) },
+            ensureTor: { _ in .init(port: try await tor.ensureReady(), replaced: false) },
+            invalidateTor: { tor.invalidateReadiness() },
+            applyTor: { false }, failedRelays: { [:] }, reconnect: { _ in commands += 1 }
+        ), networkSettleDelay: 0.01)
+        let obsolete = Task { try await recovery.reconnect() }
+        try await until { oldProbe != nil }
+        var startup: Result<UInt16, Error>?
+        tor.start { startup = $0 }
+        probe.handler = { _ in true }
+        recovery.networkChanged(online: true, network: .cellular)
+        try await until { commands == 1 }
+        do { try await obsolete.value; fatalError("Old recovery must be cancelled") } catch is CancellationError { }
+        require(try startup!.get() == 19050, "Foreground startup must survive cancellation of the coordinator's old waiter")
+        require(probe.calls == 2 && TorTestState.threadStarts == 1 && publishedPorts == [19050], "Actual Tor/coordinator handover must finish before the stale socket does")
+        oldProbe!.resume(returning: true)
+        recovery.pause()
     }
 
     static func recoveryRebindsAndPublishesOnlyVerifiedPort() async throws {

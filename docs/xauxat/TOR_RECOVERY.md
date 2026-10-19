@@ -110,11 +110,43 @@ a second reconnect command immediately after applying it.
 
 Every NWPathMonitor callback invalidates freshness, even if its coarse network
 type remains Wi-Fi. Availability changes are forwarded to the core immediately;
-global recovery waits for one second of path stability. Old monitor callbacks
+global recovery waits for one second of path stability (two seconds on cellular
+to absorb handover bursts). Old monitor callbacks
 are discarded. Profile/offline/epoch/cancellation checks are repeated after
 awaits and before issuing relay commands. Entering background pauses the app's
 automatic recovery; it resumes with pending work when the app becomes active.
 This does not grant extra background execution or change the NSE's separate Tor.
+
+## Mobile handovers and temporary route failures
+
+A new settled path cancels the coordinator's obsolete waiter. Cancellation of
+`ensureReady` detaches only that waiter; other startup callers keep their shared
+attempt. If its SOCKS check belongs to the old network revision, a fresh caller
+replaces that check immediately, preserving the other callers and the single
+Tor runtime. It does not wait for the old socket's 30-second timeout or reset
+Tor networking solely because the path changed. Mutable control commands finish
+in order before a new revision starts checking. Late manual probes cannot verify
+or withdraw readiness on behalf of an older network revision.
+
+A failed route schedules foreground recovery even with an empty outbox. The
+fresh global route checks back off by 2/5/10/20/45/90 seconds, with bounded jitter
+and a 90-second maximum delay. Each Tor attempt retains the deadlines and single
+repair described above. Successful global recovery clears this demand; ordinary
+healthy relay checks still do no work. This is incoming-route recovery, not a
+timer that rotates healthy circuits or resends messages. Background, offline,
+profile/store changes, stopped chat and authentication gates prevent delayed
+retries from issuing commands. Foreground startup failures can request the same
+retry only when an initialized, unlocked chat session is available.
+
+Diagnostics add only the coarse transport (`cellular`, `wifi`, `ethernet`,
+`other` or `unknown`), whether route recovery is pending, and its backoff. They
+do not collect radio/cell identifiers, carrier names, interface names or IPs.
+Regression checks include the actual Tor manager and coordinator together with
+an unresponsive old probe, incoming-only recovery, progressive backoff, empty
+outbox changes, and lifecycle/profile/store/authentication cancellation. Physical
+acceptance must cover repeated Wi-Fi/mobile handovers, a brief airplane-mode
+interruption and a mobile-only period with the app open and no outbound messages.
+Carrier filtering and coverage loss remain possible; bridges are not included.
 
 The outbound tracker finishes at `sndSent` as well as a receipt/error status.
 Thus missing delivery receipts (`Sent to relay` versus `Delivered`) do not by

@@ -45,7 +45,14 @@ class NetworkObserver {
         // recovery; send core network-info updates only when those values change.
         DispatchQueue.main.async {
             ChatModel.shared.networkInfo = info
-            XauXatConnectionRecoveryManager.shared.networkChanged(online: info.online)
+            let network: XauXatConnectionRecoveryManager.Network
+            switch info.networkType {
+            case .wifi: network = .wifi
+            case .cellular: network = .cellular
+            case .ethernet: network = .ethernet
+            default: network = .other
+            }
+            XauXatConnectionRecoveryManager.shared.networkChanged(online: info.online, network: network)
         }
         if infoChanged, hasChatCtrl() {
             do { try apiSetNetworkInfo(info) }

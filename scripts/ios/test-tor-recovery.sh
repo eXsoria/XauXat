@@ -10,7 +10,9 @@ swiftc -swift-version 5 -emit-library -emit-module -module-name Tor \
   "$tests/TorStub.swift" -emit-module-path "$temp/Tor.swiftmodule" -o "$temp/libTor.dylib"
 swiftc -swift-version 5 -parse-as-library -I "$temp" -L "$temp" -lTor -lSimpleXChat \
   -Xlinker -rpath -Xlinker "$temp" "$tests/AppAdapters.swift" \
-  "$root/apps/ios/Shared/Model/EmbeddedTorManager.swift" "$tests/Tests.swift" \
+  "$root/apps/ios/Shared/Model/EmbeddedTorManager.swift" \
+  "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
+  "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" "$tests/Tests.swift" \
   -o "$temp/tor-recovery-tests"
 "$temp/tor-recovery-tests"
 swiftc -swift-version 5 -parse-as-library \

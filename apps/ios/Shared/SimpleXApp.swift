@@ -118,6 +118,7 @@ struct SimpleXApp: App {
             case .success:
                 completion()
             case let .failure(error):
+                XauXatConnectionRecoveryManager.shared.routeUnavailable()
                 if showError {
                     AlertManager.shared.showAlert(Alert(
                         title: Text("Private connection unavailable"),
