@@ -35,6 +35,9 @@ import Tor
         try await cancelledWaiterKeepsSharedStartupAlive()
         try await manualCheckCannotVerifyAnOldPath()
         try await mobileHandoverCancelsOnlyObsoleteRecovery()
+        try await coldStartupFollowsTheFirstMobilePath()
+        try await transientColdStartupRetriesKeepItsCompletion()
+        try await coldStartupRetriesStopAtTheirBudgetAndAvailabilityGate()
         try await recoveryRebindsAndPublishesOnlyVerifiedPort()
         try await recoveryFailureIsBounded()
         try await interruptedRepairDoesNotStrandNextRetry()
@@ -203,6 +206,77 @@ import Tor
         require(probe.calls == 2 && TorTestState.threadStarts == 1 && publishedPorts == [19050], "Actual Tor/coordinator handover must finish before the stale socket does")
         oldProbe!.resume(returning: true)
         recovery.pause()
+    }
+
+    static func coldStartupFollowsTheFirstMobilePath() async throws {
+        reset()
+        let probe = ScriptedProbe(), tor = probe.manager()
+        var oldProbe: CheckedContinuation<Bool, Error>?
+        probe.handler = { _ in try await withCheckedThrowingContinuation { oldProbe = $0 } }
+        var startup: Result<UInt16, Error>?
+        tor.startRetrying(whileAvailable: { true }) { startup = $0 }
+        try await until { oldProbe != nil }
+        var coreCommands = 0
+        let recovery = XauXatConnectionRecoveryManager(dependencies: .init(
+            context: { .init(userId: nil, online: true, active: true) },
+            ensureTor: { _ in fatalError("Uninitialized chat must not invoke messaging recovery") },
+            invalidateTor: { tor.invalidateReadiness() },
+            refreshStartup: { await tor.refreshPendingStartup() },
+            applyTor: { coreCommands += 1; return false },
+            failedRelays: { fatalError("No core summary exists during cold start") },
+            reconnect: { _ in coreCommands += 1 }, sessionState: { .uninitialized }
+        ), networkSettleDelay: 0.01)
+        probe.handler = { _ in true }
+        recovery.networkChanged(online: true, network: .cellular)
+        try await until { startup != nil }
+        require(try startup!.get() == 19050 && probe.calls == 2, "Initial mobile path must reach the original startup callback without any chat profile")
+        require(coreCommands == 0 && TorTestState.threadStarts == 1, "Cold path refresh must never activate a store or create another Tor runtime")
+        oldProbe!.resume(returning: true)
+        recovery.pause()
+    }
+
+    static func transientColdStartupRetriesKeepItsCompletion() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager()
+        var completions = 0
+        var result: Result<UInt16, Error>?
+        probe.handler = { _ in
+            if probe.calls <= 6 { throw TorSOCKSProbeError.failed(.handshake) }
+            return true
+        }
+        manager.startRetrying(whileAvailable: { true }) { result = $0; completions += 1 }
+        try await until { result != nil }
+        require(try result!.get() > 0 && probe.calls == 7 && completions == 1, "A transient failed cold attempt must retain its initialization callback until the retry succeeds")
+        require(manager.diagnosticText.contains("startupRetry") && TorTestState.threadStarts == 1, "Cold retries must be visible and retain one runtime")
+    }
+
+    static func coldStartupRetriesStopAtTheirBudgetAndAvailabilityGate() async throws {
+        for available in [false, true] {
+            reset()
+            let probe = ScriptedProbe(), manager = probe.manager()
+            probe.handler = { _ in throw TorSOCKSProbeError.failed(.handshake) }
+            var result: Result<UInt16, Error>?
+            manager.startRetrying(whileAvailable: { available }) { result = $0 }
+            try await until { result != nil }
+            if case .success = result! { fatalError("Persistent cold failure must stay closed") }
+            require(probe.calls == (available ? 18 : 6), "Cold retries must stop after three attempts or immediately when the foreground/network gate closes")
+            require(publishedTorPort == nil && TorTestState.threadStarts == 1, "Cold retry exhaustion must not publish a route or start another runtime")
+        }
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager(timeout: 200_000_000)
+        probe.handler = { _ in try await Task.sleep(nanoseconds: 1_000_000_000); return true }
+        var result: Result<UInt16, Error>?
+        manager.startRetrying(whileAvailable: { true }) { result = $0 }
+        try await until { result != nil }
+        require(probe.calls == 1 && !manager.diagnosticText.contains("startupRetry"), "A full bootstrap timeout must reach Retry UI without multiplying its four-minute deadline")
+        reset()
+        let gatedProbe = ScriptedProbe(), gatedManager = gatedProbe.manager()
+        gatedProbe.handler = { _ in throw TorSOCKSProbeError.failed(.handshake) }
+        var gates = 0
+        var gatedResult: Result<UInt16, Error>?
+        gatedManager.startRetrying(whileAvailable: { gates += 1; return gates == 1 }) { gatedResult = $0 }
+        try await until { gatedResult != nil }
+        require(gates == 2 && gatedProbe.calls == 6, "Cold retries must recheck foreground/network availability after backoff")
     }
 
     static func recoveryRebindsAndPublishesOnlyVerifiedPort() async throws {

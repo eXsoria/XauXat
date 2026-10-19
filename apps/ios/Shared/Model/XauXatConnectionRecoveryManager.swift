@@ -84,6 +84,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         var context: () -> Context
         var ensureTor: (_ force: Bool) async throws -> Route
         var invalidateTor: () -> Void
+        var refreshStartup: () async -> Void = { }
         // The pinned core reconnects all sessions itself when config changes.
         var applyTor: () throws -> Bool
         // Relay -> minimum observed stall duration. Explicit failed sessions
@@ -469,6 +470,12 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             do { try await self.dependencies.sleep(settle) } catch { return }
             guard self.epoch == expectedEpoch, !Task.isCancelled else { return }
             self.networkSettling = false
+            do { try self.requireForegroundNetwork(self.dependencies.context(), reason: .networkChange) }
+            catch { return }
+            // The very first Tor bootstrap precedes any profile or database.
+            // Refresh only its existing callers; this opens no store/core.
+            await self.dependencies.refreshStartup()
+            guard self.epoch == expectedEpoch, !Task.isCancelled else { return }
             do { try self.requireAvailable(self.dependencies.context(), reason: .networkChange) }
             catch { return }
             do { try await self.reconnect(.all, reason: .networkChange) } catch { }
@@ -499,6 +506,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     func configurationApplied() {
         let context = dependencies.context()
         guard context.active, context.online else { return }
+        routeRetry = nil
         lastGlobal = (epoch, context, dependencies.now())
         firstObserved.removeAll()
         record(.foreground, "configuration_reconnected_all")

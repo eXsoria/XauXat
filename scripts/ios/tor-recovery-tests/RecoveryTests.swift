@@ -114,6 +114,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await routeRetriesBackOffAndStopAfterSuccess()
         try await routeRetriesRespectContextAndSessionGates()
         try await clearingOutboxDoesNotCancelRouteRecovery()
+        try await verifiedConfigurationStopsRouteRetries()
         routeRetryTimingIsBounded()
         try await diagnosticJournalIsBounded()
         print("Coordinated recovery regression checks passed: \(checks)")
@@ -569,6 +570,19 @@ typealias Recovery = XauXatConnectionRecoveryManager
         sleeping!.resume()
         try await until { f.commands == [.all] }
         require(f.forces == [true], "Incoming route recovery must survive an empty outbox and subscription summary")
+        f.manager.pause()
+    }
+
+    static func verifiedConfigurationStopsRouteRetries() async throws {
+        let f = RecoveryFixture()
+        var sleeping: CheckedContinuation<Void, Error>?
+        f.sleep = { _ in try await withCheckedThrowingContinuation { sleeping = $0 } }
+        f.manager.routeUnavailable()
+        try await until { sleeping != nil }
+        f.manager.configurationApplied()
+        sleeping!.resume()
+        try await Task.sleep(nanoseconds: 15_000_000)
+        require(f.forces.isEmpty && f.manager.diagnosticText.contains("route_retry=false"), "A verified foreground configuration reconnect must satisfy pending route recovery")
         f.manager.pause()
     }
 

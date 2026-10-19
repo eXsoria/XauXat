@@ -138,6 +138,19 @@ profile/store changes, stopped chat and authentication gates prevent delayed
 retries from issuing commands. Foreground startup failures can request the same
 retry only when an initialized, unlocked chat session is available.
 
+Cold startup also has its own bounded retry, independent of messaging or store
+initialization. The network monitor starts before the first Tor bootstrap;
+previously it only started after the database opened, so the first mobile path
+could not participate in recovery. Monitoring is idempotent, and a newly opened
+core receives the cached availability without a synthetic path change. After a
+settled foreground path update, existing Tor startup callers can refresh their
+stale check even when no profile exists. This does not open a database or bypass
+unlock. Transient startup failures retain the app initialization completion over
+at most two additional attempts (2/4-second backoff), gated on foreground and
+network availability before and after the delay. Full four-minute bootstrap
+timeouts, backup protection failure and a terminated runtime reach the existing
+Retry UI directly; they do not multiply into repeated full bootstrap deadlines.
+
 Diagnostics add only the coarse transport (`cellular`, `wifi`, `ethernet`,
 `other` or `unknown`), whether route recovery is pending, and its backoff. They
 do not collect radio/cell identifiers, carrier names, interface names or IPs.

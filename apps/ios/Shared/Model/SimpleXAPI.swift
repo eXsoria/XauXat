@@ -136,6 +136,7 @@ extension XauXatConnectionRecoveryManager {
             return Route(port: port, replaced: previousPort != port)
         },
         invalidateTor: { EmbeddedTorManager.shared.invalidateReadiness() },
+        refreshStartup: { await EmbeddedTorManager.shared.refreshPendingStartup() },
         applyTor: { try applyXauXatRecoveryConfiguration() },
         failedRelays: {
             let userId = try currentUserId("connectionRecovery")
@@ -2710,7 +2711,7 @@ func initializeChat(start: Bool, confirmStart: Bool = false, dbKey: String? = ni
     (m.chatDbEncrypted, m.chatDbStatus) = chatMigrateInit(dbKey, confirmMigrations: confirmMigrations)
     if  m.chatDbStatus != .ok { return }
     _ = protectPrivateAppDataFromSystemBackup()
-    NetworkObserver.shared.restartMonitor()
+    NetworkObserver.shared.updateCoreNetworkInfo()
     // If we migrated successfully means previous re-encryption process on database level finished successfully too
     if encryptionStartedDefault.get() {
         encryptionStartedDefault.set(false)

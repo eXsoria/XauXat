@@ -29,7 +29,7 @@ final class EmbeddedTorManager: ObservableObject {
     @Published private(set) var state: State = .stopped
 
     private enum DiagnosticStage: String {
-        case start, joined, invalidated, superseded, waiterCancelled, controlReopened, authenticated, bootstrap
+        case start, joined, invalidated, superseded, waiterCancelled, startupRetry, controlReopened, authenticated, bootstrap
         case circuitCheck, probe, probeFailed, repair, failed, ready, manualProbe, manualProbeFailed, manualVerified
     }
     private let startedAt = ProcessInfo.processInfo.systemUptime
@@ -123,6 +123,43 @@ final class EmbeddedTorManager: ObservableObject {
 
     func start(_ completion: @escaping (Result<UInt16, Error>) -> Void) {
         start(waiter: UUID(), completion)
+    }
+
+    /// Preserve the app's initialization callback across transient local or
+    /// route failures, even before a chat profile/core exists. A full bootstrap
+    /// timeout or a stopped runtime still reaches the existing Retry UI.
+    func startRetrying(whileAvailable: @escaping @MainActor () -> Bool,
+                       _ completion: @escaping (Result<UInt16, Error>) -> Void) {
+        Task {
+            for retry in 0...2 {
+                do {
+                    let port = try await ensureReady()
+                    completion(.success(port))
+                    return
+                } catch {
+                    let terminal: Bool
+                    if let failure = error as? EmbeddedTorError {
+                        switch failure {
+                        case .backupProtection, .processStopped, .timeout: terminal = true
+                        default: terminal = false
+                        }
+                    } else { terminal = error is CancellationError }
+                    guard retry < 2, !terminal, whileAvailable() else {
+                        completion(.failure(error))
+                        return
+                    }
+                    record(.startupRetry, count: retry + 1)
+                    do { try await Task.sleep(nanoseconds: retryDelay * UInt64(retry + 1)) }
+                    catch { completion(.failure(error)); return }
+                    guard whileAvailable() else { completion(.failure(error)); return }
+                }
+            }
+        }
+    }
+
+    func refreshPendingStartup() async {
+        guard attempt != nil, !callbacks.isEmpty else { return }
+        _ = try? await ensureReady()
     }
 
     private func start(waiter: UUID, _ completion: @escaping (Result<UInt16, Error>) -> Void) {
