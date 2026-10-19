@@ -14,7 +14,10 @@ swiftc -swift-version 5 -parse-as-library -I "$temp" -L "$temp" -lTor -lSimpleXC
   "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
   "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" "$tests/Tests.swift" \
   -o "$temp/tor-recovery-tests"
-"$temp/tor-recovery-tests"
+for run in {1..10}; do
+  echo "Tor recovery repeat $run/10"
+  "$temp/tor-recovery-tests"
+done
 swiftc -swift-version 5 -parse-as-library \
   "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
   "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" \

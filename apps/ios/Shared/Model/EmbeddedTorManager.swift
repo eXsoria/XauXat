@@ -114,6 +114,8 @@ final class EmbeddedTorManager: ObservableObject {
     private let retryDelay: UInt64
     private let startupTimeout: UInt64
     private let bootstrapStallTimeout: UInt64
+    private let bootstrapNow: @MainActor () -> TimeInterval
+    private let bootstrapSleep: @MainActor (UInt64) async throws -> Void
 
     // Production owns exactly one instance. Dependencies make lifecycle races
     // testable without starting a second C-Tor runtime in the test process.
@@ -121,12 +123,16 @@ final class EmbeddedTorManager: ObservableObject {
         routeProbe: @escaping @MainActor (UInt16, TimeInterval) async throws -> Bool = TorSOCKSProbe.run,
         retryDelay: UInt64 = 2_000_000_000,
         startupTimeout: UInt64 = 240_000_000_000,
-        bootstrapStallTimeout: UInt64 = 60_000_000_000
+        bootstrapStallTimeout: UInt64 = 60_000_000_000,
+        bootstrapNow: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        bootstrapSleep: @escaping @MainActor (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
     ) {
         self.routeProbe = routeProbe
         self.retryDelay = retryDelay
         self.startupTimeout = startupTimeout
         self.bootstrapStallTimeout = max(1, bootstrapStallTimeout)
+        self.bootstrapNow = bootstrapNow
+        self.bootstrapSleep = bootstrapSleep
     }
 
     func start(_ completion: @escaping (Result<UInt16, Error>) -> Void) {
@@ -287,7 +293,7 @@ final class EmbeddedTorManager: ObservableObject {
         state = .starting
         lastBootstrapBucket = nil
         bootstrapProgress = 0
-        bootstrapProgressAt = ProcessInfo.processInfo.systemUptime
+        bootstrapProgressAt = bootstrapNow()
         record(.start)
         routeTask?.cancel()
         routeTask = nil
@@ -310,13 +316,13 @@ final class EmbeddedTorManager: ObservableObject {
         bootstrapWatch = Task { [weak self] in
             guard let self else { return }
             while self.attempt == id {
-                let elapsed = ProcessInfo.processInfo.systemUptime - self.bootstrapProgressAt
+                let elapsed = self.bootstrapNow() - self.bootstrapProgressAt
                 let remaining = max(0, Double(self.bootstrapStallTimeout) / 1_000_000_000 - elapsed)
-                do { try await Task.sleep(nanoseconds: max(1, UInt64(remaining * 1_000_000_000))) }
+                do { try await self.bootstrapSleep(max(1, UInt64(remaining * 1_000_000_000))) }
                 catch { return }
                 guard self.attempt == id, !Task.isCancelled,
                       !self.requestingPort, !self.recoveryAttempted else { return }
-                if ProcessInfo.processInfo.systemUptime - self.bootstrapProgressAt >= Double(self.bootstrapStallTimeout) / 1_000_000_000 {
+                if self.bootstrapNow() - self.bootstrapProgressAt >= Double(self.bootstrapStallTimeout) / 1_000_000_000 {
                     self.record(.bootstrapStalled)
                     self.finish(.failure(EmbeddedTorError.bootstrapStalled), id: id)
                     return
@@ -462,7 +468,7 @@ final class EmbeddedTorManager: ObservableObject {
                     let bounded = max(0, min(100, progress))
                     if bounded > self.bootstrapProgress {
                         self.bootstrapProgress = bounded
-                        self.bootstrapProgressAt = ProcessInfo.processInfo.systemUptime
+                        self.bootstrapProgressAt = self.bootstrapNow()
                     }
                     if self.lastBootstrapBucket != bounded / 10 {
                         self.lastBootstrapBucket = bounded / 10

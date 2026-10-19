@@ -3,6 +3,7 @@ import Foundation
 
 public enum TorTestState {
     public static var commands: [String] = []
+    public static var completedCommands: [String] = []
     public static var threadStarts = 0
     public static var controllers = 0
     public static var port: UInt16 = 19050
@@ -15,7 +16,7 @@ public enum TorTestState {
     public static var injectStatusBeforeReply = false
     public static var lastThread: TorThread?
     public static func reset() {
-        commands = []; threadStarts = 0; controllers = 0; port = 19050
+        commands = []; completedCommands = []; threadStarts = 0; controllers = 0; port = 19050
         failNextCommand = false; failCommandContaining = nil; networkDisabled = false; injectStatusBeforeReply = false; lastThread = nil
         circuitEstablished = true; establishAfterRepair = false; statusObservers = [:]
     }
@@ -97,6 +98,7 @@ public final class TorController {
                 lines = [Data((fail ? "Failure" : "OK").utf8)]
             }
             _ = observer(codes, lines, &stop)
+            TorTestState.completedCommands.append(text)
         }
     }
 }
