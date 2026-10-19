@@ -147,7 +147,9 @@ settled foreground path update, existing Tor startup callers can refresh their
 stale check even when no profile exists. This does not open a database or bypass
 unlock. Transient startup failures retain the app initialization completion over
 at most two additional attempts (2/4-second backoff), gated on foreground and
-network availability before and after the delay. Full four-minute bootstrap
+network availability before and after the delay. All three share the original
+four-minute startup budget, including backoff; a short verification lease can
+reuse another caller's successful recovery during that backoff. Full bootstrap
 timeouts, backup protection failure and a terminated runtime reach the existing
 Retry UI directly; they do not multiply into repeated full bootstrap deadlines.
 

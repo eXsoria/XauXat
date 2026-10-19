@@ -277,6 +277,28 @@ import Tor
         gatedManager.startRetrying(whileAvailable: { gates += 1; return gates == 1 }) { gatedResult = $0 }
         try await until { gatedResult != nil }
         require(gates == 2 && gatedProbe.calls == 6, "Cold retries must recheck foreground/network availability after backoff")
+        reset()
+        let budgetProbe = ScriptedProbe()
+        let budgetManager = budgetProbe.manager(timeout: 200_000_000)
+        var budgetResult: Result<UInt16, Error>?
+        var budgetFinished = false
+        budgetProbe.handler = { _ in
+            if budgetProbe.calls <= 6 { throw TorSOCKSProbeError.failed(.handshake) }
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+            return true
+        }
+        budgetManager.startRetrying(whileAvailable: { true }) { budgetResult = $0; budgetFinished = true }
+        try await until { budgetFinished }
+        if case .success = budgetResult! { fatalError("Cold retry budget must expire") }
+        require(budgetProbe.calls == 7, "A slow retry must share the original cold-start budget rather than receive another full deadline")
+        reset()
+        let stoppedProbe = ScriptedProbe(), stoppedManager = stoppedProbe.manager()
+        _ = try await stoppedManager.ensureReady()
+        TorTestState.lastThread!.isFinished = true
+        var stoppedResult: Result<UInt16, Error>?
+        stoppedManager.startRetrying(whileAvailable: { true }) { stoppedResult = $0 }
+        try await until { stoppedResult != nil }
+        require(TorTestState.threadStarts == 1 && !stoppedManager.diagnosticText.contains("startupRetry"), "Cold retry cannot re-enter a terminated C-Tor runtime")
     }
 
     static func recoveryRebindsAndPublishesOnlyVerifiedPort() async throws {

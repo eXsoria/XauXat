@@ -131,9 +131,12 @@ final class EmbeddedTorManager: ObservableObject {
     func startRetrying(whileAvailable: @escaping @MainActor () -> Bool,
                        _ completion: @escaping (Result<UInt16, Error>) -> Void) {
         Task {
+            let expires = ProcessInfo.processInfo.systemUptime + Double(startupTimeout) / 1_000_000_000
             for retry in 0...2 {
                 do {
-                    let port = try await ensureReady()
+                    // Another foreground caller may have recovered the same
+                    // path during backoff. Reuse only its explicit short lease.
+                    let port = try await readyBefore(expires, maxAge: retry == 0 ? 0 : 15)
                     completion(.success(port))
                     return
                 } catch {
@@ -149,11 +152,28 @@ final class EmbeddedTorManager: ObservableObject {
                         return
                     }
                     record(.startupRetry, count: retry + 1)
-                    do { try await Task.sleep(nanoseconds: retryDelay * UInt64(retry + 1)) }
+                    let remaining = max(0, expires - ProcessInfo.processInfo.systemUptime)
+                    let delay = min(retryDelay * UInt64(retry + 1), UInt64(remaining * 1_000_000_000))
+                    do { try await Task.sleep(nanoseconds: delay) }
                     catch { completion(.failure(error)); return }
                     guard whileAvailable() else { completion(.failure(error)); return }
                 }
             }
+        }
+    }
+
+    private func readyBefore(_ expires: TimeInterval, maxAge: TimeInterval) async throws -> UInt16 {
+        let remaining = expires - ProcessInfo.processInfo.systemUptime
+        guard remaining > 0 else { throw EmbeddedTorError.timeout }
+        return try await withThrowingTaskGroup(of: UInt16.self) { group in
+            group.addTask { try await self.ensureReady(maxAge: maxAge) }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                throw EmbeddedTorError.timeout
+            }
+            defer { group.cancelAll() }
+            guard let port = try await group.next() else { throw EmbeddedTorError.timeout }
+            return port
         }
     }
 
