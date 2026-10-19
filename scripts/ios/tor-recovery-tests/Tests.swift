@@ -19,12 +19,12 @@ import Tor
         guard value else { fatalError(message) }
     }
     static func reset() { TorTestState.reset(); publishedTorPort = nil; publishedPorts = [] }
-    static func until(_ condition: () -> Bool) async throws {
+    static func until(file: StaticString = #fileID, line: UInt = #line, _ condition: () -> Bool) async throws {
         for _ in 0..<500 {
             if condition() { return }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
-        fatalError("Timed out waiting for test condition")
+        fatalError("Timed out waiting for test condition", file: file, line: line)
     }
 
     static func main() async throws {
