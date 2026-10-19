@@ -39,7 +39,8 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         }
     }
 
-    enum Reason: String { case pendingWork, foreground, networkChange, manual }
+    enum Reason: String { case pendingWork, foreground, networkChange, routeRetry, manual }
+    enum Network: String { case unknown, wifi, cellular, ethernet, other }
 
     struct Context: Equatable {
         var userId: Int64?
@@ -83,6 +84,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         var context: () -> Context
         var ensureTor: (_ force: Bool) async throws -> Route
         var invalidateTor: () -> Void
+        var refreshStartup: () async -> Void = { }
         // The pinned core reconnects all sessions itself when config changes.
         var applyTor: () throws -> Bool
         // Relay -> minimum observed stall duration. Explicit failed sessions
@@ -92,6 +94,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         var sessionState: () -> SessionState = { .running }
         var resumeChat: (_ isCurrent: @escaping () -> Bool) async throws -> Void = { _ in }
         var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+        var retryJitter: () -> Double = { Double.random(in: 0.85...1.15) }
         var sleep: (TimeInterval) async throws -> Void = {
             try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000))
         }
@@ -118,6 +121,8 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     private var loopId: UUID?
     private var networkTask: Task<Void, Never>?
     private var networkSettling = false
+    private var network: Network = .unknown
+    private var routeRetry: (epoch: Int, context: Context)?
 
     private struct Flight {
         let id: UUID
@@ -144,7 +149,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     /// Callers share an operation only if it covers their scope, profile and
     /// network generation. A broader/newer request waits, then runs separately.
     func reconnect(_ scope: Scope = .all, reason: Reason = .manual) async throws {
-        let force = reason == .manual || reason == .networkChange
+        let force = reason == .manual || reason == .networkChange || reason == .routeRetry
         while true {
             try Task.checkCancellation()
             let context = dependencies.context()
@@ -282,7 +287,13 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             record(reason, "verify_route")
             let route: Route
             do { route = try await dependencies.ensureTor(force) }
-            catch { record(reason, "route_failed"); throw error }
+            catch {
+                record(reason, "route_failed")
+                if !(error is CancellationError), epoch == operationEpoch, dependencies.context() == context {
+                    routeUnavailable()
+                }
+                throw error
+            }
             try requireCurrent(context, operationEpoch, reason: reason)
             // A replaced listener invalidates every old core session. This is
             // a reason to widen a relay repair to all servers.
@@ -338,6 +349,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             try requireCurrent(context, operationEpoch, reason: reason)
             try requireResumed(reason: reason)
             if scope == .all {
+                routeRetry = nil
                 lastGlobal = (operationEpoch, context, dependencies.now())
                 firstObserved.removeAll()
             }
@@ -352,9 +364,40 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     func setOutboundPending(_ pending: Bool) { outboundPending = pending; updateLoop() }
     func setSubscriptionPending(_ pending: Bool) { subscriptionPending = pending; updateLoop() }
     private var hasPendingWork: Bool { outboundPending || subscriptionPending }
+    private var needsRouteRetry: Bool {
+        guard let routeRetry else { return false }
+        return routeRetry.epoch == epoch && routeRetry.context == dependencies.context()
+    }
+    private var hasRecoveryWork: Bool { hasPendingWork || needsRouteRetry }
+
+    /// A temporarily unavailable route also blocks incoming messages. Recover
+    /// it in the foreground even when no outbound message has been queued.
+    func routeUnavailable() {
+        let context = dependencies.context()
+        guard context.active, context.online, context.userId != nil,
+              dependencies.sessionState().canRecover else { return }
+        if !needsRouteRetry {
+            // An old outbox check may be sleeping for 90 seconds. Promoting
+            // it to a failed-route repair must start the short backoff now.
+            // Cancel the scheduler only, never a caller's shared flight.
+            loop?.cancel()
+            loop = nil
+            loopId = nil
+        }
+        routeRetry = (epoch, context)
+        lastGlobal = nil
+        record(.routeRetry, "scheduled")
+        updateLoop()
+    }
+
+    static func routeRetryDelay(attempt: Int, jitter: Double) -> TimeInterval {
+        let delays: [TimeInterval] = [2, 5, 10, 20, 45, 90]
+        let delay = delays[min(max(0, attempt), delays.count - 1)]
+        return min(90, delay * max(0.85, min(1.15, jitter)))
+    }
 
     private func updateLoop() {
-        guard hasPendingWork else { stopLoop(); return }
+        guard hasRecoveryWork else { stopLoop(); return }
         guard loop == nil else { return }
         let context = dependencies.context()
         guard context.active, context.userId != nil, dependencies.sessionState().canRecover else {
@@ -366,8 +409,9 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         loop = Task { [weak self] in
             guard let self else { return }
             var attempt = 0
-            while self.hasPendingWork && !Task.isCancelled {
+            while self.hasRecoveryWork && !Task.isCancelled {
                 let context = self.dependencies.context()
+                let operationEpoch = self.epoch
                 guard context.active else { break }
                 guard context.userId != nil, self.dependencies.sessionState().canRecover else {
                     try? self.requireAvailable(context, reason: .pendingWork)
@@ -379,19 +423,26 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                     continue
                 }
                 self.state = attempt == 0 ? .waiting : .monitoring
-                do { try await self.dependencies.sleep(XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: attempt)) }
+                let delay = self.needsRouteRetry
+                    ? Self.routeRetryDelay(attempt: attempt, jitter: self.dependencies.retryJitter())
+                    : XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: attempt)
+                if self.needsRouteRetry { self.record(.routeRetry, "backoff", count: Int(delay.rounded(.up))) }
+                do { try await self.dependencies.sleep(delay) }
                 catch { break }
                 // The path, profile and pending work can change during backoff.
-                guard self.hasPendingWork, !Task.isCancelled else { break }
-                guard self.dependencies.context() == context, !self.networkSettling else { continue }
-                do { try await self.reconnect(.automatic, reason: .pendingWork) }
+                guard self.hasRecoveryWork, !Task.isCancelled else { break }
+                guard self.epoch == operationEpoch, self.dependencies.context() == context, !self.networkSettling else { continue }
+                do {
+                    if self.needsRouteRetry { try await self.reconnect(.all, reason: .routeRetry) }
+                    else { try await self.reconnect(.automatic, reason: .pendingWork) }
+                }
                 catch { /* bounded retry; the core retains pending messages */ }
                 attempt += 1
             }
             guard self.loopId == id else { return }
             self.loop = nil
             self.loopId = nil
-            if !self.hasPendingWork { self.state = .idle }
+            if !self.hasRecoveryWork { self.state = .idle }
         }
     }
 
@@ -405,22 +456,34 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
 
     /// Every path callback matters, including Wi-Fi -> Wi-Fi. Only the latest
     /// settled generation may reconfigure/reconnect the core.
-    func networkChanged(online: Bool) {
+    func networkChanged(online: Bool, network: Network = .unknown) {
         epoch += 1
+        self.network = network
+        routeRetry = nil
         dependencies.invalidateTor()
+        // ensureReady detaches cancelled waiters without cancelling other Tor
+        // clients. A new path can now check immediately after settling.
+        flight?.task.cancel()
         lastGlobal = nil
         relayAttempts.removeAll()
         firstObserved.removeAll()
         networkTask?.cancel()
         networkSettling = online
-        record(.networkChange, online ? "path_online" : "path_offline")
+        record(.networkChange, online ? "path_online_" + network.rawValue : "path_offline")
         if !online { state = .waitingForNetwork; return }
         let expectedEpoch = epoch
         networkTask = Task { [weak self] in
             guard let self else { return }
-            do { try await self.dependencies.sleep(self.networkSettleDelay) } catch { return }
+            let settle = network == .cellular ? self.networkSettleDelay * 2 : self.networkSettleDelay
+            do { try await self.dependencies.sleep(settle) } catch { return }
             guard self.epoch == expectedEpoch, !Task.isCancelled else { return }
             self.networkSettling = false
+            do { try self.requireForegroundNetwork(self.dependencies.context(), reason: .networkChange) }
+            catch { return }
+            // The very first Tor bootstrap precedes any profile or database.
+            // Refresh only its existing callers; this opens no store/core.
+            await self.dependencies.refreshStartup()
+            guard self.epoch == expectedEpoch, !Task.isCancelled else { return }
             do { try self.requireAvailable(self.dependencies.context(), reason: .networkChange) }
             catch { return }
             do { try await self.reconnect(.all, reason: .networkChange) } catch { }
@@ -431,6 +494,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     func pause() {
         record(.foreground, "paused")
         epoch += 1
+        routeRetry = nil
         dependencies.invalidateTor()
         networkTask?.cancel()
         networkTask = nil
@@ -450,6 +514,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     func configurationApplied() {
         let context = dependencies.context()
         guard context.active, context.online else { return }
+        routeRetry = nil
         lastGlobal = (epoch, context, dependencies.now())
         firstObserved.removeAll()
         record(.foreground, "configuration_reconnected_all")
@@ -466,7 +531,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     var diagnosticText: String {
         let context = dependencies.context()
         return "Connection recovery (current app process)\n"
-            + "foreground=\(context.active) online=\(context.online) profile_available=\(context.userId != nil) session=\(dependencies.sessionState().rawValue) recovery=\(state.rawValue)\n"
+            + "foreground=\(context.active) online=\(context.online) network=\(network.rawValue) profile_available=\(context.userId != nil) session=\(dependencies.sessionState().rawValue) recovery=\(state.rawValue) route_retry=\(needsRouteRetry)\n"
             + events.joined(separator: "\n")
     }
 }

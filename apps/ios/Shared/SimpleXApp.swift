@@ -61,6 +61,7 @@ struct SimpleXApp: App {
                 }
                 .onAppear() {
                     AppSheetState.shared.scenePhaseActive = scenePhase == .active
+                    NetworkObserver.shared.startMonitor()
                     plusEntitlements.start()
                     // Present screen for continue migration if it wasn't finished yet
                     if chatModel.migrationState != nil {
@@ -113,11 +114,15 @@ struct SimpleXApp: App {
     }
 
     private func startEmbeddedTor(showError: Bool = false, _ completion: @escaping () -> Void) {
-        EmbeddedTorManager.shared.start { result in
+        EmbeddedTorManager.shared.startRetrying(whileAvailable: {
+            UIApplication.shared.applicationState == .active
+                && AppSheetState.shared.scenePhaseActive && ChatModel.shared.networkInfo.online
+        }) { result in
             switch result {
             case .success:
                 completion()
             case let .failure(error):
+                XauXatConnectionRecoveryManager.shared.routeUnavailable()
                 if showError {
                     AlertManager.shared.showAlert(Alert(
                         title: Text("Private connection unavailable"),

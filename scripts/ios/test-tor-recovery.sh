@@ -10,7 +10,9 @@ swiftc -swift-version 5 -emit-library -emit-module -module-name Tor \
   "$tests/TorStub.swift" -emit-module-path "$temp/Tor.swiftmodule" -o "$temp/libTor.dylib"
 swiftc -swift-version 5 -parse-as-library -I "$temp" -L "$temp" -lTor -lSimpleXChat \
   -Xlinker -rpath -Xlinker "$temp" "$tests/AppAdapters.swift" \
-  "$root/apps/ios/Shared/Model/EmbeddedTorManager.swift" "$tests/Tests.swift" \
+  "$root/apps/ios/Shared/Model/EmbeddedTorManager.swift" \
+  "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
+  "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" "$tests/Tests.swift" \
   -o "$temp/tor-recovery-tests"
 "$temp/tor-recovery-tests"
 swiftc -swift-version 5 -parse-as-library \
@@ -45,6 +47,13 @@ context = api.split("context: {", 1)[1].split("ensureTor:", 1)[0]
 active = context.split("active:", 1)[1]
 assert "applicationState" in active and "scenePhaseActive" in active
 assert "chatRunning" not in active and "AppChatState" not in active, "Foreground cannot depend on chat activation"
+app = (root / "apps/ios/Shared/SimpleXApp.swift").read_text(encoding="utf-8")
+appear = app.split(".onAppear()", 1)[1].split("// Spec: spec/architecture.md#scenePhaseHandling", 1)[0]
+assert appear.index("NetworkObserver.shared.startMonitor()") < appear.index("startEmbeddedTor("), "Network monitoring must precede cold Tor bootstrap"
+assert "startRetrying(whileAvailable:" in app, "Cold startup must retain its completion across transient failures"
+assert "NetworkObserver.shared.updateCoreNetworkInfo()" in api, "New core must receive cached availability without restarting the monitor"
+observer = (root / "apps/ios/Shared/Model/NetworkObserver.swift").read_text(encoding="utf-8")
+assert "guard monitor == nil" in observer and "restartMonitor" not in api, "Opening the core must not synthesize another path change"
 text = "import Foundation\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "startChatAndActivate")
 text += "\n@MainActor\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", "xauXatRecoverySessionState")
 Path(sys.argv[2]).write_text(text, encoding="utf-8")

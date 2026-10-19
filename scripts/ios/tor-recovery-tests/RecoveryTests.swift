@@ -56,6 +56,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
             self.sessionState = .running
         },
         now: { self.clock },
+        retryJitter: { 1 },
         sleep: { try await self.sleep($0) }
     ), networkSettleDelay: 0.02)
 
@@ -109,6 +110,13 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await pendingWorkCanFinishDuringBackoff()
         try await offlineDuringBackoffDoesNotReconnect()
         try await pathFlapsSettleOnce()
+        try await failedHandoverRetriesWithoutAnOutbox()
+        try await routeRetriesBackOffAndStopAfterSuccess()
+        try await routeRetriesRespectContextAndSessionGates()
+        try await clearingOutboxDoesNotCancelRouteRecovery()
+        try await verifiedConfigurationStopsRouteRetries()
+        try await failedRouteInterruptsAnOlderOutboxBackoff()
+        routeRetryTimingIsBounded()
         try await diagnosticJournalIsBounded()
         print("Coordinated recovery regression checks passed: \(checks)")
     }
@@ -218,6 +226,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
         f.ensure = { throw RecoveryFixture.Failure.synthetic }
         await failed(Task { try await f.manager.reconnect() }, "Tor failure must propagate")
         require(f.resumeCount == 0 && f.applyCount == 0 && f.commands.isEmpty, "Chat must stay suspended until Tor is verified")
+        f.manager.pause()
     }
 
     static func failedResumeCannotReconnect() async throws {
@@ -407,6 +416,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
             await failed(Task { try await f.manager.reconnect(.relays([f.first])) }, "Failed route/config must propagate")
             require(f.commands.isEmpty, "Failed verification/configuration cannot issue reconnect commands")
             require(!f.manager.diagnosticText.contains("private-relay") && !f.manager.diagnosticText.contains("synthetic"), "Export must exclude addresses and raw error details")
+            f.manager.pause()
         }
     }
 
@@ -490,6 +500,117 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await until { f.commands.count == 1 }
         try await Task.sleep(nanoseconds: 30_000_000)
         require(f.commands == [.all] && f.forces == [true] && f.invalidations == 3, "Flapping paths must produce one fresh recovery after settling")
+    }
+
+    static func failedHandoverRetriesWithoutAnOutbox() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        var delays: [TimeInterval] = []
+        f.sleep = { delay in
+            delays.append(delay)
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        f.ensure = { if f.forces.count == 1 { throw RecoveryFixture.Failure.synthetic } }
+        f.manager.networkChanged(online: true, network: .cellular)
+        try await until { f.commands == [.all] }
+        require(delays.first == 0.04 && delays.contains(2), "Cellular handover must settle before a separately backed-off route retry")
+        require(f.forces == [true, true] && f.summaryCount == 0, "An unavailable incoming route needs fresh verification even with an empty outbox")
+        require(f.resumeCount == 1 && f.applyCount == 1, "Only the successful retry may resume messaging")
+        require(f.manager.diagnosticText.contains("network=cellular") && f.manager.diagnosticText.contains("route_retry=false"), "Safe diagnostics must identify cellular handover and resolved retry demand")
+        f.manager.pause()
+    }
+
+    static func routeRetriesBackOffAndStopAfterSuccess() async throws {
+        let f = RecoveryFixture()
+        var delays: [TimeInterval] = []
+        f.sleep = { delay in
+            delays.append(delay)
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        f.ensure = { if f.forces.count < 4 { throw RecoveryFixture.Failure.synthetic } }
+        await failed(Task { try await f.manager.reconnect() }, "Initial unavailable route must be reported")
+        try await until { f.commands == [.all] }
+        try await Task.sleep(nanoseconds: 15_000_000)
+        require(delays == [2, 5, 10], "Persistent route failure must back off rather than spin")
+        require(f.forces == [true, true, true, true] && f.applyCount == 1, "Every route retry must be fresh and stay closed until success")
+        require(f.manager.diagnosticText.contains("route_retry=false"), "A successful global repair must stop route-only retries")
+        f.manager.pause()
+    }
+
+    static func routeRetriesRespectContextAndSessionGates() async throws {
+        for change in 0..<7 {
+            let f = RecoveryFixture()
+            var sleeping: CheckedContinuation<Void, Error>?
+            f.sleep = { _ in try await withCheckedThrowingContinuation { sleeping = $0 } }
+            f.manager.routeUnavailable()
+            try await until { sleeping != nil }
+            switch change {
+            case 0: f.context.active = false; f.manager.pause()
+            case 1: f.context.online = false; f.manager.networkChanged(online: false)
+            case 2: f.context.userId = 2
+            case 3: f.context.alternateStore = true
+            case 4: f.sessionState = .stopped
+            case 5: f.sessionState = .unlockRequired
+            default: f.sessionState = .uninitialized
+            }
+            sleeping!.resume()
+            try await Task.sleep(nanoseconds: 15_000_000)
+            require(f.forces.isEmpty && f.commands.isEmpty && f.resumeCount == 0, "A delayed route retry cannot cross a lifecycle, profile, store or session gate")
+            f.manager.pause()
+        }
+    }
+
+    static func clearingOutboxDoesNotCancelRouteRecovery() async throws {
+        let f = RecoveryFixture()
+        var sleeping: CheckedContinuation<Void, Error>?
+        f.sleep = { _ in try await withCheckedThrowingContinuation { sleeping = $0 } }
+        f.manager.routeUnavailable()
+        try await until { sleeping != nil }
+        f.manager.setOutboundPending(false)
+        f.manager.setSubscriptionPending(false)
+        sleeping!.resume()
+        try await until { f.commands == [.all] }
+        require(f.forces == [true], "Incoming route recovery must survive an empty outbox and subscription summary")
+        f.manager.pause()
+    }
+
+    static func verifiedConfigurationStopsRouteRetries() async throws {
+        let f = RecoveryFixture()
+        var sleeping: CheckedContinuation<Void, Error>?
+        f.sleep = { _ in try await withCheckedThrowingContinuation { sleeping = $0 } }
+        f.manager.routeUnavailable()
+        try await until { sleeping != nil }
+        f.manager.configurationApplied()
+        sleeping!.resume()
+        try await Task.sleep(nanoseconds: 15_000_000)
+        require(f.forces.isEmpty && f.manager.diagnosticText.contains("route_retry=false"), "A verified foreground configuration reconnect must satisfy pending route recovery")
+        f.manager.pause()
+    }
+
+    static func failedRouteInterruptsAnOlderOutboxBackoff() async throws {
+        let f = RecoveryFixture()
+        var oldSleep: CheckedContinuation<Void, Error>?
+        var delays: [TimeInterval] = []
+        f.sleep = { delay in
+            delays.append(delay)
+            if delay == 8 { try await withCheckedThrowingContinuation { oldSleep = $0 } }
+            else { try await Task.sleep(nanoseconds: 2_000_000) }
+        }
+        f.manager.setOutboundPending(true)
+        try await until { oldSleep != nil }
+        f.ensure = { if f.forces.count == 1 { throw RecoveryFixture.Failure.synthetic } }
+        await failed(Task { try await f.manager.reconnect() }, "Failed manual route must schedule prompt recovery")
+        try await until { f.commands == [.all] }
+        require(Array(delays.prefix(2)) == [8, 2], "Route failure must replace an older outbox backoff immediately")
+        f.manager.setOutboundPending(false)
+        oldSleep!.resume()
+        f.manager.pause()
+    }
+
+    static func routeRetryTimingIsBounded() {
+        require(Recovery.routeRetryDelay(attempt: -1, jitter: 1) == 2, "First route retry must be prompt")
+        require(Recovery.routeRetryDelay(attempt: 1000, jitter: 100) == 90, "Long outages must have a capped retry rate")
+        require(Recovery.routeRetryDelay(attempt: 1, jitter: -10) == 4.25, "Jitter must be bounded below")
     }
 
     static func diagnosticJournalIsBounded() async throws {

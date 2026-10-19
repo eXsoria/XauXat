@@ -29,7 +29,8 @@ final class EmbeddedTorManager: ObservableObject {
     @Published private(set) var state: State = .stopped
 
     private enum DiagnosticStage: String {
-        case start, joined, invalidated, controlReopened, authenticated, bootstrap
+        case start, joined, invalidated, superseded, waiterCancelled, startupRetry, controlReopened, authenticated, bootstrap
+        case bootstrapStalled
         case circuitCheck, probe, probeFailed, repair, failed, ready, manualProbe, manualProbeFailed, manualVerified
     }
     private let startedAt = ProcessInfo.processInfo.systemUptime
@@ -76,6 +77,7 @@ final class EmbeddedTorManager: ObservableObject {
             switch error {
             case .backupProtection: return "backup_protection"
             case .timeout: return "startup_timeout"
+            case .bootstrapStalled: return "bootstrap_stalled"
             case .processStopped: return "runtime_stopped"
             case .missingControlPort: return "control_port_missing"
             case .controlConnection: return "control_connection"
@@ -96,8 +98,11 @@ final class EmbeddedTorManager: ObservableObject {
     private var authenticated = false
     private var statusObserver: Any?
     private var attempt: UUID?
-    private var callbacks: [(Result<UInt16, Error>) -> Void] = []
+    private var callbacks: [UUID: (Result<UInt16, Error>) -> Void] = [:]
     private var deadline: Task<Void, Never>?
+    private var bootstrapWatch: Task<Void, Never>?
+    private var bootstrapProgress = 0
+    private var bootstrapProgressAt: TimeInterval = 0
     private var routeTask: Task<Void, Never>?
     private var requestingPort = false
     private var recoveryAttempted = false
@@ -108,23 +113,94 @@ final class EmbeddedTorManager: ObservableObject {
     private let routeProbe: @MainActor (UInt16, TimeInterval) async throws -> Bool
     private let retryDelay: UInt64
     private let startupTimeout: UInt64
+    private let bootstrapStallTimeout: UInt64
 
     // Production owns exactly one instance. Dependencies make lifecycle races
     // testable without starting a second C-Tor runtime in the test process.
     init(
         routeProbe: @escaping @MainActor (UInt16, TimeInterval) async throws -> Bool = TorSOCKSProbe.run,
         retryDelay: UInt64 = 2_000_000_000,
-        startupTimeout: UInt64 = 240_000_000_000
+        startupTimeout: UInt64 = 240_000_000_000,
+        bootstrapStallTimeout: UInt64 = 60_000_000_000
     ) {
         self.routeProbe = routeProbe
         self.retryDelay = retryDelay
         self.startupTimeout = startupTimeout
+        self.bootstrapStallTimeout = max(1, bootstrapStallTimeout)
     }
 
     func start(_ completion: @escaping (Result<UInt16, Error>) -> Void) {
-        callbacks.append(completion)
+        start(waiter: UUID(), completion)
+    }
+
+    /// Preserve the app's initialization callback across transient local or
+    /// route failures, even before a chat profile/core exists. A full bootstrap
+    /// timeout or a stopped runtime still reaches the existing Retry UI.
+    func startRetrying(whileAvailable: @escaping @MainActor () -> Bool,
+                       _ completion: @escaping (Result<UInt16, Error>) -> Void) {
+        Task {
+            let expires = ProcessInfo.processInfo.systemUptime + Double(startupTimeout) / 1_000_000_000
+            for retry in 0...2 {
+                do {
+                    // Another foreground caller may have recovered the same
+                    // path during backoff. Reuse only its explicit short lease.
+                    let port = try await readyBefore(expires, maxAge: retry == 0 ? 0 : 15)
+                    completion(.success(port))
+                    return
+                } catch {
+                    let terminal: Bool
+                    if let failure = error as? EmbeddedTorError {
+                        switch failure {
+                        case .backupProtection, .processStopped, .timeout: terminal = true
+                        default: terminal = false
+                        }
+                    } else { terminal = error is CancellationError }
+                    guard retry < 2, !terminal, whileAvailable() else {
+                        completion(.failure(error))
+                        return
+                    }
+                    record(.startupRetry, count: retry + 1)
+                    let remaining = max(0, expires - ProcessInfo.processInfo.systemUptime)
+                    let delay = min(retryDelay * UInt64(retry + 1), UInt64(remaining * 1_000_000_000))
+                    do { try await Task.sleep(nanoseconds: delay) }
+                    catch { completion(.failure(error)); return }
+                    guard whileAvailable() else { completion(.failure(error)); return }
+                }
+            }
+        }
+    }
+
+    private func readyBefore(_ expires: TimeInterval, maxAge: TimeInterval) async throws -> UInt16 {
+        let remaining = expires - ProcessInfo.processInfo.systemUptime
+        guard remaining > 0 else { throw EmbeddedTorError.timeout }
+        return try await withThrowingTaskGroup(of: UInt16.self) { group in
+            group.addTask { try await self.ensureReady(maxAge: maxAge) }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                throw EmbeddedTorError.timeout
+            }
+            defer { group.cancelAll() }
+            guard let port = try await group.next() else { throw EmbeddedTorError.timeout }
+            return port
+        }
+    }
+
+    func refreshPendingStartup() async {
+        guard attempt != nil, !callbacks.isEmpty else { return }
+        _ = try? await ensureReady()
+    }
+
+    private func start(waiter: UUID, _ completion: @escaping (Result<UInt16, Error>) -> Void) {
+        callbacks[waiter] = completion
         switch state {
         case .starting, .bootstrapping, .verifying:
+            // A settled new path must not wait for up to three old-path SOCKS
+            // timeouts. Keep all callers, but replace only the stale check.
+            if attemptRevision != routeRevision, routeTask != nil {
+                record(.superseded)
+                begin()
+                return
+            }
             record(.joined)
             return
         case .stopped, .ready, .failed:
@@ -136,13 +212,29 @@ final class EmbeddedTorManager: ObservableObject {
     /// Foreground/manual callers retain the default fresh check. Network and
     /// lifecycle changes invalidate this lease even while a check is running.
     func ensureReady(maxAge: TimeInterval = 0) async throws -> UInt16 {
+        try Task.checkCancellation()
         if maxAge > 0, case let .ready(port) = state,
            thread?.isFinished == false, isXauXatManagedTorConfig(getNetCfg()),
            let verifiedAt, ProcessInfo.processInfo.systemUptime - verifiedAt < maxAge {
             return port
         }
-        return try await withCheckedThrowingContinuation { continuation in
-            start { continuation.resume(with: $0) }
+        let waiter = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                start(waiter: waiter) { continuation.resume(with: $0) }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                guard let self, let callback = self.callbacks.removeValue(forKey: waiter) else { return }
+                self.record(.waiterCancelled)
+                // Detach this caller only. Foreground startup and other callers
+                // may still need the shared Tor attempt and its completion.
+                callback(.failure(CancellationError()))
+            }
         }
     }
 
@@ -163,10 +255,11 @@ final class EmbeddedTorManager: ObservableObject {
             throw EmbeddedTorError.routeNotReady
         }
         let generation = readinessGeneration
+        let revision = routeRevision
         record(.manualProbe)
         do {
             guard try await routeProbe(port, timeout) else { throw EmbeddedTorError.checkFailed }
-            guard readinessGeneration == generation, case let .ready(currentPort) = state,
+            guard readinessGeneration == generation, routeRevision == revision, case let .ready(currentPort) = state,
                   currentPort == port else { throw EmbeddedTorError.routeNotReady }
             lastFailureCode = nil
             record(.manualVerified)
@@ -176,7 +269,7 @@ final class EmbeddedTorManager: ObservableObject {
             // A failed manual check must not leave a green Ready indicator.
             // Do not invalidate an unrelated, newer startup attempt.
             if case let .ready(currentPort) = state, currentPort == port,
-               attempt == nil, readinessGeneration == generation {
+               attempt == nil, readinessGeneration == generation, routeRevision == revision {
                 invalidateReadiness()
                 setXauXatTorSocksPort(nil)
                 state = .failed(error.localizedDescription)
@@ -193,6 +286,8 @@ final class EmbeddedTorManager: ObservableObject {
         verifiedAt = nil
         state = .starting
         lastBootstrapBucket = nil
+        bootstrapProgress = 0
+        bootstrapProgressAt = ProcessInfo.processInfo.systemUptime
         record(.start)
         routeTask?.cancel()
         routeTask = nil
@@ -209,6 +304,24 @@ final class EmbeddedTorManager: ObservableObject {
                 return
             }
             self?.finish(.failure(EmbeddedTorError.timeout), id: id, allowRecovery: false)
+        }
+
+        bootstrapWatch?.cancel()
+        bootstrapWatch = Task { [weak self] in
+            guard let self else { return }
+            while self.attempt == id {
+                let elapsed = ProcessInfo.processInfo.systemUptime - self.bootstrapProgressAt
+                let remaining = max(0, Double(self.bootstrapStallTimeout) / 1_000_000_000 - elapsed)
+                do { try await Task.sleep(nanoseconds: max(1, UInt64(remaining * 1_000_000_000))) }
+                catch { return }
+                guard self.attempt == id, !Task.isCancelled,
+                      !self.requestingPort, !self.recoveryAttempted else { return }
+                if ProcessInfo.processInfo.systemUptime - self.bootstrapProgressAt >= Double(self.bootstrapStallTimeout) / 1_000_000_000 {
+                    self.record(.bootstrapStalled)
+                    self.finish(.failure(EmbeddedTorError.bootstrapStalled), id: id)
+                    return
+                }
+            }
         }
 
         Task { await startTor(id: id) }
@@ -347,6 +460,10 @@ final class EmbeddedTorManager: ObservableObject {
                 if action == "BOOTSTRAP", let value = arguments?["PROGRESS"], let progress = Int(value) {
                     self.state = .bootstrapping(progress)
                     let bounded = max(0, min(100, progress))
+                    if bounded > self.bootstrapProgress {
+                        self.bootstrapProgress = bounded
+                        self.bootstrapProgressAt = ProcessInfo.processInfo.systemUptime
+                    }
                     if self.lastBootstrapBucket != bounded / 10 {
                         self.lastBootstrapBucket = bounded / 10
                         self.record(.bootstrap, count: bounded)
@@ -382,6 +499,9 @@ final class EmbeddedTorManager: ObservableObject {
             do {
                 let value = try await info(control, "net/listeners/socks")
                 guard attempt == id else { return }
+                // Let outstanding mutable control commands finish in order;
+                // once they are done, never probe on their old path revision.
+                guard attemptRevision == routeRevision else { begin(); return }
                 guard let port = Self.loopbackPort(value) else { throw EmbeddedTorError.invalidSocksPort }
                 state = .verifying
                 routeTask = Task { await self.verifyStartupRoute(port: port, id: id) }
@@ -442,6 +562,8 @@ final class EmbeddedTorManager: ObservableObject {
            let thread, !thread.isFinished, authenticated,
            let controller, controller.isConnected {
             recoveryAttempted = true
+            bootstrapWatch?.cancel()
+            bootstrapWatch = nil
             requestingPort = true
             setXauXatTorSocksPort(nil)
             state = .verifying
@@ -454,6 +576,8 @@ final class EmbeddedTorManager: ObservableObject {
         attempt = nil
         deadline?.cancel()
         deadline = nil
+        bootstrapWatch?.cancel()
+        bootstrapWatch = nil
         routeTask?.cancel()
         routeTask = nil
         removeObservers()
@@ -477,7 +601,7 @@ final class EmbeddedTorManager: ObservableObject {
             logger.error("XauXat Tor: startup failed: \(Self.diagnosticFailure(error), privacy: .public)")
         }
 
-        let pending = callbacks
+        let pending = Array(callbacks.values)
         callbacks.removeAll()
         pending.forEach { $0(result) }
     }
@@ -585,6 +709,7 @@ final class EmbeddedTorManager: ObservableObject {
 private enum EmbeddedTorError: LocalizedError {
     case backupProtection
     case timeout
+    case bootstrapStalled
     case processStopped
     case missingControlPort
     case controlConnection
@@ -599,6 +724,7 @@ private enum EmbeddedTorError: LocalizedError {
         switch self {
         case .backupProtection: "XauXat could not protect Tor data from system backup."
         case .timeout: "Tor took too long to start."
+        case .bootstrapStalled: "Tor stopped making progress while starting the private connection."
         case .processStopped: "The embedded Tor process stopped. Close XauXat completely and reopen it."
         case .missingControlPort: "Tor did not create its control port."
         case .controlConnection: "XauXat could not connect to Tor locally."

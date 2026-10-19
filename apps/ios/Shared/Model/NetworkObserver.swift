@@ -18,9 +18,9 @@ class NetworkObserver {
     private var monitor: NWPathMonitor?
     private var monitorGeneration = UUID()
 
-    func restartMonitor() {
+    func startMonitor() {
         queue.async { [self] in
-            monitor?.cancel()
+            guard monitor == nil else { return }
             let generation = UUID()
             monitorGeneration = generation
             prevInfo = nil
@@ -31,6 +31,18 @@ class NetworkObserver {
             }
             monitor = mon
             mon.start(queue: queue)
+        }
+    }
+
+    /// Monitoring starts before Tor/database initialization. A newly opened
+    /// core still needs the cached availability, without manufacturing another
+    /// path change and interrupting the route that just finished bootstrapping.
+    func updateCoreNetworkInfo() {
+        startMonitor()
+        queue.async { [self] in
+            guard let info = prevInfo, hasChatCtrl() else { return }
+            do { try apiSetNetworkInfo(info) }
+            catch { logger.error("XauXat could not update core network availability") }
         }
     }
 
@@ -45,9 +57,16 @@ class NetworkObserver {
         // recovery; send core network-info updates only when those values change.
         DispatchQueue.main.async {
             ChatModel.shared.networkInfo = info
-            XauXatConnectionRecoveryManager.shared.networkChanged(online: info.online)
+            let network: XauXatConnectionRecoveryManager.Network
+            switch info.networkType {
+            case .wifi: network = .wifi
+            case .cellular: network = .cellular
+            case .ethernet: network = .ethernet
+            default: network = .other
+            }
+            XauXatConnectionRecoveryManager.shared.networkChanged(online: info.online, network: network)
         }
-        if infoChanged, hasChatCtrl() {
+        if infoChanged, hasChatCtrl(), ChatModel.shared.chatInitialized {
             do { try apiSetNetworkInfo(info) }
             catch { logger.error("XauXat could not update core network availability") }
         }
