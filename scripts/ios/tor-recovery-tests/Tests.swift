@@ -291,6 +291,7 @@ import Tor
         try await until { budgetFinished }
         if case .success = budgetResult! { fatalError("Cold retry budget must expire") }
         require(budgetProbe.calls == 7, "A slow retry must share the original cold-start budget rather than receive another full deadline")
+        try await until { if case .failed = budgetManager.state { return true }; return false }
         reset()
         let stoppedProbe = ScriptedProbe(), stoppedManager = stoppedProbe.manager()
         _ = try await stoppedManager.ensureReady()
