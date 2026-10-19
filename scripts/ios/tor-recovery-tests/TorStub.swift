@@ -9,11 +9,21 @@ public enum TorTestState {
     public static var failNextCommand = false
     public static var failCommandContaining: String?
     public static var networkDisabled = false
+    public static var circuitEstablished = true
+    public static var establishAfterRepair = false
+    public static var statusObservers: [UUID: (String, String, String, [String: String]?) -> Bool] = [:]
     public static var injectStatusBeforeReply = false
     public static var lastThread: TorThread?
     public static func reset() {
         commands = []; threadStarts = 0; controllers = 0; port = 19050
         failNextCommand = false; failCommandContaining = nil; networkDisabled = false; injectStatusBeforeReply = false; lastThread = nil
+        circuitEstablished = true; establishAfterRepair = false; statusObservers = [:]
+    }
+    public static func emitProgress(_ progress: Int) {
+        for observer in Array(statusObservers.values) { _ = observer("STATUS_CLIENT", "NOTICE", "BOOTSTRAP", ["PROGRESS": String(progress)]) }
+    }
+    public static func emitCircuit() {
+        for observer in Array(statusObservers.values) { _ = observer("STATUS_CLIENT", "NOTICE", "CIRCUIT_ESTABLISHED", [:]) }
     }
 }
 public final class TorConfiguration {
@@ -43,7 +53,11 @@ public final class TorController {
     public func authenticate(with cookie: Data, completion: @escaping (Bool, Error?) -> Void) {
         DispatchQueue.main.async { completion(true, nil) }
     }
-    public func addObserver(forStatusEvents observer: @escaping (String, String, String, [String: String]?) -> Bool) -> Any { UUID() }
+    public func addObserver(forStatusEvents observer: @escaping (String, String, String, [String: String]?) -> Bool) -> Any {
+        let token = UUID()
+        TorTestState.statusObservers[token] = observer
+        return token
+    }
     public func addObserver(forCircuitEstablished observer: @escaping (Bool) -> Void) -> Any {
         DispatchQueue.main.async { observer(!TorTestState.networkDisabled) }
         return UUID()
@@ -51,7 +65,9 @@ public final class TorController {
     public func getInfoForKeys(_ keys: [String], completion: @escaping ([String]) -> Void) {
         DispatchQueue.main.async { completion(["\"127.0.0.1:\(TorTestState.port)\""]) }
     }
-    public func removeObserver(_ observer: Any?) {}
+    public func removeObserver(_ observer: Any?) {
+        if let token = observer as? UUID { TorTestState.statusObservers.removeValue(forKey: token) }
+    }
     public func sendCommand(_ command: String, arguments: [String]?, data: Data?, observer: @escaping ([NSNumber], [Data], UnsafeMutablePointer<ObjCBool>) -> Bool) {
         let text = ([command] + (arguments ?? [])).joined(separator: " ")
         TorTestState.commands.append(text)
@@ -61,7 +77,10 @@ public final class TorController {
         if matchesFailure { TorTestState.failCommandContaining = nil }
         if !fail, arguments?.contains("DisableNetwork=1") == true { TorTestState.networkDisabled = true }
         if !fail, arguments?.contains("DisableNetwork=0") == true { TorTestState.networkDisabled = false }
-        if !fail, arguments?.contains("SocksPort=\"127.0.0.1:auto\"") == true { TorTestState.port += 1 }
+        if !fail, arguments?.contains("SocksPort=\"127.0.0.1:auto\"") == true {
+            TorTestState.port += 1
+            if TorTestState.establishAfterRepair { TorTestState.circuitEstablished = true }
+        }
         DispatchQueue.main.async {
             var stop: ObjCBool = false
             if TorTestState.injectStatusBeforeReply {
@@ -71,7 +90,7 @@ public final class TorController {
             let codes: [NSNumber]
             let lines: [Data]
             if !fail, command == "GETINFO", let key = arguments?.first {
-                let value = key == "status/circuit-established" ? (TorTestState.networkDisabled ? "0" : "1") : "\"127.0.0.1:\(TorTestState.port)\""
+                let value = key == "status/circuit-established" ? (TorTestState.networkDisabled || !TorTestState.circuitEstablished ? "0" : "1") : "\"127.0.0.1:\(TorTestState.port)\""
                 codes = [250, 250]; lines = [Data((key + "=" + value).utf8), Data("OK".utf8)]
             } else {
                 codes = [NSNumber(value: fail ? 551 : 250)]

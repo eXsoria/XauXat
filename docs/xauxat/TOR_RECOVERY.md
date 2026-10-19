@@ -153,6 +153,14 @@ reuse another caller's successful recovery during that backoff. Full bootstrap
 timeouts, backup protection failure and a terminated runtime reach the existing
 Retry UI directly; they do not multiply into repeated full bootstrap deadlines.
 
+Before a circuit is established, 60 seconds without an increasing bootstrap
+percentage triggers the existing single controlled repair early. Actual progress
+renews this interval; repeated identical percentages do not. It stops once the
+SOCKS/route verification begins and cannot request a second repair in the same
+attempt. The original four-minute overall deadline remains in force. This
+targets stale initial mobile connections without periodically interrupting slow
+but advancing bootstraps or rotating healthy circuits.
+
 Diagnostics add only the coarse transport (`cellular`, `wifi`, `ethernet`,
 `other` or `unknown`), whether route recovery is pending, and its backoff. They
 do not collect radio/cell identifiers, carrier names, interface names or IPs.

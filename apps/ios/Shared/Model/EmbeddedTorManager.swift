@@ -30,6 +30,7 @@ final class EmbeddedTorManager: ObservableObject {
 
     private enum DiagnosticStage: String {
         case start, joined, invalidated, superseded, waiterCancelled, startupRetry, controlReopened, authenticated, bootstrap
+        case bootstrapStalled
         case circuitCheck, probe, probeFailed, repair, failed, ready, manualProbe, manualProbeFailed, manualVerified
     }
     private let startedAt = ProcessInfo.processInfo.systemUptime
@@ -76,6 +77,7 @@ final class EmbeddedTorManager: ObservableObject {
             switch error {
             case .backupProtection: return "backup_protection"
             case .timeout: return "startup_timeout"
+            case .bootstrapStalled: return "bootstrap_stalled"
             case .processStopped: return "runtime_stopped"
             case .missingControlPort: return "control_port_missing"
             case .controlConnection: return "control_connection"
@@ -98,6 +100,9 @@ final class EmbeddedTorManager: ObservableObject {
     private var attempt: UUID?
     private var callbacks: [UUID: (Result<UInt16, Error>) -> Void] = [:]
     private var deadline: Task<Void, Never>?
+    private var bootstrapWatch: Task<Void, Never>?
+    private var bootstrapProgress = 0
+    private var bootstrapProgressAt: TimeInterval = 0
     private var routeTask: Task<Void, Never>?
     private var requestingPort = false
     private var recoveryAttempted = false
@@ -108,17 +113,20 @@ final class EmbeddedTorManager: ObservableObject {
     private let routeProbe: @MainActor (UInt16, TimeInterval) async throws -> Bool
     private let retryDelay: UInt64
     private let startupTimeout: UInt64
+    private let bootstrapStallTimeout: UInt64
 
     // Production owns exactly one instance. Dependencies make lifecycle races
     // testable without starting a second C-Tor runtime in the test process.
     init(
         routeProbe: @escaping @MainActor (UInt16, TimeInterval) async throws -> Bool = TorSOCKSProbe.run,
         retryDelay: UInt64 = 2_000_000_000,
-        startupTimeout: UInt64 = 240_000_000_000
+        startupTimeout: UInt64 = 240_000_000_000,
+        bootstrapStallTimeout: UInt64 = 60_000_000_000
     ) {
         self.routeProbe = routeProbe
         self.retryDelay = retryDelay
         self.startupTimeout = startupTimeout
+        self.bootstrapStallTimeout = max(1, bootstrapStallTimeout)
     }
 
     func start(_ completion: @escaping (Result<UInt16, Error>) -> Void) {
@@ -278,6 +286,8 @@ final class EmbeddedTorManager: ObservableObject {
         verifiedAt = nil
         state = .starting
         lastBootstrapBucket = nil
+        bootstrapProgress = 0
+        bootstrapProgressAt = ProcessInfo.processInfo.systemUptime
         record(.start)
         routeTask?.cancel()
         routeTask = nil
@@ -294,6 +304,24 @@ final class EmbeddedTorManager: ObservableObject {
                 return
             }
             self?.finish(.failure(EmbeddedTorError.timeout), id: id, allowRecovery: false)
+        }
+
+        bootstrapWatch?.cancel()
+        bootstrapWatch = Task { [weak self] in
+            guard let self else { return }
+            while self.attempt == id {
+                let elapsed = ProcessInfo.processInfo.systemUptime - self.bootstrapProgressAt
+                let remaining = max(0, Double(self.bootstrapStallTimeout) / 1_000_000_000 - elapsed)
+                do { try await Task.sleep(nanoseconds: max(1, UInt64(remaining * 1_000_000_000))) }
+                catch { return }
+                guard self.attempt == id, !Task.isCancelled,
+                      !self.requestingPort, !self.recoveryAttempted else { return }
+                if ProcessInfo.processInfo.systemUptime - self.bootstrapProgressAt >= Double(self.bootstrapStallTimeout) / 1_000_000_000 {
+                    self.record(.bootstrapStalled)
+                    self.finish(.failure(EmbeddedTorError.bootstrapStalled), id: id)
+                    return
+                }
+            }
         }
 
         Task { await startTor(id: id) }
@@ -432,6 +460,10 @@ final class EmbeddedTorManager: ObservableObject {
                 if action == "BOOTSTRAP", let value = arguments?["PROGRESS"], let progress = Int(value) {
                     self.state = .bootstrapping(progress)
                     let bounded = max(0, min(100, progress))
+                    if bounded > self.bootstrapProgress {
+                        self.bootstrapProgress = bounded
+                        self.bootstrapProgressAt = ProcessInfo.processInfo.systemUptime
+                    }
                     if self.lastBootstrapBucket != bounded / 10 {
                         self.lastBootstrapBucket = bounded / 10
                         self.record(.bootstrap, count: bounded)
@@ -530,6 +562,8 @@ final class EmbeddedTorManager: ObservableObject {
            let thread, !thread.isFinished, authenticated,
            let controller, controller.isConnected {
             recoveryAttempted = true
+            bootstrapWatch?.cancel()
+            bootstrapWatch = nil
             requestingPort = true
             setXauXatTorSocksPort(nil)
             state = .verifying
@@ -542,6 +576,8 @@ final class EmbeddedTorManager: ObservableObject {
         attempt = nil
         deadline?.cancel()
         deadline = nil
+        bootstrapWatch?.cancel()
+        bootstrapWatch = nil
         routeTask?.cancel()
         routeTask = nil
         removeObservers()
@@ -673,6 +709,7 @@ final class EmbeddedTorManager: ObservableObject {
 private enum EmbeddedTorError: LocalizedError {
     case backupProtection
     case timeout
+    case bootstrapStalled
     case processStopped
     case missingControlPort
     case controlConnection
@@ -687,6 +724,7 @@ private enum EmbeddedTorError: LocalizedError {
         switch self {
         case .backupProtection: "XauXat could not protect Tor data from system backup."
         case .timeout: "Tor took too long to start."
+        case .bootstrapStalled: "Tor stopped making progress while starting the private connection."
         case .processStopped: "The embedded Tor process stopped. Close XauXat completely and reopen it."
         case .missingControlPort: "Tor did not create its control port."
         case .controlConnection: "XauXat could not connect to Tor locally."
