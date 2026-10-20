@@ -42,11 +42,12 @@ concurrency:
 jobs:
   opening-presentation:
     name: Opening and authentication transitions
-    runs-on: macos-26
+    runs-on: macos-26-intel
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: bash scripts/ios/test-opening-presentation.sh
+      - run: bash scripts/ios/test-device-architectures.sh
 
   notification-configuration:
     name: Notification configuration and signing guards
@@ -129,7 +130,7 @@ jobs:
 
   device:
     name: Latest iOS Release device (arm64)
-    runs-on: macos-26
+    runs-on: macos-26-intel
     timeout-minutes: 60
     needs: [native-core, qr-images]
 
@@ -141,7 +142,6 @@ jobs:
 
       - name: Record Apple toolchain
         run: |
-          test "$(uname -m)" = "arm64"
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
@@ -192,6 +192,7 @@ jobs:
           test -f "$app_path/Frameworks/Tor.framework/Tor"
           file "$app_path/SimpleX" | grep -q 'arm64'
           file "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'arm64'
+          bash scripts/ios/verify-device-architectures.sh "$app_path"
           test "$(plutil -extract CFBundleDisplayName raw "$app_path/Info.plist")" = "XauXat"
           xcrun vtool -show-build "$app_path/SimpleX" | grep -q 'platform IOS'
           xcrun vtool -show-build "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'platform IOS'

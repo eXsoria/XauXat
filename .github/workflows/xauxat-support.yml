@@ -20,7 +20,7 @@ jobs:
       - run: for script in services/support-chat/*.sh; do bash -n "$script"; done
       - run: python3 scripts/ios/verify-native-support.py
   ios-support:
-    runs-on: macos-26
+    runs-on: macos-26-intel
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
