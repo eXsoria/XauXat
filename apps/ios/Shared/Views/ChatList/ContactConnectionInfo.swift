@@ -65,15 +65,7 @@ struct ContactConnectionInfo: View {
                         let policy = xauXatObserveContactInvitePolicy(connectionId: contactConnection.pccConnId)
                         let policies = invitePolicies(policy)
                         let used = policies.filter { $0.state == .used }.count
-                        let status = if policies.contains(where: { $0.state == .active }) {
-                            "Active"
-                        } else if policies.allSatisfy({ $0.state == .used }) {
-                            "Fully used"
-                        } else if policies.contains(where: { $0.state == .expired }) {
-                            "Expired"
-                        } else {
-                            "Revoked"
-                        }
+                        let status = xauXatPendingContactInviteStatus(policies)
                         infoRow("Invite status", status)
                         if let policy {
                             if let expiresAt = policy.expiresAt {

@@ -892,12 +892,7 @@ private struct InviteView: View {
     }
 
     private var inviteStatus: String {
-        guard let policy = observedPolicy else { return "Unused" }
-        if bundlePolicies.allSatisfy({ $0.state == .used }) { return "Fully used" }
-        if bundlePolicies.contains(where: { $0.state == .active }) { return "Active" }
-        if bundlePolicies.contains(where: { $0.state == .expired }) { return "Expired" }
-        if bundlePolicies.contains(where: { $0.state == .revoked }) { return "Revoked" }
-        return policy.state == .used ? "Used" : "Unused"
+        xauXatPendingContactInviteStatus(bundlePolicies)
     }
 
     private var sectionHeader: some View {

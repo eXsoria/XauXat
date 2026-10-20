@@ -58,11 +58,37 @@ assert "NetworkObserver.shared.updateCoreNetworkInfo()" in api, "New core must r
 observer = (root / "apps/ios/Shared/Model/NetworkObserver.swift").read_text(encoding="utf-8")
 assert "guard monitor == nil" in observer and "restartMonitor" not in api, "Opening the core must not synthesize another path change"
 text = "import Foundation\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "startChatAndActivate")
+text += "\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "activateChat")
+text += "\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", "apiActivateChat")
+for name in ["chatCloseStore", "chatReopenStore", "isChatStoreOpen", "setChatStoreOpen"]:
+    text += "\n" + function("apps/ios/SimpleXChat/API.swift", name)
 text += "\n@MainActor\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", "xauXatRecoverySessionState")
+text += "\n@MainActor\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", "xauXatRequireInviteSession")
 Path(sys.argv[2]).write_text(text, encoding="utf-8")
+
+keychain = (root / "apps/ios/SimpleXChat/KeyChain.swift").read_text(encoding="utf-8")
+start = keychain.index("public enum XauXatContactInviteState:")
+policy = "import Foundation\n" + keychain[start:keychain.index("private var kcContactInvitePolicies:", start)]
+policy += "\nprivate var kcContactInvitePolicies: KeyChainItem { xauXatStorageScope() == .decoy ? kcDecoyContactInvitePolicies : kcPrimaryContactInvitePolicies }\n"
+for name in ["xauXatRemoveContactInvitePolicies", "readXauXatContactInvitePolicies", "writeXauXatContactInvitePolicies", "xauXatSaveContactInvitePolicy", "xauXatObserveContactInvitePolicy", "xauXatSetContactInviteState", "xauXatContactInvitePolicies"]:
+    policy += "\n" + function("apps/ios/SimpleXChat/KeyChain.swift", name)
+Path(sys.argv[2]).with_name("InvitePolicy.swift").write_text(policy, encoding="utf-8")
+
+initialization = function("apps/ios/SimpleXChat/API.swift", "chatMigrateInit")
+assert initialization.index("xauXatRemoveContactInvitePolicies") < initialization.index("chat_migrate_init_key"), "Clear stale policies before a fresh database reuses connection IDs"
+assert "!FileManager.default.fileExists(atPath: dbPath + CHAT_DB)" in initialization, "Existing databases retain their invite policies"
+assert "return (false, .errorKeychain)" in initialization, "Failed Keychain cleanup must block fresh database initialization"
+revoke = function("apps/ios/Shared/Views/ChatList/ChatListNavLink.swift", "revokeXauXatContactInvite")
+assert revoke.index("xauXatRequireInviteSession") < revoke.index("xauXatSetContactInviteState"), "An unavailable store cannot tombstone an invite on a tap"
+create = function("apps/ios/Shared/Model/SimpleXAPI.swift", "apiAddContact")
+assert create.index("xauXatRequireInviteSession") < create.index("chatApiSendCmdWithRetry"), "Never submit invite creation against a suspended store"
+assert "guard xauXatSaveContactInvitePolicy" in create, "Every newly allocated native invite, including Free, must replace stale ID policies"
 PY
 swiftc -swift-version 5 -parse-as-library \
   "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
   "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" \
   "$temp/Activation.swift" "$tests/ActivationTests.swift" -o "$temp/activation-tests"
 "$temp/activation-tests"
+swiftc -swift-version 5 -parse-as-library \
+  "$temp/InvitePolicy.swift" "$tests/InvitePolicyTests.swift" -o "$temp/invite-policy-tests"
+"$temp/invite-policy-tests"

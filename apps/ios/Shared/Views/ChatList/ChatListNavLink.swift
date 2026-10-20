@@ -720,6 +720,8 @@ func deleteContactConnectionAlert(_ contactConnection: PendingContactConnection,
 }
 
 func revokeXauXatContactInvite(_ contactConnection: PendingContactConnection) async throws {
+    // Do not tombstone an invitation on a tap while the local store is closed.
+    try await MainActor.run { try xauXatRequireInviteSession() }
     let policy = xauXatObserveContactInvitePolicy(connectionId: contactConnection.pccConnId)
     let policyIds: Set<Int64> = if let bundleId = policy?.bundleId {
         Set(xauXatContactInviteBundlePolicies(bundleId: bundleId).map(\.connectionId))

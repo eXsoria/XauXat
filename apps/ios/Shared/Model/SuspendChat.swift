@@ -114,16 +114,25 @@ func setAppState(_ appState: AppState) {
     }
 }
 
-func activateChat(appState: AppState = .active) {
+@discardableResult
+func activateChat(appState: AppState = .active) -> Bool {
     logger.debug("DEBUGGING: activateChat")
     guard isXauXatTorReady() else {
         logger.error("XauXat: refusing to activate chat before embedded Tor is ready")
-        return
+        return false
     }
-    suspendLockQueue.sync {
+    return suspendLockQueue.sync {
+        guard ChatModel.ok, hasChatCtrl() else { return false }
+        // Publish success only after both stores and the native core reopen.
+        // Otherwise recovery would treat a closed SQLite handle as running.
+        guard apiActivateChat() else {
+            AppChatState.shared.set(.suspended)
+            logger.error("XauXat could not reopen the chat session")
+            return false
+        }
         AppChatState.shared.set(appState)
-        if ChatModel.ok { apiActivateChat() }
         logger.debug("DEBUGGING: activateChat: after apiActivateChat")
+        return true
     }
 }
 
@@ -152,14 +161,12 @@ func initChatAndMigrate(refreshInvitations: Bool = true) {
 
 func startChatForCall() {
     logger.debug("DEBUGGING: startChatForCall")
+    if .active != AppChatState.shared.value || !isChatStoreOpen() {
+        guard activateChat() else { return }
+    }
     if ChatModel.shared.chatRunning == true {
         ChatReceiver.shared.start()
         logger.debug("DEBUGGING: startChatForCall: after ChatReceiver.shared.start")
-    }
-    if .active != AppChatState.shared.value {
-        logger.debug("DEBUGGING: startChatForCall: before activateChat")
-        activateChat()
-        logger.debug("DEBUGGING: startChatForCall: after activateChat")
     }
 }
 
@@ -174,11 +181,8 @@ func startChatAndActivate(ifAllowed: @escaping () -> Bool = { true }, _ completi
     }
     logger.debug("DEBUGGING: startChatAndActivate")
     guard ifAllowed() else { finish(); return }
-    if ChatModel.shared.chatRunning == true {
-        ChatReceiver.shared.start()
-        logger.debug("DEBUGGING: startChatAndActivate: after ChatReceiver.shared.start")
-    }
-    if case .active = AppChatState.shared.value {
+    if AppChatState.shared.value == .active && isChatStoreOpen() {
+        if ChatModel.shared.chatRunning == true { ChatReceiver.shared.start() }
         finish()
     } else if nseStateGroupDefault.get().inactive {
         activate()
@@ -207,7 +211,9 @@ func startChatAndActivate(ifAllowed: @escaping () -> Bool = { true }, _ completi
     func activate() {
         guard ifAllowed() else { finish(); return }
         logger.debug("DEBUGGING: startChatAndActivate: before activateChat")
-        activateChat()
+        if activateChat(), ChatModel.shared.chatRunning == true {
+            ChatReceiver.shared.start()
+        }
         finish()
         logger.debug("DEBUGGING: startChatAndActivate: after activateChat")
     }

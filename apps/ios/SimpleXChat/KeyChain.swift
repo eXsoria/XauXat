@@ -285,8 +285,27 @@ public struct XauXatContactInvitePolicy: Codable, Hashable, Sendable {
     public var isExpired: Bool { state == .expired }
 }
 
+/// For a pending native invitation, no advanced policy means an active invite.
+/// Do not classify the empty policy list using vacuous allSatisfy truth.
+public func xauXatPendingContactInviteStatus(_ policies: [XauXatContactInvitePolicy]) -> String {
+    if policies.isEmpty || policies.contains(where: { $0.state == .active }) { return "Active" }
+    if policies.allSatisfy({ $0.state == .used }) { return "Fully used" }
+    if policies.contains(where: { $0.state == .expired }) { return "Expired" }
+    return "Revoked"
+}
+
 private var kcContactInvitePolicies: KeyChainItem {
     xauXatStorageScope() == .decoy ? kcDecoyContactInvitePolicies : kcPrimaryContactInvitePolicies
+}
+
+@discardableResult
+public func xauXatRemoveContactInvitePolicies(_ scope: XauXatStorageScope) -> Bool {
+    xauXatContactInvitePoliciesLock.lock()
+    defer { xauXatContactInvitePoliciesLock.unlock() }
+    switch scope {
+    case .primary: kcPrimaryContactInvitePolicies.remove()
+    case .decoy: kcDecoyContactInvitePolicies.remove()
+    }
 }
 
 private func readXauXatContactInvitePolicies() -> [Int64: XauXatContactInvitePolicy] {

@@ -116,7 +116,7 @@ func xauXatRecoverySessionState() -> XauXatConnectionRecoveryManager.SessionStat
     if kcDecoyPassword.get() != nil && !model.contentViewAccessAuthenticated { return .unlockRequired }
     if AppChatState.shared.value == .stopped { return .stopped }
     guard hasChatCtrl(), !model.ctrlInitInProgress, model.chatRunning == true else { return .uninitialized }
-    return AppChatState.shared.value == .active ? .running : .suspended
+    return AppChatState.shared.value == .active && isChatStoreOpen() ? .running : .suspended
 }
 
 @MainActor
@@ -657,12 +657,15 @@ func apiStopChat() async throws {
 }
 
 // Spec: spec/architecture.md#apiActivateChat
-func apiActivateChat() {
-    chatReopenStore()
+@discardableResult
+func apiActivateChat() -> Bool {
+    guard chatReopenStore() else { return false }
     do {
         try sendCommandOkRespSync(.apiActivateChat(restoreChat: true))
+        return true
     } catch {
         logger.error("apiActivateChat error: \(responseError(error))")
+        return false
     }
 }
 
@@ -1444,14 +1447,47 @@ func apiVerifyGroupMember(_ groupId: Int64, _ groupMemberId: Int64, connectionCo
 }
 
 func apiAddContact(incognito: Bool) async -> (CreatedConnLink, PendingContactConnection)? {
+    do { try await MainActor.run { try xauXatRequireInviteSession() } }
+    catch {
+        await MainActor.run {
+            AlertManager.shared.showAlertMsg(title: "Private connection not ready", message: "\(error.localizedDescription)")
+        }
+        return nil
+    }
     guard let userId = ChatModel.shared.currentUser?.userId else {
         logger.error("apiAddContact: no current user")
         return nil
     }
     let r: APIResult<ChatResponse1>? = await chatApiSendCmdWithRetry(.apiAddContact(userId: userId, incognito: incognito), bgTask: false)
-    if case let .result(.invitation(_, connLinkInv, connection)) = r { return (connLinkInv, connection) }
+    if case let .result(.invitation(_, connLinkInv, connection)) = r {
+        // Every newly allocated native ID replaces any stale Keychain policy,
+        // including ordinary Free invites without advanced restrictions.
+        guard xauXatSaveContactInvitePolicy(XauXatContactInvitePolicy(
+            connectionId: connection.pccConnId, createdAt: .now
+        )) else {
+            try? await apiDeleteChat(type: .contactConnection, id: connection.apiId)
+            await MainActor.run {
+                AlertManager.shared.showAlertMsg(title: "Error creating invitation", message: "Could not securely save the invitation. Please retry.")
+            }
+            return nil
+        }
+        return (connLinkInv, connection)
+    }
     if let r { await MainActor.run { showAlert(connectionErrorAlert(r)) } }
     return nil
+}
+
+// A verified Tor route alone does not imply the database/core has resumed.
+// In particular, never create/revoke an invite while the store is suspended.
+@MainActor
+func xauXatRequireInviteSession() throws {
+    guard UIApplication.shared.applicationState == .active,
+          AppSheetState.shared.scenePhaseActive,
+          ChatModel.shared.networkInfo.online,
+          isXauXatTorReady(),
+          xauXatRecoverySessionState() == .running else {
+        throw XauXatConnectionRecoveryManager.RecoveryError.blocked(.chatSuspended)
+    }
 }
 
 func apiSetConnectionIncognito(connId: Int64, incognito: Bool) async throws -> PendingContactConnection? {

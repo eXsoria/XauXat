@@ -130,7 +130,10 @@ class BGManager {
                     fatalError("Failed to start or load chats: \(responseError(error))")
                 }
             }
-            activateChat(appState: .bgRefresh)
+            guard activateChat(appState: .bgRefresh) else {
+                completeReceiving("chat store unavailable")
+                return
+            }
             if m.currentUser == nil {
                 completeReceiving("no current user")
                 return

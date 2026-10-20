@@ -15,6 +15,20 @@ private let XAUXAT_NTF_SERVER_ENV = "XAUXAT_NTF_SERVER"
 private var chatController: chat_ctrl?
 
 private var migrationResult: (Bool, DBMigrationResult)?
+private let chatStoreStateLock = NSLock()
+private var chatStoreOpen = false
+
+public func isChatStoreOpen() -> Bool {
+    chatStoreStateLock.lock()
+    defer { chatStoreStateLock.unlock() }
+    return chatStoreOpen
+}
+
+private func setChatStoreOpen(_ open: Bool) {
+    chatStoreStateLock.lock()
+    defer { chatStoreStateLock.unlock() }
+    chatStoreOpen = open
+}
 
 public func hasChatCtrl() -> Bool {
     chatController != nil
@@ -29,6 +43,12 @@ public func chatMigrateInit(_ useKey: String? = nil, confirmMigrations: Migratio
     if let res = migrationResult { return res }
     applyXauXatNotificationServerEnvironment()
     let dbPath = getAppDatabasePath().path
+    // Keychain items survive reinstalls and database deletion. Numeric native
+    // connection IDs belong to this database, not to the installation/account.
+    if !FileManager.default.fileExists(atPath: dbPath + CHAT_DB),
+       !xauXatRemoveContactInvitePolicies(xauXatStorageScope()) {
+        return (false, .errorKeychain)
+    }
     var dbKey = ""
     let useKeychain = storeDBPassphraseGroupDefault.get()
     logger.debug("chatMigrateInit uses keychain: \(useKeychain)")
@@ -52,6 +72,7 @@ public func chatMigrateInit(_ useKey: String? = nil, confirmMigrations: Migratio
     // the last parameter of chat_migrate_init is used to return the pointer to chat controller
     let cjson = chat_migrate_init_key(&cPath, &cKey, 1, &cConfirm, backgroundMode ? 1 : 0, &chatController)!
     let dbRes = dbMigrationResult(dataFromCString(cjson))
+    setChatStoreOpen(dbRes == .ok)
     let encrypted = dbKey != ""
     let keychainErr = dbRes == .ok && useKeychain && encrypted && !kcDatabasePassword.set(dbKey)
     let result = (encrypted, keychainErr ? .errorKeychain : dbRes)
@@ -120,20 +141,28 @@ public func chatCloseStore() {
         logger.error("chatCloseStore: already closed, chatCtrl is nil")
         return
     }
+    setChatStoreOpen(false)
     let err = fromCString(chat_close_store(getChatCtrl()))
     if err != "" {
         logger.error("chatCloseStore error: \(err)")
     }
 }
 
-public func chatReopenStore() {
+@discardableResult
+public func chatReopenStore() -> Bool {
+    guard hasChatCtrl() else { return false }
+    setChatStoreOpen(false)
     let err = fromCString(chat_reopen_store(getChatCtrl()))
+    setChatStoreOpen(err == "")
     if err != "" {
         logger.error("chatReopenStore error: \(err)")
+        return false
     }
+    return true
 }
 
 public func resetChatCtrl() {
+    setChatStoreOpen(false)
     chatController = nil
     migrationResult = nil
 }

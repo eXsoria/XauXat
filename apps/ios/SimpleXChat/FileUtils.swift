@@ -184,6 +184,7 @@ public func deleteAppDatabaseAndFiles() {
     try? fm.createDirectory(at: getWallpaperDirectory(), withIntermediateDirectories: true)
     deleteAppFiles()
     _ = kcDatabasePassword.remove()
+    _ = xauXatRemoveContactInvitePolicies(xauXatStorageScope())
     storeDBPassphraseGroupDefault.set(true)
 }
 
@@ -280,6 +281,7 @@ public func destroyXauXatStorage(_ scope: XauXatStorageScope) -> Bool {
     _ = xauXatRemoveHiddenChats(scope)
     _ = xauXatRemoveProtectedProfiles(scope)
     _ = xauXatRemoveProtectedProfilePasswords(scope)
+    _ = xauXatRemoveContactInvitePolicies(scope)
 
     let fm = FileManager.default
     if scope == .decoy {
