@@ -1,4 +1,5 @@
 import Foundation
+import Dispatch
 
 // Minimal app collaborators for the actual production activation functions.
 // The NSE waiter is held so lifecycle changes can happen before its callback.
