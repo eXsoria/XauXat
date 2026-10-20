@@ -103,7 +103,7 @@ struct ContactConnectionInfo: View {
                     Button(role: .destructive) {
                         alert = .deleteInvitationAlert
                     } label: {
-                        Label(contactConnection.initiated ? "Revoke invite" : "Delete connection", systemImage: "trash")
+                        Label(deletionLabel, systemImage: "trash")
                             .foregroundColor(Color.red)
                     }
                 }
@@ -152,6 +152,14 @@ struct ContactConnectionInfo: View {
                 contactConnection.localAlias = prevAlias
             }
         }
+    }
+
+    private var deletionLabel: LocalizedStringKey {
+        guard contactConnection.initiated else { return "Delete connection" }
+        let policy = xauXatObserveContactInvitePolicy(connectionId: contactConnection.pccConnId)
+        let policies = invitePolicies(policy)
+        return policies.isEmpty || policies.contains(where: { $0.state == .active })
+            ? "Revoke invite" : "Delete connection"
     }
 
     private func contactConnectionText(_ contactConnection: PendingContactConnection) -> LocalizedStringKey {
