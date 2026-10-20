@@ -302,7 +302,7 @@ private var kcContactInvitePolicies: KeyChainItem {
 public func xauXatRemoveContactInvitePolicies(_ scope: XauXatStorageScope) -> Bool {
     xauXatContactInvitePoliciesLock.lock()
     defer { xauXatContactInvitePoliciesLock.unlock() }
-    switch scope {
+    return switch scope {
     case .primary: kcPrimaryContactInvitePolicies.remove()
     case .decoy: kcDecoyContactInvitePolicies.remove()
     }
