@@ -61,7 +61,9 @@ jobs:
 
   qr-images:
     name: QR images and photo library
-    runs-on: macos-26
+    # Host fixtures are portable; the scanner still type-checks arm64 iOS.
+    # Keep these short checks off the constrained Apple Silicon runner pool.
+    runs-on: macos-26-intel
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
