@@ -17,6 +17,11 @@ def replace_once(source, before, after):
 def implementation(source):
     source = replace_once(source, '#import <arpa/inet.h>', '#import <arpa/inet.h>\n#import <unistd.h>\n#import <errno.h>')
     source = replace_once(source, '    int sock;\n', '    int sock;\n    NSUInteger _xauxatSocketGeneration;\n    NSInteger _xauxatLastSocketError;\n')
+    source = replace_once(source, '''- (BOOL)isConnected {
+    return (_channel != nil);
+}''', '''- (BOOL)isConnected {
+    @synchronized (self) { return (_channel != nil); }
+}''')
     source = replace_once(source, '''    if (_channel)
         dispatch_io_close(_channel, DISPATCH_IO_STOP);
 }''', '''    if (_channel)
@@ -26,11 +31,15 @@ def implementation(source):
 }''')
     source = replace_once(source, '- (BOOL)connect:(out NSError **)error {', '''// Socket-only close: never sends a Tor command and is safe after EOF/timeout.
 - (void)xauxatCloseControlSocket {
-    dispatch_io_t channel = _channel;
-    int descriptor = sock;
-    _channel = nil;
-    sock = -1;
-    ++_xauxatSocketGeneration;
+    dispatch_io_t channel;
+    int descriptor;
+    @synchronized (self) {
+        channel = _channel;
+        descriptor = sock;
+        _channel = nil;
+        sock = -1;
+        ++_xauxatSocketGeneration;
+    }
     if (channel) {
         if (descriptor >= 0) shutdown(descriptor, SHUT_RDWR);
         dispatch_io_close(channel, DISPATCH_IO_STOP);
@@ -81,10 +90,13 @@ def implementation(source):
     _channel = dispatch_io_create(DISPATCH_IO_STREAM, descriptor, [self.class controlQueue], ^(int __unused error) {
         close(descriptor);
         TORController *strongSelf = weakSelf;
-        if (strongSelf && strongSelf->_xauxatSocketGeneration == generation)
-        {
-            strongSelf->_channel = nil;
-            strongSelf->sock = -1;
+        if (strongSelf) {
+            @synchronized (strongSelf) {
+                if (strongSelf->_xauxatSocketGeneration == generation) {
+                    strongSelf->_channel = nil;
+                    strongSelf->sock = -1;
+                }
+            }
         }
     });''')
     source = replace_once(source, '''    if (!_channel)
@@ -103,8 +115,12 @@ def implementation(source):
         if (error || !data || dispatch_data_get_size(data) == 0) {
             if (done || error) {
                 TORController *strongSelf = weakSelf;
-                if (strongSelf && strongSelf->_xauxatSocketGeneration == generation)
-                    [strongSelf xauxatCloseControlSocket];
+                if (strongSelf) {
+                    @synchronized (strongSelf) {
+                        if (strongSelf->_xauxatSocketGeneration == generation)
+                            [strongSelf xauxatCloseControlSocket];
+                    }
+                }
             }
             return;
         }
@@ -116,10 +132,21 @@ def implementation(source):
             [self->_blocks insertObject:observer atIndex:0];
         }
     });''', '''    dispatch_async([self.class controlQueue], ^{
-        if (!self->_channel) return;
+        dispatch_io_t channel;
+        NSUInteger generation;
+        @synchronized (self) {
+            channel = self->_channel;
+            generation = self->_xauxatSocketGeneration;
+        }
+        if (!channel) return;
         if (observer) [self->_blocks insertObject:observer atIndex:0];
-        dispatch_io_write(self->_channel, 0, dispatchData, [self.class controlQueue], ^(bool __unused done, dispatch_data_t __unused data, int error) {
-            if (error) [self xauxatCloseControlSocket];
+        dispatch_io_write(channel, 0, dispatchData, [self.class controlQueue], ^(bool __unused done, dispatch_data_t __unused data, int error) {
+            if (error) {
+                @synchronized (self) {
+                    if (self->_xauxatSocketGeneration == generation)
+                        [self xauxatCloseControlSocket];
+                }
+            }
         });
     });''')
     return source
@@ -136,7 +163,7 @@ def patch(directory):
     # Hashes cover normalized upstream text; patched hashes are verified too,
     # so repeated pod installs cannot silently accept a partial/altered patch.
     entries = [
-        ('TORController.m', 'c49aea0df45981b0b09f3bac7cc35a5b43d5b872daaa0581846d0693bfd2cbdc', '49f1d23144f2b86a562a0919d1237caa1d08fd4a389a7521834985756f7846f3', implementation),
+        ('TORController.m', 'c49aea0df45981b0b09f3bac7cc35a5b43d5b872daaa0581846d0693bfd2cbdc', '172f36fc90c3772918225177f57b519c11dcc48349b2d1074138f963a90efa39', implementation),
         ('TORController.h', '0524b978c1ebbc70a96eea3c0f0e750a6356ecc2b76ba82644901f08c9606a5c', '600ac91a0538d9dd695147df6264cd3207eab5faab4c160e782d74028403e15a', header),
     ]
     pending = []

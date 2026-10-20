@@ -107,6 +107,25 @@ int main(void) {
         check(received == 0 && !control.connected, @"socket-only close sends no SIGNAL SHUTDOWN and is idempotent");
         close(peer); close(server); control = nil;
 
+        printf("Testing concurrent EOF and explicit close\n");
+        server = endpoint(&port, YES);
+        BOOL concurrentClose = YES;
+        for (int i = 0; i < 64; ++i) {
+            TORController *closing = [[TORController alloc] initWithSocketHost:@"127.0.0.1" port:port];
+            if (!closing.connected) { concurrentClose = NO; break; }
+            peer = accept(server, NULL, NULL);
+            close(peer); // reader EOF races two foreground/deadline closes
+            dispatch_group_t closes = dispatch_group_create();
+            for (int j = 0; j < 2; ++j)
+                dispatch_group_async(closes, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                    [closing xauxatCloseControlSocket];
+                });
+            if (dispatch_group_wait(closes, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) != 0 || closing.connected)
+                concurrentClose = NO;
+        }
+        check(concurrentClose, @"64 concurrent EOF/timeout closes preserve subsequent connections");
+        close(server);
+
         // A loopback peer answers immediately; read callbacks share the same
         // queue as registration, so replies cannot beat their observer.
         server = endpoint(&port, YES);
