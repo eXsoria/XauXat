@@ -8,6 +8,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
     let second = Recovery.Relay(userId: 1, server: "smp://private-relay-b.example")
     var failed: Set<Recovery.Relay> = []
     var connectingGrace: TimeInterval = 0
+    var health: [Recovery.Relay: Recovery.RelayHealth]? = nil
     var commands: [Recovery.Scope] = []
     var forces: [Bool] = []
     var applyCount = 0
@@ -41,6 +42,11 @@ typealias Recovery = XauXatConnectionRecoveryManager
         },
         failedRelays: {
             self.summaryCount += 1
+            if let health = self.health {
+                return health.filter { $0.value.needsRecovery }.mapValues {
+                    $0.recoveryGrace(connectingBudget: self.connectingGrace)
+                }
+            }
             return Dictionary(uniqueKeysWithValues: self.failed.map { ($0, self.connectingGrace) })
         },
         reconnect: { scope in
@@ -94,6 +100,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await cancelledWaiterCannotAbortSharedOperation()
         relayHealthSelection()
         try await automaticRecoveryIsSelective()
+        try await partialSessionFailureDoesNotHideBehindAConnectedSession()
         try await emptyAndHealthySnapshotsDoNotDisturbTor()
         try await broaderRequestWaitsForNarrowerOperation()
         try await globalOperationCoversConcurrentAutomaticRequest()
@@ -275,8 +282,12 @@ typealias Recovery = XauXatConnectionRecoveryManager
     }
 
     static func relayHealthSelection() {
-        require(!Recovery.RelayHealth(connected: 1, connecting: 0, errors: 1, pendingSubscriptions: 0).needsRecovery,
-                "A connected relay must not be reset merely because an error counter is nonzero")
+        require(Recovery.RelayHealth(connected: 1, connecting: 0, errors: 1, pendingSubscriptions: 0).needsRecovery,
+                "A connected session must not hide another currently failed session on the same server")
+        require(!Recovery.RelayHealth(connected: 1, connecting: 0, errors: 0, pendingSubscriptions: 0).needsRecovery,
+                "A server with only healthy sessions needs no recovery")
+        require(Recovery.RelayHealth(connected: 1, connecting: 1, errors: 0, pendingSubscriptions: 0).needsRecovery,
+                "A connected session must not hide a still-connecting session")
         require(Recovery.RelayHealth(connected: 1, connecting: 0, errors: 0, pendingSubscriptions: 1).needsRecovery,
                 "A pending subscription on a shared relay still needs recovery")
         require(Recovery.RelayHealth(connected: 0, connecting: 1, errors: 0, pendingSubscriptions: 0).needsRecovery,
@@ -293,6 +304,33 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await f.manager.reconnect(.automatic, reason: .pendingWork)
         require(Set(f.commands) == Set([.relays([f.first]), .relays([f.second])]), "Only failed relays in the selected profile may reconnect")
         require(f.forces == [false] && f.applyCount == 1, "Automatic recovery may reuse recent verification and must apply its route once")
+    }
+
+    static func partialSessionFailureDoesNotHideBehindAConnectedSession() async throws {
+        let f = RecoveryFixture()
+        f.connectingGrace = 100
+        f.health = [
+            f.first: .init(connected: 1, connecting: 0, errors: 1, pendingSubscriptions: 0),
+            f.second: .init(connected: 2, connecting: 0, errors: 0, pendingSubscriptions: 0)
+        ]
+        try await f.manager.reconnect(.automatic, reason: .pendingWork)
+        require(f.commands == [.relays([f.first])], "Repair a partial failure without reconnecting an unrelated healthy server")
+        require(f.forces == [false], "A partial session failure must not force a fresh Tor bootstrap")
+        try await f.manager.reconnect(.automatic, reason: .pendingWork)
+        require(f.commands.count == 1 && f.manager.diagnosticText.contains("relay_cooldown count=1"), "Partial failures respect cooldown and explain the delay")
+
+        let g = RecoveryFixture()
+        g.connectingGrace = 100
+        g.health = [g.first: .init(connected: 1, connecting: 1, errors: 1, pendingSubscriptions: 0)]
+        try await g.manager.reconnect(.automatic, reason: .pendingWork)
+        g.clock += 99
+        try await g.manager.reconnect(.automatic, reason: .pendingWork)
+        require(g.commands.isEmpty && g.forces.isEmpty, "Even a mixed failed/connected server must give an in-flight session its full native budget")
+        require(g.manager.diagnosticText.contains("relay_candidates count=1") && g.manager.diagnosticText.contains("relay_connect_budget count=1"), "Export distinguishes no candidates from waiting for the connection budget")
+        g.clock += 1
+        try await g.manager.reconnect(.automatic, reason: .pendingWork)
+        require(g.commands == [.relays([g.first])], "A mixed server that stays stuck must eventually be repaired")
+        require(!g.manager.diagnosticText.contains("private-relay"), "Candidate diagnostics never disclose relay addresses")
     }
 
     static func emptyAndHealthySnapshotsDoNotDisturbTor() async throws {

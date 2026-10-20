@@ -21,7 +21,16 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         let pendingSubscriptions: Int
 
         var needsRecovery: Bool {
-            pendingSubscriptions > 0 || (connected == 0 && (errors > 0 || connecting > 0))
+            // These are counts of current transport-session states, not
+            // historical errors. One connected session cannot establish that
+            // another isolated session on the same server is healthy.
+            pendingSubscriptions > 0 || errors > 0 || connecting > 0
+        }
+
+        func recoveryGrace(connectingBudget: TimeInterval) -> TimeInterval {
+            // Do not interrupt a still-connecting session just because another
+            // session on this server has already failed.
+            errors > 0 && connecting == 0 ? 0 : connectingBudget
         }
     }
 
@@ -264,13 +273,21 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 let now = dependencies.now()
                 firstObserved = firstObserved.filter { failed[$0.key] != nil }
                 var targets: Set<Relay> = []
+                var waitingForBudget = 0
+                var coolingDown = 0
                 for (relay, grace) in failed where relay.userId == context.userId {
                     if firstObserved[relay] == nil { firstObserved[relay] = now }
-                    if now - firstObserved[relay]! >= max(0, grace),
-                       now - (relayAttempts[relay] ?? -.infinity) >= cooldown {
+                    if now - firstObserved[relay]! < max(0, grace) {
+                        waitingForBudget += 1
+                    } else if now - (relayAttempts[relay] ?? -.infinity) < cooldown {
+                        coolingDown += 1
+                    } else {
                         targets.insert(relay)
                     }
                 }
+                record(reason, "relay_candidates", count: failed.keys.filter { $0.userId == context.userId }.count)
+                if waitingForBudget > 0 { record(reason, "relay_connect_budget", count: waitingForBudget) }
+                if coolingDown > 0 { record(reason, "relay_cooldown", count: coolingDown) }
                 guard !targets.isEmpty else {
                     state = .monitoring
                     record(reason, "no_eligible_failed_relays")
@@ -532,6 +549,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         let context = dependencies.context()
         return "Connection recovery (current app process)\n"
             + "foreground=\(context.active) online=\(context.online) network=\(network.rawValue) profile_available=\(context.userId != nil) session=\(dependencies.sessionState().rawValue) recovery=\(state.rawValue) route_retry=\(needsRouteRetry)\n"
+            + "outbound_pending=\(outboundPending) subscription_pending=\(subscriptionPending)\n"
             + events.joined(separator: "\n")
     }
 }
