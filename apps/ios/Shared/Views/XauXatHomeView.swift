@@ -3252,7 +3252,7 @@ struct XauXatTorDiagnosticsView: View {
                 Button("Copy connection diagnostics") {
                     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
                     let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-                    UIPasteboard.general.string = "XauXat \(version) (\(build))\n" + recovery.diagnosticText + "\n\n" + tor.diagnosticText
+                    UIPasteboard.general.string = "XauXat \(version) (\(build))\nstore_open=\(isChatStoreOpen())\n" + recovery.diagnosticText + "\n\n" + tor.diagnosticText
                 }
                 .font(.system(size: 14, weight: .bold, design: .default))
                 .foregroundStyle(palette.ink)
