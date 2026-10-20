@@ -3244,7 +3244,7 @@ struct XauXatTorDiagnosticsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Text("This check sends no chat data. It opens a fresh SOCKS5 tunnel through the same local Tor endpoint and confirms that Tor Project is reachable through it. It does not request, display or store an exit IP.")
+                Text("This check sends no chat data. It opens a fresh SOCKS5 tunnel through the same local Tor endpoint and confirms that Tor Project is reachable through it. It does not request, display or store an exit IP. A passed check does not confirm a messaging relay connection or message delivery.")
                     .font(.system(size: 12, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)

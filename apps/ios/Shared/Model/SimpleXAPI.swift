@@ -149,8 +149,7 @@ extension XauXatConnectionRecoveryManager {
                 let health = RelayHealth(connected: sessions.ssConnected, connecting: sessions.ssConnecting,
                                          errors: sessions.ssErrors, pendingSubscriptions: server.subsOrNew.ssPending)
                 guard health.needsRecovery else { continue }
-                let explicitlyFailed = health.connected == 0 && health.connecting == 0 && health.errors > 0
-                failed[Relay(userId: userId, server: server.smpServer)] = explicitlyFailed ? 0 : connectingGrace
+                failed[Relay(userId: userId, server: server.smpServer)] = health.recoveryGrace(connectingBudget: connectingGrace)
             }
             return failed
         },
