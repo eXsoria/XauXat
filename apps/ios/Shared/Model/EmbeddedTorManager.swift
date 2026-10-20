@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Darwin
 import Combine
 import Network
 import OSLog
@@ -31,6 +32,7 @@ final class EmbeddedTorManager: ObservableObject {
     private enum DiagnosticStage: String {
         case start, joined, invalidated, superseded, waiterCancelled, startupRetry, controlReopened, authenticated, bootstrap
         case bootstrapStalled
+        case controlPortWait, controlCookieWait, controlSocketWait, authenticating
         case circuitCheck, probe, probeFailed, repair, failed, ready, manualProbe, manualProbeFailed, manualVerified
     }
     private let startedAt = ProcessInfo.processInfo.systemUptime
@@ -82,6 +84,13 @@ final class EmbeddedTorManager: ObservableObject {
             case .missingControlPort: return "control_port_missing"
             case .controlConnection: return "control_connection"
             case .controlTimeout: return "control_timeout"
+            case .controlSocketTimeout: return "control_socket_timeout"
+            case .controlSocketRefused: return "control_socket_refused"
+            case .controlDescriptorLimit: return "control_descriptor_limit"
+            case .controlCookieTimeout: return "control_cookie_timeout"
+            case .controlCommandTimeout: return "control_command_timeout"
+            case .controlInfoTimeout: return "control_info_timeout"
+            case .controlAuthenticationTimeout: return "control_authentication_timeout"
             case .authentication: return "control_authentication"
             case .invalidSocksPort: return "socks_listener_invalid"
             case .routeNotReady: return "route_not_ready"
@@ -116,6 +125,8 @@ final class EmbeddedTorManager: ObservableObject {
     private let bootstrapStallTimeout: UInt64
     private let bootstrapNow: @MainActor () -> TimeInterval
     private let bootstrapSleep: @MainActor (UInt64) async throws -> Void
+    private let controlReplyTimeout: TimeInterval
+    private let controlPollDelay: UInt64
 
     // Production owns exactly one instance. Dependencies make lifecycle races
     // testable without starting a second C-Tor runtime in the test process.
@@ -125,7 +136,9 @@ final class EmbeddedTorManager: ObservableObject {
         startupTimeout: UInt64 = 240_000_000_000,
         bootstrapStallTimeout: UInt64 = 60_000_000_000,
         bootstrapNow: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-        bootstrapSleep: @escaping @MainActor (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
+        bootstrapSleep: @escaping @MainActor (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
+        controlReplyTimeout: TimeInterval = 5,
+        controlPollDelay: UInt64 = 200_000_000
     ) {
         self.routeProbe = routeProbe
         self.retryDelay = retryDelay
@@ -133,6 +146,8 @@ final class EmbeddedTorManager: ObservableObject {
         self.bootstrapStallTimeout = max(1, bootstrapStallTimeout)
         self.bootstrapNow = bootstrapNow
         self.bootstrapSleep = bootstrapSleep
+        self.controlReplyTimeout = controlReplyTimeout
+        self.controlPollDelay = controlPollDelay
     }
 
     func start(_ completion: @escaping (Result<UInt16, Error>) -> Void) {
@@ -396,8 +411,7 @@ final class EmbeddedTorManager: ObservableObject {
                     guard attempt == id else { return }
                     record(.controlReopened, error: error)
                     removeObservers()
-                    // TorController.disconnect() sends SIGNAL SHUTDOWN in the
-                    // pinned framework. Releasing its socket must not kill Tor.
+                    controller.xauxatCloseControlSocket()
                     self.controller = nil
                     authenticated = false
                     // Reopen the control socket below rather than trusting a
@@ -407,53 +421,74 @@ final class EmbeddedTorManager: ObservableObject {
             guard let portFile = config.controlPortFile else {
                 throw EmbeddedTorError.missingControlPort
             }
+            // Also dispose a channel whose reader has already observed EOF.
+            removeObservers()
+            controller?.xauxatCloseControlSocket()
+            controller = nil
+            authenticated = false
 
             // The framework asserts when its file initializer sees a partial file,
             // so wait for a complete loopback endpoint and authentication cookie.
+            var waitingFor: EmbeddedTorError = .controlTimeout
+            var waitStage: DiagnosticStage?
             for _ in 0..<100 {
                 guard attempt == id else { return }
                 guard !thread.isFinished else { throw EmbeddedTorError.processStopped }
 
                 if let contents = try? String(contentsOf: portFile, encoding: .utf8),
-                   let port = Self.loopbackPort(contents.replacingOccurrences(of: "PORT=", with: "")),
-                   let cookie = config.cookie, !cookie.isEmpty {
-                    let control = TorController(socketHost: "127.0.0.1", port: port)
-                    if control.isConnected {
-                        controller = control
-                        authenticate(control, cookie: cookie, id: id)
-                        return
+                   let port = Self.loopbackPort(contents.replacingOccurrences(of: "PORT=", with: "")) {
+                    if let cookie = config.cookie, cookie.count == 32 {
+                        if waitStage != .controlSocketWait { record(.controlSocketWait); waitStage = .controlSocketWait }
+                        let control = TorController(socketHost: "127.0.0.1", port: port)
+                        if control.isConnected {
+                            controller = control
+                            try await authenticate(control, cookie: cookie, id: id)
+                            return
+                        }
+                        switch control.xauxatLastSocketError {
+                        case Int(ECONNREFUSED): waitingFor = .controlSocketRefused
+                        case Int(EMFILE), Int(ENFILE): waitingFor = .controlDescriptorLimit
+                        default: waitingFor = .controlSocketTimeout
+                        }
+                        control.xauxatCloseControlSocket()
+                    } else {
+                        waitingFor = .controlCookieTimeout
+                        if waitStage != .controlCookieWait { record(.controlCookieWait); waitStage = .controlCookieWait }
                     }
+                } else {
+                    waitingFor = .controlTimeout
+                    if waitStage != .controlPortWait { record(.controlPortWait); waitStage = .controlPortWait }
                 }
-                try await Task.sleep(nanoseconds: 200_000_000)
+                try await Task.sleep(nanoseconds: controlPollDelay)
             }
-            throw EmbeddedTorError.controlTimeout
+            throw waitingFor
         } catch {
             finish(.failure(error), id: id)
         }
     }
 
-    private func authenticate(_ control: TorController, cookie: Data, id: UUID) {
-        control.authenticate(with: cookie) { [weak self] success, _ in
-            Task { @MainActor in
-                guard let self, self.attempt == id else { return }
-                guard success else {
-                    self.finish(.failure(EmbeddedTorError.authentication), id: id)
-                    return
-                }
-                self.authenticated = true
-                self.record(.authenticated)
-                do {
-                    // Reauthentication can follow a repair interrupted while
-                    // DisableNetwork was set. Restore Tor before waiting for
-                    // a circuit; otherwise that retry could wait forever.
-                    try await self.command(control, "SETCONF", ["DisableNetwork=0"])
-                    guard self.attempt == id else { return }
-                    self.observeCircuit(control, id: id)
-                } catch {
-                    self.finish(.failure(error), id: id)
-                }
+    private func authenticate(_ control: TorController, cookie: Data, id: UUID) async throws {
+        record(.authenticating)
+        let accepted: Bool? = await withCheckedContinuation { continuation in
+            let completion = ControlCompletion<Bool?>(continuation)
+            let timeout = DispatchWorkItem { completion.resume(nil) }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + controlReplyTimeout, execute: timeout)
+            control.authenticate(with: cookie) { success, _ in
+                timeout.cancel()
+                completion.resume(success)
             }
         }
+        guard attempt == id, controller === control else { return }
+        guard accepted == true else {
+            control.xauxatCloseControlSocket()
+            throw accepted == nil ? EmbeddedTorError.controlAuthenticationTimeout : EmbeddedTorError.authentication
+        }
+        authenticated = true
+        record(.authenticated)
+        // Restore networking after an interrupted repair before awaiting a circuit.
+        try await command(control, "SETCONF", ["DisableNetwork=0"])
+        guard attempt == id else { return }
+        observeCircuit(control, id: id)
     }
 
     private func observeCircuit(_ control: TorController, id: UUID) {
@@ -599,8 +634,7 @@ final class EmbeddedTorManager: ObservableObject {
         case let .failure(error):
             record(.failed, error: error)
             setXauXatTorSocksPort(nil)
-            // Dropping the controller closes only its socket. Its disconnect()
-            // method would shut down the entire embedded Tor runtime.
+            controller?.xauxatCloseControlSocket()
             controller = nil
             authenticated = false
             state = .failed(error.localizedDescription)
@@ -631,10 +665,10 @@ final class EmbeddedTorManager: ObservableObject {
     }
 
     private func command(_ control: TorController, _ name: String, _ arguments: [String]) async throws {
-        let accepted: Bool = await withCheckedContinuation { continuation in
-            let completion = ControlCompletion(continuation)
-            let timeout = DispatchWorkItem { completion.resume(false) }
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 5, execute: timeout)
+        let accepted: Bool? = await withCheckedContinuation { continuation in
+            let completion = ControlCompletion<Bool?>(continuation)
+            let timeout = DispatchWorkItem { completion.resume(nil) }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + controlReplyTimeout, execute: timeout)
             control.sendCommand(name, arguments: arguments, data: nil) { codes, lines, stop in
                 guard let code = codes.first?.intValue, code < 600 else { return false }
                 // GETINFO replies belonging to another outstanding request
@@ -646,14 +680,17 @@ final class EmbeddedTorManager: ObservableObject {
                 return true
             }
         }
-        guard accepted else { throw EmbeddedTorError.controlConnection }
+        guard accepted == true else {
+            control.xauxatCloseControlSocket()
+            throw accepted == nil ? EmbeddedTorError.controlCommandTimeout : EmbeddedTorError.controlConnection
+        }
     }
 
     private func info(_ control: TorController, _ key: String) async throws -> String {
         let value: String? = await withCheckedContinuation { continuation in
             let completion = ControlCompletion(continuation)
             let timeout = DispatchWorkItem { completion.resume(nil) }
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 5, execute: timeout)
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + controlReplyTimeout, execute: timeout)
             control.sendCommand("GETINFO", arguments: [key], data: nil) { codes, lines, stop in
                 // Tor sends 650 status events between command replies. The
                 // framework GETINFO helper consumes these as invalid replies.
@@ -667,7 +704,10 @@ final class EmbeddedTorManager: ObservableObject {
                 return true
             }
         }
-        guard let value else { throw EmbeddedTorError.controlConnection }
+        guard let value else {
+            control.xauxatCloseControlSocket()
+            throw EmbeddedTorError.controlInfoTimeout
+        }
         return value
     }
 
@@ -720,6 +760,8 @@ private enum EmbeddedTorError: LocalizedError {
     case missingControlPort
     case controlConnection
     case controlTimeout
+    case controlSocketTimeout, controlSocketRefused, controlDescriptorLimit, controlCookieTimeout
+    case controlCommandTimeout, controlInfoTimeout, controlAuthenticationTimeout
     case authentication
     case invalidSocksPort
     case routeNotReady
@@ -735,6 +777,13 @@ private enum EmbeddedTorError: LocalizedError {
         case .missingControlPort: "Tor did not create its control port."
         case .controlConnection: "XauXat could not connect to Tor locally."
         case .controlTimeout: "Tor did not open its control port in time."
+        case .controlSocketTimeout: "The local Tor control socket could not be opened in time."
+        case .controlSocketRefused: "Tor refused the local control connection."
+        case .controlDescriptorLimit: "The app could not open another local socket."
+        case .controlCookieTimeout: "The local Tor authentication cookie was not available in time."
+        case .controlCommandTimeout: "Tor did not answer a local control command in time."
+        case .controlInfoTimeout: "Tor did not answer a local status request in time."
+        case .controlAuthenticationTimeout: "Tor did not answer local authentication in time."
         case .authentication: "XauXat could not authenticate with Tor locally."
         case .invalidSocksPort: "Tor did not return a valid local SOCKS port."
         case .routeNotReady: "The managed Tor route is not ready."

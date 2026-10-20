@@ -16,6 +16,12 @@ end
 # Tor 409.11.2 writes the argv terminator one element past its allocation.
 # Keep this patch bounded and fail dependency installation if upstream changes.
 post_install do |installer|
+  controller_patch = File.expand_path('../../scripts/ios/patch-tor-controller.py', __dir__)
+  controller_source = installer.sandbox.root + 'Tor/Tor/Classes/Core'
+  unless system('python3', controller_patch, controller_source.to_s)
+    raise 'Could not apply the pinned Tor control-socket lifecycle patch.'
+  end
+
   path = installer.sandbox.root + 'Tor/Tor/Classes/CTor/TORThread.m'
   source = File.read(path)
   original = 'char *argv[argc];'

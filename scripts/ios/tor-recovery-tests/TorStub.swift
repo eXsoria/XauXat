@@ -15,10 +15,18 @@ public enum TorTestState {
     public static var statusObservers: [UUID: (String, String, String, [String: String]?) -> Bool] = [:]
     public static var injectStatusBeforeReply = false
     public static var lastThread: TorThread?
+    public static var lastController: TorController?
+    public static var closedControllers = 0
+    public static var refuseConnections = false
+    public static var holdAuthentication = false
+    public static var pendingAuthentication: (() -> Void)?
+    public static var dropCommandContaining: String?
     public static func reset() {
         commands = []; completedCommands = []; threadStarts = 0; controllers = 0; port = 19050
         failNextCommand = false; failCommandContaining = nil; networkDisabled = false; injectStatusBeforeReply = false; lastThread = nil
         circuitEstablished = true; establishAfterRepair = false; statusObservers = [:]
+        lastController = nil; closedControllers = 0; refuseConnections = false
+        holdAuthentication = false; pendingAuthentication = nil; dropCommandContaining = nil
     }
     public static func emitProgress(_ progress: Int) {
         for observer in Array(statusObservers.values) { _ = observer("STATUS_CLIENT", "NOTICE", "BOOTSTRAP", ["PROGRESS": String(progress)]) }
@@ -49,9 +57,23 @@ public final class TorThread {
 }
 public final class TorController {
     public var isConnected = true
-    public init(socketHost: String, port: UInt16) { TorTestState.controllers += 1 }
+    public var xauxatLastSocketError: Int { isConnected ? 0 : 61 } // Darwin ECONNREFUSED
+    public init(socketHost: String, port: UInt16) {
+        TorTestState.controllers += 1
+        isConnected = !TorTestState.refuseConnections
+        TorTestState.lastController = self
+    }
+    private var closed = false
+    public func xauxatCloseControlSocket() {
+        if !closed { TorTestState.closedControllers += 1; closed = true }
+        isConnected = false
+    }
     public func disconnect() { fatalError("The pinned framework disconnect() shuts down Tor; never use it for socket recovery") }
     public func authenticate(with cookie: Data, completion: @escaping (Bool, Error?) -> Void) {
+        if TorTestState.holdAuthentication {
+            TorTestState.pendingAuthentication = { completion(true, nil) }
+            return
+        }
         DispatchQueue.main.async { completion(true, nil) }
     }
     public func addObserver(forStatusEvents observer: @escaping (String, String, String, [String: String]?) -> Bool) -> Any {
@@ -72,6 +94,10 @@ public final class TorController {
     public func sendCommand(_ command: String, arguments: [String]?, data: Data?, observer: @escaping ([NSNumber], [Data], UnsafeMutablePointer<ObjCBool>) -> Bool) {
         let text = ([command] + (arguments ?? [])).joined(separator: " ")
         TorTestState.commands.append(text)
+        if let drop = TorTestState.dropCommandContaining, text.contains(drop) {
+            TorTestState.dropCommandContaining = nil
+            return
+        }
         let matchesFailure = TorTestState.failCommandContaining.map { text.contains($0) } ?? false
         let fail = TorTestState.failNextCommand || matchesFailure
         TorTestState.failNextCommand = false

@@ -64,6 +64,11 @@ import Tor
         try await interruptedRepairDoesNotStrandNextRetry()
         try await statusEventsCannotConsumeCommandReplies()
         try await staleControlChannelIsReopened()
+        try await unresponsiveControlIsClosedBeforeReopening()
+        try await authenticationTimeoutCannotPublishLateSuccess()
+        try await missingStatusReplyDiscardsTheChannel()
+        try await refusedControlConnectionsDoNotPoisonRetry()
+        try await repeatedResumeDisposesOldChannels()
         try await manualFailureCannotLeaveReady()
         try await oldManualFailureCannotInvalidateNewReadiness()
         try await deadlineCannotPublishLateSuccess()
@@ -449,6 +454,86 @@ import Tor
         TorTestState.failNextCommand = true
         _ = try await manager.ensureReady()
         require(TorTestState.controllers == 2 && TorTestState.threadStarts == 1, "A stale control socket must be reopened without a second Tor runtime")
+    }
+
+    static func controlManager(_ probe: ScriptedProbe) -> EmbeddedTorManager {
+        EmbeddedTorManager(routeProbe: { port, _ in try await probe.run(port) }, retryDelay: 0,
+                           startupTimeout: 3_000_000_000, controlReplyTimeout: 0.2, controlPollDelay: 1_000_000)
+    }
+
+    static func unresponsiveControlIsClosedBeforeReopening() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = controlManager(probe)
+        _ = try await manager.ensureReady()
+        manager.invalidateReadiness()
+        TorTestState.dropCommandContaining = "DisableNetwork=0"
+        _ = try await manager.ensureReady()
+        require(TorTestState.controllers == 2 && TorTestState.closedControllers == 1,
+                "A resumed channel that never answers must be closed before a replacement is used")
+        require(TorTestState.threadStarts == 1 && publishedTorPort == 19050,
+                "Control-socket recovery must keep the same runtime and listener")
+        require(manager.diagnosticText.contains("controlReopened failure=control_command_timeout"),
+                "Diagnostics must distinguish a dead command channel from a missing control-port file")
+    }
+
+    static func authenticationTimeoutCannotPublishLateSuccess() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = controlManager(probe)
+        TorTestState.holdAuthentication = true
+        do { _ = try await manager.ensureReady(); fatalError("Authentication without a response must finish") } catch { }
+        require(manager.diagnosticText.contains("last_failure=control_authentication_timeout") && publishedTorPort == nil,
+                "Authentication has its own bounded timeout and must fail closed")
+        let late = TorTestState.pendingAuthentication!
+        TorTestState.holdAuthentication = false
+        _ = try await manager.ensureReady()
+        late()
+        try await Task.sleep(nanoseconds: 10_000_000)
+        require(publishedPorts == [19050] && TorTestState.closedControllers == 1,
+                "Late authentication from a discarded channel cannot publish readiness or close the new channel")
+    }
+
+    static func missingStatusReplyDiscardsTheChannel() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = controlManager(probe)
+        TorTestState.dropCommandContaining = "GETINFO status/circuit-established"
+        do { _ = try await manager.ensureReady(); fatalError("Missing status reply must time out") } catch { }
+        require(manager.diagnosticText.contains("last_failure=control_info_timeout") && TorTestState.closedControllers == 1,
+                "A status timeout must close its channel rather than repair Tor through the same dead channel")
+        require(!TorTestState.commands.contains("SETCONF SocksPort=0") && publishedTorPort == nil,
+                "A control failure does not justify rotating a possibly healthy SOCKS listener")
+        _ = try await manager.ensureReady()
+        require(TorTestState.controllers == 2 && TorTestState.threadStarts == 1,
+                "A fresh retry must reconnect to the existing runtime")
+    }
+
+    static func refusedControlConnectionsDoNotPoisonRetry() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = controlManager(probe)
+        TorTestState.refuseConnections = true
+        do { _ = try await manager.ensureReady(); fatalError("Refused socket must fail") } catch { }
+        require(manager.diagnosticText.contains("last_failure=control_socket_refused"),
+                "An existing endpoint that refuses connections is different from a missing port file")
+        require(TorTestState.controllers == 100 && TorTestState.closedControllers == 100 && publishedTorPort == nil,
+                "Every failed control connection must be disposed and retries must be bounded")
+        TorTestState.refuseConnections = false
+        _ = try await manager.ensureReady()
+        require(TorTestState.threadStarts == 1 && publishedTorPort == 19050,
+                "Temporary local connection refusal must not poison the next retry or spawn C-Tor again")
+    }
+
+    static func repeatedResumeDisposesOldChannels() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = controlManager(probe)
+        _ = try await manager.ensureReady()
+        for _ in 0..<25 {
+            TorTestState.lastController!.isConnected = false // EOF after suspension
+            manager.invalidateReadiness()
+            _ = try await manager.ensureReady()
+        }
+        require(TorTestState.controllers == 26 && TorTestState.closedControllers == 25,
+                "Repeated foreground/network recovery cannot accumulate stale control channels")
+        require(TorTestState.threadStarts == 1 && probe.calls == 26,
+                "Each resume revalidates Tor while retaining exactly one runtime")
     }
 
     static func statusEventsCannotConsumeCommandReplies() async throws {
