@@ -21,11 +21,11 @@ with ThreadPoolExecutor(max_workers=5) as pool:
     list(pool.map(fetch, files))
 PY
 sources=("$temp/TORController.m" "$temp/TORCircuit.m" "$temp/TORNode.m" "$temp/NSCharacterSet+PredefinedSets.m" "$root/scripts/ios/tor-recovery-tests/ControllerContract.m")
-clang -fobjc-arc -framework Foundation -I "$temp" "${sources[@]}" -o "$temp/upstream-contract"
+clang -fobjc-arc -framework Foundation -framework CFNetwork -I "$temp" "${sources[@]}" -o "$temp/upstream-contract"
 echo 'Reproduce upstream lifecycle defects (three expected failures):'
 "$temp/upstream-contract"
 python3 "$root/scripts/ios/patch-tor-controller.py" "$temp"
 python3 "$root/scripts/ios/patch-tor-controller.py" "$temp"
-clang -fobjc-arc -DXAUXAT_PATCHED=1 -framework Foundation -I "$temp" "${sources[@]}" -o "$temp/patched-contract"
+clang -fobjc-arc -DXAUXAT_PATCHED=1 -framework Foundation -framework CFNetwork -I "$temp" "${sources[@]}" -o "$temp/patched-contract"
 echo 'Patched real framework lifecycle checks:'
 "$temp/patched-contract"

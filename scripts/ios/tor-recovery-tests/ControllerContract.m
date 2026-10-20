@@ -45,7 +45,23 @@ static int descriptorCount(void) {
 int main(void) {
     @autoreleasepool {
         uint16_t port;
-        int server = endpoint(&port, YES);
+        int server;
+        // A bound, non-listening socket reserves a port which always refuses
+        // connections; no remote destination or Internet traffic is involved.
+        server = endpoint(&port, NO);
+        int before = descriptorCount();
+        for (int i = 0; i < 64; ++i) {
+            @autoreleasepool {
+                TORController *refused = [[TORController alloc] initWithSocketHost:@"127.0.0.1" port:port];
+                NSCAssert(!refused.connected, @"fixture must refuse connections");
+            }
+        }
+        int leaked = descriptorCount() - before;
+        printf("Descriptors added by 64 refused connections: %d\n", leaked);
+        check(leaked == 0, @"refused connections release their descriptors");
+        close(server);
+
+        server = endpoint(&port, YES);
         __weak TORController *released;
         int peer;
         @autoreleasepool {
@@ -114,20 +130,6 @@ int main(void) {
         close(server); control = nil;
 #endif
 
-        // A bound, non-listening socket reserves a port which always refuses
-        // connections; no remote destination or Internet traffic is involved.
-        server = endpoint(&port, NO);
-        int before = descriptorCount();
-        for (int i = 0; i < 64; ++i) {
-            @autoreleasepool {
-                TORController *refused = [[TORController alloc] initWithSocketHost:@"127.0.0.1" port:port];
-                NSCAssert(!refused.connected, @"fixture must refuse connections");
-            }
-        }
-        int leaked = descriptorCount() - before;
-        printf("Descriptors added by 64 refused connections: %d\n", leaked);
-        check(leaked == 0, @"refused connections release their descriptors");
-        close(server);
     }
 #if XAUXAT_PATCHED
     return failures == 0 ? 0 : 1;
