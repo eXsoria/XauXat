@@ -147,10 +147,12 @@ xcodebuild \
   -archivePath "$archive_path" \
   ${provisioning_args[@]+"${provisioning_args[@]}"} \
   "${signing_args[@]}" \
+  ARCHS=arm64 \
   archive
 
 archive_app="$archive_path/Products/Applications/SimpleX.app"
 "$repo_root/scripts/ios/verify-xauxat-identifiers.sh" "$archive_app"
+bash "$script_dir/verify-device-architectures.sh" "$archive_app"
 
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/xauxat-testflight.XXXXXX")
 trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
@@ -245,6 +247,7 @@ unzip -q "$ipa_path" -d "$work_dir/ipa"
 exported_app=$(find "$work_dir/ipa/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)
 test -n "$exported_app"
 "$repo_root/scripts/ios/verify-xauxat-identifiers.sh" "$exported_app" production
+bash "$script_dir/verify-device-architectures.sh" "$exported_app"
 verify_signed_entitlements "$exported_app" production
 
 swiftygif_privacy_manifest=$(find "$exported_app/Frameworks" -path '*SwiftyGif*.framework/*/PrivacyInfo.xcprivacy' -type f -print -quit)
