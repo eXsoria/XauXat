@@ -16,6 +16,6 @@ for bundle in "${bundles[@]}"; do
   test -n "$executable"
   [[ "$executable" != */* ]]
   test -f "$bundle/$executable"
-  xcrun lipo -verify_arch arm64 "$bundle/$executable"
+  xcrun lipo "$bundle/$executable" -verify_arch arm64
 done
 echo "Verified ARM64 device binaries in ${#bundles[@]} app, extension and framework bundles."
