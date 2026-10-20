@@ -97,15 +97,15 @@ func xauXatDeliveryStatusText(_ status: CIStatus) -> String? {
         NSLocalizedString("Queued for relay", comment: "outbound message delivery status")
     case let .sndSent(sndProgress):
         sndProgress == .complete
-            ? NSLocalizedString("Sent to relay", comment: "outbound message delivery status")
+            ? NSLocalizedString("Sent", comment: "outbound message delivery status")
             : NSLocalizedString("Sending to relays", comment: "outbound message delivery status")
     case let .sndRcvd(msgRcptStatus, sndProgress):
         if msgRcptStatus == .badMsgHash {
             NSLocalizedString("Receipt mismatch", comment: "outbound message delivery status")
         } else if sndProgress == .complete {
-            NSLocalizedString("Delivered", comment: "outbound message delivery status")
+            NSLocalizedString("Sent", comment: "outbound message delivery status")
         } else {
-            NSLocalizedString("Partly delivered", comment: "outbound message delivery status")
+            NSLocalizedString("Sending to relays", comment: "outbound message delivery status")
         }
     case .sndWarning:
         NSLocalizedString("Retrying delivery", comment: "outbound message delivery status")

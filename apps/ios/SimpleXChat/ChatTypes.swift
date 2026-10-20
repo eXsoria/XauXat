@@ -4130,7 +4130,7 @@ public enum CIStatus: Decodable, Hashable {
             (Image("checkmark.wide"),  sndProgress == .partial ? paleMetaColor : metaColor)
         case let .sndRcvd(msgRcptStatus, sndProgress):
             switch msgRcptStatus {
-            case .ok: (Image("checkmark.2"), sndProgress == .partial ? paleMetaColor : metaColor)
+            case .ok: (Image("checkmark.wide"), sndProgress == .partial ? paleMetaColor : metaColor)
             case .badMsgHash: (Image("checkmark.2"), .red)
             }
         case .sndErrorAuth: (Image(systemName: "multiply"), .red)
