@@ -91,6 +91,7 @@ final class EmbeddedTorManager: ObservableObject {
             case .controlCommandTimeout: return "control_command_timeout"
             case .controlInfoTimeout: return "control_info_timeout"
             case .controlAuthenticationTimeout: return "control_authentication_timeout"
+            case .controlRejected: return "control_response_rejected"
             case .authentication: return "control_authentication"
             case .invalidSocksPort: return "socks_listener_invalid"
             case .routeNotReady: return "route_not_ready"
@@ -682,14 +683,14 @@ final class EmbeddedTorManager: ObservableObject {
         }
         guard accepted == true else {
             control.xauxatCloseControlSocket()
-            throw accepted == nil ? EmbeddedTorError.controlCommandTimeout : EmbeddedTorError.controlConnection
+            throw accepted == nil ? EmbeddedTorError.controlCommandTimeout : EmbeddedTorError.controlRejected
         }
     }
 
     private func info(_ control: TorController, _ key: String) async throws -> String {
-        let value: String? = await withCheckedContinuation { continuation in
-            let completion = ControlCompletion(continuation)
-            let timeout = DispatchWorkItem { completion.resume(nil) }
+        let value: Result<String, EmbeddedTorError> = await withCheckedContinuation { continuation in
+            let completion = ControlCompletion<Result<String, EmbeddedTorError>>(continuation)
+            let timeout = DispatchWorkItem { completion.resume(.failure(.controlInfoTimeout)) }
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + controlReplyTimeout, execute: timeout)
             control.sendCommand("GETINFO", arguments: [key], data: nil) { codes, lines, stop in
                 // Tor sends 650 status events between command replies. The
@@ -700,15 +701,19 @@ final class EmbeddedTorManager: ObservableObject {
                 if code == 250 && result == nil { return false }
                 stop.pointee = true
                 timeout.cancel()
-                completion.resume(codes.allSatisfy { $0.intValue == 250 } ? result.map { String($0.dropFirst(prefix.count)) } : nil)
+                if codes.allSatisfy({ $0.intValue == 250 }), let result {
+                    completion.resume(.success(String(result.dropFirst(prefix.count))))
+                } else {
+                    completion.resume(.failure(.controlRejected))
+                }
                 return true
             }
         }
-        guard let value else {
+        do { return try value.get() }
+        catch {
             control.xauxatCloseControlSocket()
-            throw EmbeddedTorError.controlInfoTimeout
+            throw error
         }
-        return value
     }
 
     private func removeObservers() {
@@ -762,6 +767,7 @@ private enum EmbeddedTorError: LocalizedError {
     case controlTimeout
     case controlSocketTimeout, controlSocketRefused, controlDescriptorLimit, controlCookieTimeout
     case controlCommandTimeout, controlInfoTimeout, controlAuthenticationTimeout
+    case controlRejected
     case authentication
     case invalidSocksPort
     case routeNotReady
@@ -784,6 +790,7 @@ private enum EmbeddedTorError: LocalizedError {
         case .controlCommandTimeout: "Tor did not answer a local control command in time."
         case .controlInfoTimeout: "Tor did not answer a local status request in time."
         case .controlAuthenticationTimeout: "Tor did not answer local authentication in time."
+        case .controlRejected: "Tor rejected a local control request."
         case .authentication: "XauXat could not authenticate with Tor locally."
         case .invalidSocksPort: "Tor did not return a valid local SOCKS port."
         case .routeNotReady: "The managed Tor route is not ready."

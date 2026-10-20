@@ -67,6 +67,7 @@ import Tor
         try await unresponsiveControlIsClosedBeforeReopening()
         try await authenticationTimeoutCannotPublishLateSuccess()
         try await missingStatusReplyDiscardsTheChannel()
+        try await rejectedStatusReplyIsNotATimeout()
         try await refusedControlConnectionsDoNotPoisonRetry()
         try await repeatedResumeDisposesOldChannels()
         try await manualFailureCannotLeaveReady()
@@ -519,6 +520,17 @@ import Tor
         _ = try await manager.ensureReady()
         require(TorTestState.threadStarts == 1 && publishedTorPort == 19050,
                 "Temporary local connection refusal must not poison the next retry or spawn C-Tor again")
+    }
+
+    static func rejectedStatusReplyIsNotATimeout() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = controlManager(probe)
+        TorTestState.failCommandContaining = "GETINFO status/circuit-established"
+        do { _ = try await manager.ensureReady(); fatalError("Rejected status request must fail") } catch { }
+        require(manager.diagnosticText.contains("last_failure=control_response_rejected"),
+                "A rejection response must not be reported as a missing response")
+        require(TorTestState.closedControllers == 1 && publishedTorPort == nil,
+                "A rejected control request must dispose its channel and stay closed")
     }
 
     static func repeatedResumeDisposesOldChannels() async throws {
