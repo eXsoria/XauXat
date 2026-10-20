@@ -43,12 +43,16 @@ static int descriptorCount(void) {
 }
 
 int main(void) {
+    setbuf(stdout, NULL);
+    alarm(45); // Bound blocked upstream system calls, not just assertions.
     @autoreleasepool {
         uint16_t port;
         int server;
-        // A bound, non-listening socket reserves a port which always refuses
-        // connections; no remote destination or Internet traffic is involved.
-        server = endpoint(&port, NO);
+        // Use a closed listener. A bound-but-not-listening TCP PCB can leave
+        // connect() waiting for SYN retransmission on Darwin.
+        printf("Testing refused connections\n");
+        server = endpoint(&port, YES);
+        close(server);
         int before = descriptorCount();
         for (int i = 0; i < 64; ++i) {
             @autoreleasepool {
@@ -59,8 +63,8 @@ int main(void) {
         int leaked = descriptorCount() - before;
         printf("Descriptors added by 64 refused connections: %d\n", leaked);
         check(leaked == 0, @"refused connections release their descriptors");
-        close(server);
 
+        printf("Testing controller release\n");
         server = endpoint(&port, YES);
         __weak TORController *released;
         int peer;
@@ -75,8 +79,10 @@ int main(void) {
         close(peer);
         close(server);
 
+        printf("Testing peer EOF\n");
         server = endpoint(&port, YES);
         TORController *control = [[TORController alloc] initWithSocketHost:@"127.0.0.1" port:port];
+        NSCAssert(control.connected, @"fixture connect failed");
         peer = accept(server, NULL, NULL);
         close(peer);
         check(until(^BOOL { return !control.connected; }), @"peer EOF invalidates isConnected");
@@ -87,8 +93,10 @@ int main(void) {
         close(server);
 
 #if XAUXAT_PATCHED
+        printf("Testing explicit socket close\n");
         server = endpoint(&port, YES);
         control = [[TORController alloc] initWithSocketHost:@"127.0.0.1" port:port];
+        NSCAssert(control.connected, @"fixture connect failed");
         peer = accept(server, NULL, NULL);
         [control xauxatCloseControlSocket];
         [control xauxatCloseControlSocket]; // repeat must not close another FD
@@ -102,6 +110,7 @@ int main(void) {
         // A loopback peer answers immediately; read callbacks share the same
         // queue as registration, so replies cannot beat their observer.
         server = endpoint(&port, YES);
+        printf("Testing immediate replies\n");
         dispatch_group_t responder = dispatch_group_create();
         dispatch_group_async(responder, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
             int client = accept(server, NULL, NULL);
@@ -116,6 +125,7 @@ int main(void) {
             close(client);
         });
         control = [[TORController alloc] initWithSocketHost:@"127.0.0.1" port:port];
+        NSCAssert(control.connected, @"fixture connect failed");
         BOOL replies = YES;
         for (int i = 0; i < 100; ++i) {
             dispatch_semaphore_t reply = dispatch_semaphore_create(0);
