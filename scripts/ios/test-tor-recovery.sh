@@ -24,6 +24,18 @@ swiftc -swift-version 5 -parse-as-library \
   "$tests/RecoveryTests.swift" -o "$temp/coordinated-recovery-tests"
 "$temp/coordinated-recovery-tests"
 
+# Exercise the actual path adapter with a controlled Network module, including
+# duplicate snapshots while its shared Tor verification is still in flight.
+swiftc -swift-version 5 -emit-library -emit-module -module-name Network \
+  "$tests/NetworkStub.swift" -emit-module-path "$temp/Network.swiftmodule" -o "$temp/libNetwork.dylib"
+swiftc -swift-version 5 -parse-as-library -I "$temp" -L "$temp" -lNetwork -lSimpleXChat \
+  -Xlinker -rpath -Xlinker "$temp" \
+  "$root/apps/ios/Shared/Model/NetworkObserver.swift" \
+  "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
+  "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" \
+  "$tests/NetworkObserverTests.swift" -o "$temp/network-observer-tests"
+"$temp/network-observer-tests"
+
 # Compile and execute the real app activation/session-classification functions
 # with an NSE callback that can be held across lifecycle/profile changes.
 python3 "$root/scripts/ios/extract-lifecycle-tests.py" "$root" "$temp/Activation.swift"

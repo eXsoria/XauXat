@@ -151,6 +151,7 @@ struct SimpleXApp: App {
             do { configurationReconnected = try applyXauXatRecoveryConfiguration() }
             catch {
                 logger.error("XauXat could not apply its verified Tor route before resuming")
+                XauXatConnectionRecoveryManager.shared.sessionUnavailable()
                 return
             }
         }
@@ -164,10 +165,16 @@ struct SimpleXApp: App {
                 && AppChatState.shared.value != .stopped
                 && (kcDecoyPassword.get() == nil || chatModel.contentViewAccessAuthenticated)
         }) {
-            guard scenePhase == .active, chatModel.chatRunning == true else { return }
-            guard isXauXatTorReady(), chatModel.currentUser?.userId == userId,
-                  xauXatStorageScope() == storageScope,
-                  AppChatState.shared.value == .active else { return }
+            guard scenePhase == .active, chatModel.currentUser?.userId == userId,
+                  xauXatStorageScope() == storageScope else { return }
+            guard xauXatRecoverySessionState() == .running else {
+                XauXatConnectionRecoveryManager.shared.sessionUnavailable()
+                return
+            }
+            guard isXauXatTorReady() else {
+                XauXatConnectionRecoveryManager.shared.routeUnavailable()
+                return
+            }
             if configurationReconnected { XauXatConnectionRecoveryManager.shared.configurationApplied() }
             XauXatConnectionRecoveryManager.shared.resume()
             if let ntfResponse = chatModel.notificationResponse {
