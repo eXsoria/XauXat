@@ -334,7 +334,8 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 }
                 catch {
                     record(reason, "resume_failed")
-                    if epoch == operationEpoch, dependencies.context() == context { sessionUnavailable() }
+                    if !(error is CancellationError), epoch == operationEpoch,
+                       dependencies.context() == context { sessionUnavailable() }
                     throw error
                 }
                 try requireCurrent(context, operationEpoch, reason: reason)

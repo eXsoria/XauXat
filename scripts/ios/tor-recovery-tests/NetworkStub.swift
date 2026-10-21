@@ -15,11 +15,23 @@ public struct NWPath: Equatable {
     public func usesInterfaceType(_ type: NWInterface.InterfaceType) -> Bool { interface == type }
 }
 public final class NWPathMonitor {
-    public static var current: NWPathMonitor?
-    public static var starts = 0
+    private static let lock = NSLock()
+    private static var currentMonitor: NWPathMonitor?
+    private static var startCount = 0
+    public static var current: NWPathMonitor? {
+        lock.lock(); defer { lock.unlock() }; return currentMonitor
+    }
+    public static var starts: Int {
+        lock.lock(); defer { lock.unlock() }; return startCount
+    }
     public var pathUpdateHandler: ((NWPath) -> Void)?
     private var queue: DispatchQueue?
-    public init() { Self.current = self }
-    public func start(queue: DispatchQueue) { self.queue = queue; Self.starts += 1 }
+    public init() {}
+    public func start(queue: DispatchQueue) {
+        self.queue = queue
+        Self.lock.lock(); defer { Self.lock.unlock() }
+        Self.startCount += 1
+        Self.currentMonitor = self
+    }
     public func emit(_ path: NWPath) { queue!.async { self.pathUpdateHandler?(path) } }
 }
