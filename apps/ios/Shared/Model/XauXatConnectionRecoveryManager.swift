@@ -416,6 +416,10 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             loopId = nil
         }
         sessionRetry = (epoch, context)
+        // These callers have already verified routing. If a route retry got
+        // this far before activation failed, continue as a session repair;
+        // do not force a new Tor probe on every local activation attempt.
+        routeRetry = nil
         lastGlobal = nil
         record(.sessionRetry, "scheduled")
         updateLoop()

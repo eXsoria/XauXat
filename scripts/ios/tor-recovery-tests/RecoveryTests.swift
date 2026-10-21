@@ -98,6 +98,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await failedResumeCannotReconnect()
         try await sessionFailuresRetryWithoutPendingMessages()
         try await sessionRetriesBackOffAndRespectGates()
+        try await routeRecoveryCanContinueAsSessionRecovery()
         try await staleResumeFailureCannotScheduleAnotherProfile()
         try await configurationCannotClearAnUnresumedSessionRetry()
         try await unlockDuringVerificationPreventsCoreCommands()
@@ -321,6 +322,24 @@ typealias Recovery = XauXatConnectionRecoveryManager
         f.resume = { f.context.userId = 2; throw RecoveryFixture.Failure.synthetic }
         await failed(Task { try await f.manager.reconnect() }, "A stale activation failure must propagate")
         require(!f.manager.diagnosticText.contains("sessionRetry scheduled"), "The previous profile cannot schedule a retry for its replacement")
+        f.manager.pause()
+    }
+
+    static func routeRecoveryCanContinueAsSessionRecovery() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        var delays: [TimeInterval] = []
+        f.sleep = { delay in
+            delays.append(delay)
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        f.ensure = { if f.forces.count == 1 { throw RecoveryFixture.Failure.synthetic } }
+        f.resume = { if f.resumeCount == 1 { throw RecoveryFixture.Failure.synthetic } }
+        await failed(Task { try await f.manager.reconnect() }, "An unavailable route must propagate before activation")
+        try await until { f.commands == [.all] }
+        require(f.forces == [true, true, false], "Once routing succeeds, local activation failure must continue without forcing another Tor probe")
+        require(delays == [2, 5], "Changing the failing stage must not reset bounded retry backoff")
+        require(f.manager.diagnosticText.contains("route_retry=false") && f.manager.diagnosticText.contains("session_retry=false"), "Full recovery must satisfy both route and session retry demands")
         f.manager.pause()
     }
 
