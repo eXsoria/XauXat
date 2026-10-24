@@ -804,7 +804,9 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
             && (kcDecoyPassword.get() == nil || model.contentViewAccessAuthenticated)
     }
     guard isCurrent() else { return }
-    im.isLoading = true
+    // Background-to-foreground refreshes preserve the current scroll position;
+    // only a fresh navigation/replacement should trigger initial positioning.
+    if clearItems || differentChat { im.isLoading = true }
     let progress = Task { @MainActor in
         try? await Task.sleep(nanoseconds: 500_000_000)
         if !Task.isCancelled && isCurrent() { im.showLoadingProgress = chatId }

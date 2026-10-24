@@ -145,6 +145,12 @@ func apiGetChat(chatId: ChatId, scope: GroupChatScope?, contentTag: MsgContentTa
         await loadChat(chatId: "a", im: im)
         expect(attempts == 2 && im.reversedChatItems.map(\.id) == [2, 1], "Transient read failure must retry and restore history")
         expect(!im.isLoading && im.messageLoadError == nil && im.showLoadingProgress == nil, "Successful retry clears progress and error")
+        let refreshIM = im
+        fetch = { id, _, _ in
+            expect(!refreshIM.isLoading, "Foreground refresh must not trigger initial scroll positioning")
+            return response(id, [1, 2])
+        }
+        await loadChat(chatId: "a", im: im, clearItems: false)
 
         attempts = 0
         fetch = { _, _, _ in attempts += 1; throw TestError.unavailable }
