@@ -47,7 +47,13 @@ struct SimpleXApp: App {
         WindowGroup {
             // contentAccessAuthenticationExtended has to be passed to ContentView on view initialization,
             // so that it's computed by the time view renders, and not on event after rendering
-            ContentView(contentAccessAuthenticationExtended: !authenticationExpired())
+            ContentView(contentAccessAuthenticationExtended: !authenticationExpired(), refreshConnection: {
+                guard scenePhase == .active, chatModel.networkInfo.online else { throw CancellationError() }
+                _ = try await EmbeddedTorManager.shared.refreshConnection()
+                guard scenePhase == .active else { return }
+                initializeAfterTor()
+                if chatModel.chatInitialized { resumeChatAfterTor() }
+            })
                 .environmentObject(chatModel)
                 .environmentObject(plusEntitlements)
                 .environmentObject(AppTheme.shared)
@@ -70,12 +76,7 @@ struct SimpleXApp: App {
                         chatModel.onboardingStage = onboardingStageDefault.get()
                     }
                     startEmbeddedTor(showError: true) {
-                        if chatModel.migrationState == nil &&
-                           !xauXatRequiresUnlockBeforeInitialization() {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                                initChatAndMigrate()
-                            }
-                        }
+                        initializeAfterTor()
                     }
                 }
 // Spec: spec/architecture.md#scenePhaseHandling
@@ -110,6 +111,15 @@ struct SimpleXApp: App {
                         break
                     }
                 }
+        }
+    }
+
+    private func initializeAfterTor() {
+        guard chatModel.migrationState == nil, !xauXatRequiresUnlockBeforeInitialization() else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            guard isXauXatTorReady(), !chatModel.chatInitialized, !chatModel.ctrlInitInProgress,
+                  chatModel.migrationState == nil, !xauXatRequiresUnlockBeforeInitialization() else { return }
+            initChatAndMigrate()
         }
     }
 

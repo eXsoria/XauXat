@@ -13,6 +13,7 @@ root, temp = map(Path, sys.argv[1:])
 content = (root / 'apps/ios/Shared/ContentView.swift').read_text()
 sheet = (root / 'apps/ios/Shared/Views/Helpers/AppSheet.swift').read_text()
 auth = (root / 'apps/ios/Shared/Views/Helpers/LocalAuthenticationUtils.swift').read_text()
+app = (root / 'apps/ios/Shared/SimpleXApp.swift').read_text()
 
 def declaration(source, marker):
     start = source.index(marker)
@@ -65,7 +66,10 @@ final class AppChatState {
     var value: AppState = .suspended
 }
 struct Migration { var startChat = true }
+struct NetworkInfo { var online = true }
 final class Model {
+    var networkInfo = NetworkInfo()
+    var migrationState: Int?
     var chatDbStatus: DBStatus?
     var ctrlInitInProgress = false
     var onboardingStage: Onboarding?
@@ -262,6 +266,18 @@ checks_source = r'''
 '''
 (temp / 'main.swift').write_text(adapters + predicate + '\n' + readiness + '\n' + automatic + '\n' + callback + '\n' + checks_source + '\n' + selection + '\nHarness().run()\nprint("\(checks) opening/authentication transition checks passed.")\n')
 ui = 'import SwiftUI\n' + declaration(sheet, 'class AppSheetState: ObservableObject')
+ui += '''
+@MainActor final class EmbeddedTorManager: ObservableObject {
+    static let shared = EmbeddedTorManager()
+    @Published var refreshingConnection = false
+}
+struct NetworkInfo { var online = true }
+@MainActor final class ChatModel: ObservableObject {
+    static let shared = ChatModel()
+    @Published var networkInfo = NetworkInfo()
+}
+func isXauXatTorReady() -> Bool { false }
+'''
 ui += '\n' + declaration(sheet, 'struct XauXatAppSwitcherProtection: ViewModifier')
 ui += '\n' + declaration(content, 'struct XauXatOpeningView: View')
 ui += '''
@@ -274,10 +290,74 @@ struct OpeningUsage: View {
 }
 '''
 (temp / 'OpeningViews.swift').write_text(ui)
+
+# Execute the actual visibility gate and post-refresh initialization, including
+# the alternate-PIN boundary. The action must also work after startup timed out.
+refresh_gate = declaration(content, 'private var canRefreshConnection: Bool').replace('private ', '', 1)
+initializer = declaration(app, 'private func initializeAfterTor()').replace('private ', '', 1)
+(temp / 'Refresh.swift').write_text(adapters[:adapters.index('struct Harness {')] + selection + '''
+final class RefreshHarness {
+    var showsProgress = true
+    var refreshConnection: (() -> Void)? = {}
+    var scenePhase: Phase = .active
+    let chatModel = Model()
+''' + refresh_gate + '\n' + initializer + '''
+    func run() {
+        socksReady = false
+        expect(canRefreshConnection, "a stalled online launch can offer refresh")
+        showsProgress = false
+        expect(!canRefreshConnection, "privacy and lock opening views never offer refresh")
+        showsProgress = true
+        refreshConnection = nil
+        expect(!canRefreshConnection, "an opening view without a recovery action cannot offer refresh")
+        refreshConnection = {}
+        scenePhase = .background
+        expect(!canRefreshConnection, "background cannot offer refresh")
+        scenePhase = .inactive
+        expect(!canRefreshConnection, "inactive app cannot offer refresh")
+        scenePhase = .active
+        chatModel.networkInfo.online = false
+        expect(!canRefreshConnection, "offline app cannot offer refresh")
+        chatModel.networkInfo.online = true
+        socksReady = true
+        expect(!canRefreshConnection, "database loading after Tor readiness cannot offer Tor refresh")
+        activeModel = chatModel
+        chatModel.contentViewAccessAuthenticated = true
+        kcAppPassword.value = "test-only"
+        kcDecoyPassword.value = "test-only-decoy"
+        initializeAfterTor()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        expect(initializations == 0, "refresh cannot select a store before the alternate PIN")
+        kcDecoyPassword.value = nil
+        initializeAfterTor()
+        initializeAfterTor()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        expect(initializations == 1, "startup and refresh completions initialize exactly once")
+        chatModel.chatInitialized = false
+        initializeAfterTor()
+        kcDecoyPassword.value = "test-only-decoy"
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        expect(initializations == 1, "deferred initialization rechecks the selected-store boundary")
+        kcDecoyPassword.value = nil
+        initializeAfterTor()
+        socksReady = false
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        expect(initializations == 1, "readiness lost during the delay cannot initialize the core")
+    }
+}
+@main struct RefreshChecks {
+    static func main() {
+        RefreshHarness().run()
+        print("\\(checks) connection refresh presentation/startup checks passed.")
+    }
+}
+''')
 PY
 
 swiftc "$temp/main.swift" -o "$temp/opening-tests"
 "$temp/opening-tests"
+swiftc -parse-as-library "$temp/Refresh.swift" -o "$temp/refresh-tests"
+"$temp/refresh-tests"
 sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun swiftc -swift-version 5 -typecheck -sdk "$sdk" -target arm64-apple-ios15.0-simulator \
   "$temp/OpeningViews.swift"
