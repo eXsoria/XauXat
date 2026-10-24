@@ -90,6 +90,11 @@ class ItemsModel: ObservableObject {
     // this will cause reversedChatItems to be rendered without throttling
     @Published var isLoading = false
     @Published var showLoadingProgress: ChatId? = nil
+    @Published var messageLoadError: ChatId? = nil
+    var messageLoadId = UUID()
+    var messageLoadChatId: ChatId? = nil
+    var messageLoadUserId: Int64? = nil
+    var messageLoadAlternateStore = false
 
     private var navigationTimeoutTask: Task<Void, Never>? = nil
     private var loadChatTask: Task<Void, Never>? = nil
@@ -133,15 +138,8 @@ class ItemsModel: ObservableObject {
             } catch {}
         }
         loadChatTask = Task {
-            await MainActor.run { self.isLoading = true }
 //            try? await Task.sleep(nanoseconds: 1000_000000)
             await loadChat(chatId: chatId, im: self)
-            if !Task.isCancelled {
-                await MainActor.run {
-                    self.isLoading = false
-                    self.showLoadingProgress = nil
-                }
-            }
         }
     }
 

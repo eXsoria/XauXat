@@ -767,33 +767,83 @@ func apiGetChatContentTypes(chatId: ChatId, scope: GroupChatScope? = nil) async 
     throw r.unexpected
 }
 
+@MainActor
 func loadChat(chat: Chat, im: ItemsModel, contentTag: MsgContentTag? = nil, search: String = "", clearItems: Bool = true) async {
     await loadChat(chatId: chat.chatInfo.id, im: im, contentTag: contentTag, search: search, clearItems: clearItems)
 }
 
+@MainActor
 func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, search: String = "", openAroundItemId: ChatItem.ID? = nil, clearItems: Bool = true) async {
-    await MainActor.run {
-        if clearItems {
-            im.reversedChatItems = []
-            im.chatState.clear()
+    let model = ChatModel.shared
+    let userId = model.currentUser?.userId
+    let alternateStore = xauXatStorageScope() == .decoy
+    let requestId = UUID()
+    let differentChat = im.messageLoadChatId != chatId || im.messageLoadUserId != userId
+        || im.messageLoadAlternateStore != alternateStore
+    im.messageLoadId = requestId
+    im.messageLoadChatId = chatId
+    im.messageLoadUserId = userId
+    im.messageLoadAlternateStore = alternateStore
+    im.messageLoadError = nil
+    // Never display another conversation's messages. A refresh of the same
+    // conversation keeps its existing history until a replacement succeeds.
+    if differentChat {
+        im.reversedChatItems = []
+        im.chatState.clear()
+    }
+    func isCurrent() -> Bool {
+        !Task.isCancelled && im.messageLoadId == requestId
+            && model.currentUser?.userId == userId
+            && (xauXatStorageScope() == .decoy) == alternateStore
+            && UIApplication.shared.applicationState == .active
+            && AppSheetState.shared.scenePhaseActive
+            && (kcDecoyPassword.get() == nil || model.contentViewAccessAuthenticated)
+    }
+    guard isCurrent() else { return }
+    im.isLoading = true
+    let progress = Task { @MainActor in
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        if !Task.isCancelled && isCurrent() { im.showLoadingProgress = chatId }
+    }
+    defer {
+        progress.cancel()
+        // An older request must not hide a newer request's progress.
+        if im.messageLoadId == requestId {
+            im.isLoading = false
+            im.showLoadingProgress = nil
         }
     }
-    await apiLoadMessages(
-        chatId,
-        im,
-        ( // pagination
-            openAroundItemId != nil
-            ? .around(chatItemId: openAroundItemId!, count: loadItemsPerPage)
-            : (
-                contentTag == nil && search == ""
-                ? .initial(count: loadItemsPerPage) : .last(count: loadItemsPerPage)
-            )
-        ),
-        contentTag,
-        search,
-        openAroundItemId,
-        { 0...0 }
-    )
+    let pagination: ChatPagination = if let openAroundItemId {
+        .around(chatItemId: openAroundItemId, count: loadItemsPerPage)
+    } else if contentTag == nil && search.isEmpty {
+        .initial(count: loadItemsPerPage)
+    } else {
+        .last(count: loadItemsPerPage)
+    }
+    for attempt in 0..<3 {
+        guard isCurrent() else { return }
+        // Opening a conversation can race foreground/NSE store activation.
+        // Reuse the existing guarded recovery; never reopen a stopped or locked
+        // profile or require a network connection for an already open store.
+        if !isChatStoreOpen() {
+            do {
+                try await XauXatConnectionRecoveryManager.shared.reconnect(.all, reason: .foreground)
+            } catch {
+                logger.error("Chat history session is unavailable")
+            }
+        }
+        guard isCurrent() else { return }
+        if isChatStoreOpen(), await apiLoadMessages(
+            chatId, im, pagination, contentTag, search, openAroundItemId,
+            { 0...0 }, replaceItems: clearItems || differentChat, canApply: isCurrent
+        ) { return }
+        guard isCurrent() else { return }
+        if attempt < 2 {
+            do { try await Task.sleep(nanoseconds: attempt == 0 ? 250_000_000 : 750_000_000) }
+            catch { return }
+        }
+    }
+    if isCurrent() { im.messageLoadError = chatId }
 }
 
 func apiGetChatItemInfo(type: ChatType, id: Int64, scope: GroupChatScope?, itemId: Int64) async throws -> ChatItemInfo {

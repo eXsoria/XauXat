@@ -146,6 +146,25 @@ struct ChatView: View {
                             scrollView.updateItems(mergedItems.boxedValue.items)
                         }
                     )
+                    if im.messageLoadError == chat.id {
+                        VStack(spacing: 12) {
+                            Text("Could not load messages")
+                                .font(.headline)
+                            Text("Try again to load this conversation.")
+                                .font(.callout)
+                            Button("Retry") {
+                                Task {
+                                    await loadChat(chat: chat, im: im, contentTag: contentFilter?.contentTag, search: searchText)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .multilineTextAlignment(.center)
+                        .padding(24)
+                        .background(theme.colors.background)
+                        .cornerRadius(16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
                 if let connectInProgressText = connectProgressManager.showConnectProgress {
                     connectInProgressView(connectInProgressText)
@@ -407,6 +426,14 @@ struct ChatView: View {
         }
         .onChange(of: chatModel.chatSubStatus) { status in
             updateSubscriptionRecovery(status)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active, !im.isLoading,
+               im.messageLoadError == chat.id || (im.reversedChatItems.isEmpty && !chat.chatItems.isEmpty) {
+                Task {
+                    await loadChat(chat: chat, im: im, contentTag: contentFilter?.contentTag, search: searchText)
+                }
+            }
         }
         .onChange(of: chatModel.secondaryPendingInviteeChatOpened) { opened in
             if im.secondaryIMFilter != nil && !opened {
