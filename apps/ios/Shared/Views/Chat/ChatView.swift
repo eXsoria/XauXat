@@ -146,6 +146,25 @@ struct ChatView: View {
                             scrollView.updateItems(mergedItems.boxedValue.items)
                         }
                     )
+                    if im.messageLoadError == chat.id {
+                        VStack(spacing: 12) {
+                            Text("Could not load messages")
+                                .font(.headline)
+                            Text("Try again to load this conversation.")
+                                .font(.callout)
+                            Button("Retry") {
+                                Task {
+                                    await loadChat(chat: chat, im: im, contentTag: contentFilter?.contentTag, search: searchText)
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .multilineTextAlignment(.center)
+                        .padding(24)
+                        .background(theme.colors.background)
+                        .cornerRadius(16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
                 if let connectInProgressText = connectProgressManager.showConnectProgress {
                     connectInProgressView(connectInProgressText)
@@ -340,6 +359,7 @@ struct ChatView: View {
             selectedChatItems = nil
             revealedItems = Set()
             initChatView()
+            retryMessageHistoryIfNeeded()
             updateSubscriptionRecovery(chatModel.chatSubStatus)
             if im.isLoading {
                 Task {
@@ -407,6 +427,9 @@ struct ChatView: View {
         }
         .onChange(of: chatModel.chatSubStatus) { status in
             updateSubscriptionRecovery(status)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { retryMessageHistoryIfNeeded() }
         }
         .onChange(of: chatModel.secondaryPendingInviteeChatOpened) { opened in
             if im.secondaryIMFilter != nil && !opened {
@@ -749,6 +772,13 @@ struct ChatView: View {
         .lineLimit(1)
         .foregroundColor(theme.colors.onBackground)
         .frame(width: 220)
+    }
+
+    private func retryMessageHistoryIfNeeded() {
+        guard shouldRetryMessageHistory(chat: chat, im: im) else { return }
+        Task {
+            await loadChat(chat: chat, im: im, contentTag: contentFilter?.contentTag, search: searchText)
+        }
     }
 
     // Spec: spec/client/chat-view.md#initChatView
