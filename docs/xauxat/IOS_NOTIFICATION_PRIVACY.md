@@ -1,8 +1,15 @@
 # iOS notification privacy and consent
 
-XauXat starts with notifications off. A new installation does not ask for iOS
-notification permission, register for remote notifications or share an APNs
-device token with the XauXat notification server during onboarding.
+XauXat starts with notifications off. The fourth onboarding step asks the user
+to choose Instant, Periodic or Off, with no option preselected. Choosing Instant
+or Periodic first opens the same privacy notice used in Settings. Dismissing
+the notice does not select or enable that mode.
+
+The choice is applied when the user finishes setup, after profile and PIN
+creation and server-condition acceptance. Only a choice accepted in the privacy
+notice can request iOS permission or register for remote notifications. Choosing
+Off never requests permission. If iOS permission is denied, setup completes with
+notifications Off. Existing completed onboarding is not shown again.
 
 ## Enabling notifications
 

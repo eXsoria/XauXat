@@ -93,6 +93,8 @@ struct XauXatWelcomeView: View {
     @State private var isCompleting = false
     @State private var profileCreated = false
     @State private var errorMessage: String?
+    @State private var notificationMode: NotificationsMode?
+    @State private var proposedNotificationMode: NotificationsMode?
     @FocusState private var focusedField: XauXatOnboardingField?
 
     private var palette: XauXatPalette { XauXatPalette(colorScheme) }
@@ -111,8 +113,10 @@ struct XauXatWelcomeView: View {
                         welcomeStep(geometry)
                     case 1:
                         nameStep(geometry)
-                    default:
+                    case 2:
                         pinStep(geometry)
+                    default:
+                        notificationsStep(geometry)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -139,6 +143,13 @@ struct XauXatWelcomeView: View {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
+        }
+        .sheet(item: $proposedNotificationMode) { candidate in
+            XauXatNotificationPrivacyNotice(
+                mode: candidate,
+                onCancel: { proposedNotificationMode = nil },
+                onEnable: { acceptNotificationMode(candidate) }
+            )
         }
     }
 
@@ -169,14 +180,14 @@ struct XauXatWelcomeView: View {
             }
 
             HStack(spacing: 6) {
-                ForEach(0..<3, id: \.self) { index in
+                ForEach(0..<4, id: \.self) { index in
                     Capsule(style: .continuous)
                         .fill(index == step ? palette.ink : palette.line)
                         .frame(width: index == step ? 18 : 5, height: 5)
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Step \(step + 1) of 3")
+            .accessibilityLabel("Step \(step + 1) of 4")
         }
         .frame(height: 58)
         .padding(.horizontal, 22)
@@ -432,9 +443,9 @@ struct XauXatWelcomeView: View {
             Spacer(minLength: 18)
 
             primaryButton(
-                isCompleting ? "Finishing…" : "Finish",
-                enabled: validPIN && !isCompleting,
-                action: finishOnboarding
+                "Continue",
+                enabled: validPIN,
+                action: advanceToNotifications
             )
 
 
@@ -443,6 +454,82 @@ struct XauXatWelcomeView: View {
         .padding(.bottom, 71)
         .contentShape(Rectangle())
         .onTapGesture { focusedField = .pin }
+    }
+
+    private func notificationsStep(_ geometry: GeometryProxy) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Choose your notifications")
+                        .font(.system(size: 27, weight: .bold))
+                        .foregroundStyle(palette.ink)
+
+                    Text("Decide when XauXat should alert you to new messages.")
+                        .font(.system(size: 15))
+                        .foregroundStyle(palette.muted)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+
+                XauXatSettingsCard(palette: palette) {
+                    ForEach([NotificationsMode.instant, .periodic, .off], id: \.self) { candidate in
+                        Button { selectNotificationMode(candidate) } label: {
+                            XauXatSelectionRow(
+                                palette: palette,
+                                title: candidate.label,
+                                subtitle: ntfModeShortDescription(candidate),
+                                selected: notificationMode == candidate
+                            )
+                        }
+                        .disabled(isCompleting || (candidate != .off && !xauXatNotificationServerConfigured))
+                        .accessibilityAddTraits(notificationMode == candidate ? .isSelected : [])
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Text("Instant and Periodic require your agreement to the privacy notice and permission from iOS. With Off, open XauXat to check for messages. You can change this later in Settings.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !xauXatNotificationServerConfigured {
+                    Text("Push notifications are unavailable in this build. Choose Off to continue.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                primaryButton(
+                    isCompleting ? "Finishing…" : "Finish",
+                    enabled: notificationMode != nil && !isCompleting,
+                    action: finishOnboarding
+                )
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, geometry.size.height < 700 ? 24 : 48)
+            .padding(.bottom, 32)
+        }
+    }
+
+    private func advanceToNotifications() {
+        guard validName, validPIN else { return }
+        focusedField = nil
+        step = 3
+    }
+
+    private func selectNotificationMode(_ mode: NotificationsMode) {
+        guard !isCompleting else { return }
+        if mode == .off {
+            notificationMode = .off
+            proposedNotificationMode = nil
+        } else if xauXatNotificationServerConfigured {
+            proposedNotificationMode = mode
+        }
+    }
+
+    private func acceptNotificationMode(_ mode: NotificationsMode) {
+        guard proposedNotificationMode == mode else { return }
+        notificationMode = mode
+        proposedNotificationMode = nil
     }
 
     private func primaryButton(_ label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
@@ -468,7 +555,7 @@ struct XauXatWelcomeView: View {
     }
 
     private func finishOnboarding() {
-        guard validName, validPIN, !isCompleting else { return }
+        guard validName, validPIN, notificationMode != nil, !isCompleting else { return }
         focusedField = nil
         isCompleting = true
 
@@ -498,7 +585,6 @@ struct XauXatWelcomeView: View {
     }
 
     private func applySimpleXOnboardingDefaults() {
-        applyDefaultNotificationMode()
         let selectedOperatorIds = Set(chatModel.conditions.serverOperators.filter(\.enabled).map(\.operatorId))
         Task {
             do {
@@ -515,10 +601,12 @@ struct XauXatWelcomeView: View {
 
                 await MainActor.run {
                     chatModel.conditions = updatedConditions
-                    onboardingStageDefault.set(.onboardingComplete)
-                    dismissAllSheets(animated: false) {
-                        DispatchQueue.main.async {
-                            chatModel.onboardingStage = .onboardingComplete
+                    applySelectedNotificationMode {
+                        onboardingStageDefault.set(.onboardingComplete)
+                        dismissAllSheets(animated: false) {
+                            DispatchQueue.main.async {
+                                chatModel.onboardingStage = .onboardingComplete
+                            }
                         }
                     }
                 }
@@ -531,10 +619,17 @@ struct XauXatWelcomeView: View {
         }
     }
 
-    private func applyDefaultNotificationMode() {
-        xauXatSetNotificationModeIntent(.off)
-        chatModel.notificationMode = .off
-        reconcileXauXatNotificationRegistration(token: chatModel.deviceToken)
+    private func applySelectedNotificationMode(_ completion: @escaping () -> Void) {
+        guard let notificationMode else { return }
+        xauXatApplyNotificationMode(notificationMode) { enabled in
+            if enabled {
+                completion()
+            } else {
+                // Denying the iOS prompt is an Off choice, not a setup failure.
+                self.notificationMode = .off
+                xauXatApplyNotificationMode(.off) { _ in completion() }
+            }
+        }
     }
 }
 
@@ -2402,8 +2497,8 @@ private struct XauXatNotificationPrivacyNotice: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     Button {
-                        dismiss()
                         onEnable()
+                        dismiss()
                     } label: {
                         Text("I understand, enable \(mode == .instant ? "instant" : "periodic") notifications")
                             .font(.system(size: 16, weight: .semibold))
@@ -2421,8 +2516,8 @@ private struct XauXatNotificationPrivacyNotice: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Not now") {
-                        dismiss()
                         onCancel()
+                        dismiss()
                     }
                     .foregroundStyle(palette.ink)
                 }
