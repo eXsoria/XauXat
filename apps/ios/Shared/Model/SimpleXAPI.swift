@@ -815,7 +815,8 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
     im.messageLoadUserId = userId
     im.messageLoadAlternateStore = alternateStore
     im.messageLoadError = nil
-    im.messageLoadInterrupted = chatId
+    im.messageLoadInterrupted = nil
+    var completed = false
     func ownsRequest() -> Bool {
         !Task.isCancelled && im.messageLoadId == requestId
             && model.currentUser?.userId == userId
@@ -835,6 +836,7 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
         progress?.cancel()
         // An older request must not hide a newer request's progress.
         if im.messageLoadId == requestId {
+            if !completed { im.messageLoadInterrupted = chatId }
             im.isLoading = false
             im.showLoadingProgress = nil
         }
@@ -876,6 +878,7 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
             { 0...0 }, replaceItems: clearItems || differentChat, canApply: isCurrent
         ) {
             guard isCurrent() else { return false }
+            completed = true
             im.messageLoadInterrupted = nil
             return true
         }
@@ -886,6 +889,7 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
         }
     }
     if isCurrent() {
+        completed = true
         im.messageLoadInterrupted = nil
         im.messageLoadError = chatId
     }

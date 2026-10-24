@@ -151,6 +151,8 @@ func apiGetChat(chatId: ChatId, scope: GroupChatScope?, contentTag: MsgContentTa
         let refreshIM = im
         fetch = { id, _, _ in
             expect(!refreshIM.isLoading, "Foreground refresh must not trigger initial scroll positioning")
+            let visible = Chat(chatInfo: ChatInfo(id: id), chatItems: [ChatItem(id: 2)])
+            expect(!shouldRetryMessageHistory(chat: visible, im: refreshIM), "An in-flight foreground refresh is not an interrupted read and cannot trigger a duplicate retry")
             return response(id, [1, 2])
         }
         await loadChat(chatId: "a", im: im, clearItems: false)
