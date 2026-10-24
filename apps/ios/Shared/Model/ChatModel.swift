@@ -91,6 +91,7 @@ class ItemsModel: ObservableObject {
     @Published var isLoading = false
     @Published var showLoadingProgress: ChatId? = nil
     @Published var messageLoadError: ChatId? = nil
+    var messageLoadInterrupted: ChatId? = nil
     var messageLoadId = UUID()
     var messageLoadChatId: ChatId? = nil
     var messageLoadUserId: Int64? = nil
@@ -128,18 +129,21 @@ class ItemsModel: ObservableObject {
     private func loadOpenChatAuthorized(_ chatId: ChatId, willNavigate: @escaping () -> Void = {}) {
         navigationTimeoutTask?.cancel()
         loadChatTask?.cancel()
-        navigationTimeoutTask = Task {
-            do {
-                try await Task.sleep(nanoseconds: 250_000000)
-                await MainActor.run {
+        loadChatTask = Task { @MainActor in
+            _ = await loadChat(chatId: chatId, im: self, onStarted: {
+                let requestId = self.messageLoadId
+                let userId = self.messageLoadUserId
+                let alternateStore = self.messageLoadAlternateStore
+                self.navigationTimeoutTask = Task { @MainActor in
+                    do { try await Task.sleep(nanoseconds: 250_000_000) }
+                    catch { return }
+                    guard await waitForMessageHistoryAccess(userId: userId, alternateStore: alternateStore, requestIsCurrent: {
+                        self.messageLoadId == requestId
+                    }) else { return }
                     ChatModel.shared.chatId = chatId
                     willNavigate()
                 }
-            } catch {}
-        }
-        loadChatTask = Task {
-//            try? await Task.sleep(nanoseconds: 1000_000000)
-            await loadChat(chatId: chatId, im: self)
+            })
         }
     }
 
@@ -153,16 +157,16 @@ class ItemsModel: ObservableObject {
     private func loadOpenChatNoWaitAuthorized(_ chatId: ChatId, _ openAroundItemId: ChatItem.ID? = nil) {
         navigationTimeoutTask?.cancel()
         loadChatTask?.cancel()
-        loadChatTask = Task {
-            //            try? await Task.sleep(nanoseconds: 1000_000000)
-            await loadChat(chatId: chatId, im: self, openAroundItemId: openAroundItemId, clearItems: openAroundItemId == nil)
-            if !Task.isCancelled {
-                await MainActor.run {
-                    if openAroundItemId == nil {
-                        ChatModel.shared.chatId = chatId
-                    }
-                }
-            }
+        loadChatTask = Task { @MainActor in
+            let userId = ChatModel.shared.currentUser?.userId
+            let alternateStore = xauXatStorageScope() == .decoy
+            let loaded = await loadChat(chatId: chatId, im: self, openAroundItemId: openAroundItemId, clearItems: openAroundItemId == nil)
+            guard openAroundItemId == nil, loaded || self.messageLoadError == chatId else { return }
+            let requestId = self.messageLoadId
+            guard await waitForMessageHistoryAccess(userId: userId, alternateStore: alternateStore, requestIsCurrent: {
+                self.messageLoadId == requestId && self.messageLoadChatId == chatId
+            }) else { return }
+            ChatModel.shared.chatId = chatId
         }
     }
 

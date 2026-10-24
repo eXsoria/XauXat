@@ -769,18 +769,44 @@ func apiGetChatContentTypes(chatId: ChatId, scope: GroupChatScope? = nil) async 
 
 @MainActor
 func loadChat(chat: Chat, im: ItemsModel, contentTag: MsgContentTag? = nil, search: String = "", clearItems: Bool = true) async {
-    await loadChat(chatId: chat.chatInfo.id, im: im, contentTag: contentTag, search: search, clearItems: clearItems)
+    _ = await loadChat(chatId: chat.chatInfo.id, im: im, contentTag: contentTag, search: search, clearItems: clearItems)
 }
 
 @MainActor
-func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, search: String = "", openAroundItemId: ChatItem.ID? = nil, clearItems: Bool = true) async {
+func waitForMessageHistoryAccess(userId: Int64?, alternateStore: Bool, requestIsCurrent: @MainActor () -> Bool) async -> Bool {
+    while !Task.isCancelled && requestIsCurrent()
+        && ChatModel.shared.currentUser?.userId == userId
+        && (xauXatStorageScope() == .decoy) == alternateStore
+        && (kcDecoyPassword.get() == nil || ChatModel.shared.contentViewAccessAuthenticated)
+        && UIApplication.shared.applicationState != .background {
+        if UIApplication.shared.applicationState == .active && AppSheetState.shared.scenePhaseActive { return true }
+        // Authentication can finish before the scene becomes active again.
+        // Keep the authorized request pending instead of silently dropping it.
+        do { try await Task.sleep(nanoseconds: 25_000_000) }
+        catch { return false }
+    }
+    return false
+}
+
+@MainActor
+func shouldRetryMessageHistory(chat: Chat, im: ItemsModel) -> Bool {
+    guard !im.isLoading else { return false }
+    let interrupted = im.messageLoadInterrupted == chat.id
+        && im.messageLoadUserId == ChatModel.shared.currentUser?.userId
+        && im.messageLoadAlternateStore == (xauXatStorageScope() == .decoy)
+    return im.messageLoadError == chat.id || interrupted
+        || (im.reversedChatItems.isEmpty && !chat.chatItems.isEmpty)
+}
+
+@MainActor
+@discardableResult
+func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, search: String = "", openAroundItemId: ChatItem.ID? = nil, clearItems: Bool = true, onStarted: @MainActor () -> Void = {}) async -> Bool {
     let model = ChatModel.shared
     let userId = model.currentUser?.userId
     let alternateStore = xauXatStorageScope() == .decoy
     guard !Task.isCancelled, userId != nil,
-          UIApplication.shared.applicationState == .active,
-          AppSheetState.shared.scenePhaseActive,
-          kcDecoyPassword.get() == nil || model.contentViewAccessAuthenticated else { return }
+          UIApplication.shared.applicationState != .background,
+          kcDecoyPassword.get() == nil || model.contentViewAccessAuthenticated else { return false }
     let requestId = UUID()
     let differentChat = im.messageLoadChatId != chatId || im.messageLoadUserId != userId
         || im.messageLoadAlternateStore != alternateStore
@@ -789,35 +815,41 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
     im.messageLoadUserId = userId
     im.messageLoadAlternateStore = alternateStore
     im.messageLoadError = nil
-    // Never display another conversation's messages. A refresh of the same
-    // conversation keeps its existing history until a replacement succeeds.
-    if differentChat {
-        im.reversedChatItems = []
-        im.chatState.clear()
-    }
-    func isCurrent() -> Bool {
+    im.messageLoadInterrupted = chatId
+    func ownsRequest() -> Bool {
         !Task.isCancelled && im.messageLoadId == requestId
             && model.currentUser?.userId == userId
             && (xauXatStorageScope() == .decoy) == alternateStore
-            && UIApplication.shared.applicationState == .active
-            && AppSheetState.shared.scenePhaseActive
             && (kcDecoyPassword.get() == nil || model.contentViewAccessAuthenticated)
     }
-    guard isCurrent() else { return }
+    func isCurrent() -> Bool {
+        ownsRequest()
+            && UIApplication.shared.applicationState == .active
+            && AppSheetState.shared.scenePhaseActive
+    }
     // Background-to-foreground refreshes preserve the current scroll position;
     // only a fresh navigation/replacement should trigger initial positioning.
     if clearItems || differentChat { im.isLoading = true }
-    let progress = Task { @MainActor in
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        if !Task.isCancelled && isCurrent() { im.showLoadingProgress = chatId }
-    }
+    var progress: Task<Void, Never>?
     defer {
-        progress.cancel()
+        progress?.cancel()
         // An older request must not hide a newer request's progress.
         if im.messageLoadId == requestId {
             im.isLoading = false
             im.showLoadingProgress = nil
         }
+    }
+    guard await waitForMessageHistoryAccess(userId: userId, alternateStore: alternateStore, requestIsCurrent: ownsRequest) else { return false }
+    // A cross-chat around-item jump navigates only on success. Keep its source
+    // history intact until then; the loader replaces it atomically on success.
+    if differentChat && clearItems {
+        im.reversedChatItems = []
+        im.chatState.clear()
+    }
+    onStarted()
+    progress = Task { @MainActor in
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        if !Task.isCancelled && isCurrent() { im.showLoadingProgress = chatId }
     }
     let pagination: ChatPagination = if let openAroundItemId {
         .around(chatItemId: openAroundItemId, count: loadItemsPerPage)
@@ -827,7 +859,7 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
         .last(count: loadItemsPerPage)
     }
     for attempt in 0..<3 {
-        guard isCurrent() else { return }
+        guard isCurrent() else { return false }
         // Opening a conversation can race foreground/NSE store activation.
         // Reuse the existing guarded recovery; never reopen a stopped or locked
         // profile or require a network connection for an already open store.
@@ -838,18 +870,26 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
                 logger.error("Chat history session is unavailable")
             }
         }
-        guard isCurrent() else { return }
+        guard isCurrent() else { return false }
         if isChatStoreOpen(), await apiLoadMessages(
             chatId, im, pagination, contentTag, search, openAroundItemId,
             { 0...0 }, replaceItems: clearItems || differentChat, canApply: isCurrent
-        ) { return }
-        guard isCurrent() else { return }
+        ) {
+            guard isCurrent() else { return false }
+            im.messageLoadInterrupted = nil
+            return true
+        }
+        guard isCurrent() else { return false }
         if attempt < 2 {
             do { try await Task.sleep(nanoseconds: attempt == 0 ? 250_000_000 : 750_000_000) }
-            catch { return }
+            catch { return false }
         }
     }
-    if isCurrent() { im.messageLoadError = chatId }
+    if isCurrent() {
+        im.messageLoadInterrupted = nil
+        im.messageLoadError = chatId
+    }
+    return false
 }
 
 func apiGetChatItemInfo(type: ChatType, id: Int64, scope: GroupChatScope?, itemId: Int64) async throws -> ChatItemInfo {

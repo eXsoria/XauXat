@@ -57,10 +57,13 @@ final class ItemsModel {
     var isLoading = false
     var showLoadingProgress: ChatId? = nil
     var messageLoadError: ChatId? = nil
+    var messageLoadInterrupted: ChatId? = nil
     var messageLoadId = UUID()
     var messageLoadChatId: ChatId? = nil
     var messageLoadUserId: Int64? = nil
     var messageLoadAlternateStore = false
+    var navigationTimeoutTask: Task<Void, Never>?
+    var loadChatTask: Task<Void, Never>?
 }
 struct User { var userId: Int64 }
 final class ChatModel {
@@ -80,7 +83,7 @@ struct Secret { func get() -> String? { decoyConfigured ? "configured" : nil } }
 let kcDecoyPassword = Secret()
 var decoyConfigured = false
 final class UIApplication {
-    enum State { case active, background }
+    enum State { case active, inactive, background }
     static var shared = UIApplication()
     var applicationState = State.active
 }
@@ -199,7 +202,7 @@ func apiGetChat(chatId: ChatId, scope: GroupChatScope?, contentTag: MsgContentTa
             return response(id, [9])
         }
         let cancelledIM = im
-        await Task { await loadChat(chatId: "a", im: cancelledIM) }.value
+        _ = await Task { await loadChat(chatId: "a", im: cancelledIM) }.value
         expect(attempts == 1 && im.reversedChatItems.isEmpty && im.messageLoadError == nil, "Cancellation cannot publish data, an error or retry")
 
         for change in 0..<4 {
@@ -228,7 +231,7 @@ func apiGetChat(chatId: ChatId, scope: GroupChatScope?, contentTag: MsgContentTa
         while late == nil { await Task.yield() }
         await loadChat(chatId: "b", im: im)
         late!.resume(returning: response("a", [99]))
-        await first.value
+        _ = await first.value
         expect(im.reversedChatItems.map(\.id) == [7] && im.messageLoadError == nil, "A late response cannot overwrite a newer conversation")
 
         im = reset()
@@ -245,7 +248,7 @@ func apiGetChat(chatId: ChatId, scope: GroupChatScope?, contentTag: MsgContentTa
         let newRequest = Task { await loadChat(chatId: "b", im: pendingIM) }
         while newResponse == nil { await Task.yield() }
         oldResponse!.resume(throwing: TestError.unavailable)
-        await oldRequest.value
+        _ = await oldRequest.value
         expect(im.isLoading && im.messageLoadError == nil, "Old failure cannot clear the newer request's loading state")
         UIApplication.shared.applicationState = .background
         let generation = im.messageLoadId
@@ -253,7 +256,7 @@ func apiGetChat(chatId: ChatId, scope: GroupChatScope?, contentTag: MsgContentTa
         expect(im.messageLoadId == generation, "A background request cannot supersede an in-flight foreground request")
         UIApplication.shared.applicationState = .active
         newResponse!.resume(returning: response("b", [8]))
-        await newRequest.value
+        _ = await newRequest.value
         expect(!im.isLoading && im.reversedChatItems.map(\.id) == [8], "The latest request alone completes loading")
 
         im = reset(); let searchIM = im
@@ -277,6 +280,133 @@ func apiGetChat(chatId: ChatId, scope: GroupChatScope?, contentTag: MsgContentTa
         fetch = { id, _, _ in response(id, [2, 3]) }
         let loaded = await apiLoadMessages("a", im, .last(count: 50))
         expect(loaded && im.reversedChatItems.map(\.id) == [3, 2, 1], "Normal pagination still merges and deduplicates items")
+
+        // P1: the real authorized-open function must not navigate when Face ID
+        // completes before UIKit/SwiftUI have restored the active scene.
+        im = reset()
+        let authIM = im
+        im.reversedChatItems = [ChatItem(id: 10)]
+        UIApplication.shared.applicationState = .inactive
+        AppSheetState.shared.scenePhaseActive = false
+        attempts = 0
+        var navigations = 0
+        fetch = { id, _, _ in attempts += 1; return response(id, [20]) }
+        im.loadOpenChatAuthorized("b") { navigations += 1 }
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        expect(attempts == 0 && navigations == 0 && ChatModel.shared.chatId == "a", "An inactive authentication callback cannot load or navigate")
+        expect(im.reversedChatItems.map(\.id) == [10], "Pending authentication return preserves the source history")
+        UIApplication.shared.applicationState = .active
+        try? await Task.sleep(nanoseconds: 75_000_000)
+        expect(attempts == 0 && navigations == 0, "UIKit active alone cannot bypass an inactive SwiftUI scene")
+        AppSheetState.shared.scenePhaseActive = true
+        await authIM.loadChatTask?.value
+        await authIM.navigationTimeoutTask?.value
+        expect(attempts == 1 && navigations == 1 && ChatModel.shared.chatId == "b", "The authorized open resumes and navigates exactly once when active")
+        expect(im.reversedChatItems.map(\.id) == [20], "The destination never renders the previous conversation's history")
+
+        im = reset()
+        UIApplication.shared.applicationState = .inactive
+        im.loadOpenChatNoWaitAuthorized("b")
+        await Task.yield()
+        UIApplication.shared.applicationState = .background
+        await im.loadChatTask?.value
+        expect(ChatModel.shared.chatId == "a" && im.navigationTimeoutTask == nil, "A backgrounded no-wait open cannot navigate after an aborted read")
+
+        // Superseding/cancelling an inactive authorization must not wake a stale
+        // navigation when the scene eventually becomes active.
+        im = reset()
+        UIApplication.shared.applicationState = .inactive
+        fetch = { id, _, _ in response(id, id == "c" ? [30] : [20]) }
+        im.loadOpenChatAuthorized("b")
+        let superseded = im.loadChatTask
+        await Task.yield()
+        im.loadOpenChatAuthorized("c")
+        UIApplication.shared.applicationState = .active
+        await superseded?.value
+        await im.loadChatTask?.value
+        await im.navigationTimeoutTask?.value
+        expect(ChatModel.shared.chatId == "c" && im.reversedChatItems.map(\.id) == [30], "A superseded inactive open cannot navigate or publish old history")
+
+        for change in 0..<2 {
+            im = reset()
+            UIApplication.shared.applicationState = .inactive
+            im.loadOpenChatAuthorized("b")
+            while im.messageLoadChatId == nil { await Task.yield() }
+            if change == 0 { ChatModel.shared.currentUser = User(userId: 2) }
+            else { scope = .decoy }
+            UIApplication.shared.applicationState = .active
+            await im.loadChatTask?.value
+            expect(ChatModel.shared.chatId == "a" && im.navigationTimeoutTask == nil, "Profile/store changes cancel an inactive authorized navigation")
+        }
+
+        // P2: a failed/deleted forwarded-message target must leave the source
+        // conversation and all of its pagination state usable.
+        for deleted in [false, true] {
+            im = reset()
+            fetch = { id, _, _ in response(id, [1, 2]) }
+            await loadChat(chatId: "a", im: im)
+            im.chatState.splits = [1]
+            im.chatState.totalAfter = 9
+            attempts = 0
+            fetch = { id, _, _ in
+                attempts += 1
+                if deleted { return response(id, []) }
+                throw TestError.unavailable
+            }
+            im.loadOpenChatNoWaitAuthorized("b", 99)
+            await im.loadChatTask?.value
+            expect(attempts == 3 && ChatModel.shared.chatId == "a", "A failed cross-chat jump cannot navigate away from its source")
+            expect(im.reversedChatItems.map(\.id) == [2, 1], "A failed/deleted cross-chat target preserves the source messages")
+            expect(im.chatState.splits == [1] && im.chatState.totalAfter == 9, "A failed cross-chat jump preserves the source pagination state")
+            let source = Chat(chatInfo: ChatInfo(id: "a"), chatItems: [ChatItem(id: 2)])
+            expect(!shouldRetryMessageHistory(chat: source, im: im), "A target error cannot replace or retry the still-visible source history")
+            fetch = { id, _, _ in response(id, [98, 99]) }
+            im.loadOpenChatNoWaitAuthorized("b", 99)
+            await im.loadChatTask?.value
+            expect(ChatModel.shared.chatId == "b" && ChatModel.shared.openAroundItemId == 99, "A successful retry navigates to the forwarded target")
+            expect(im.reversedChatItems.map(\.id) == [99, 98] && im.chatState.totalAfter == 0, "A successful cross-chat jump replaces source messages and pagination")
+        }
+
+        // Ordinary navigation still opens the destination's Retry UI after a
+        // persistent failure, with none of the source's messages underneath it.
+        im = reset()
+        im.reversedChatItems = [ChatItem(id: 10)]
+        fetch = { _, _, _ in throw TestError.unavailable }
+        im.loadOpenChatAuthorized("b")
+        await im.loadChatTask?.value
+        await im.navigationTimeoutTask?.value
+        expect(ChatModel.shared.chatId == "b" && im.messageLoadError == "b" && im.reversedChatItems.isEmpty, "Failed ordinary navigation shows Retry for the correct empty destination")
+
+        // P2: secondary histories intentionally have no preview items. The
+        // production foreground decision must retry an interrupted read anyway.
+        im = reset()
+        im.secondaryIMFilter = 1
+        let secondaryIM = im
+        let secondary = Chat(chatInfo: ChatInfo(id: "secondary"), chatItems: [])
+        var secondaryRead: CheckedContinuation<(Chat, NavigationInfo), Error>?
+        fetch = { _, _, _ in try await withCheckedThrowingContinuation { secondaryRead = $0 } }
+        let interrupted = Task { await loadChat(chatId: secondary.id, im: secondaryIM) }
+        while secondaryRead == nil { await Task.yield() }
+        expect(!shouldRetryMessageHistory(chat: secondary, im: im), "An in-flight secondary read cannot start a duplicate foreground retry")
+        UIApplication.shared.applicationState = .background
+        secondaryRead!.resume(returning: response(secondary.id, [40]))
+        _ = await interrupted.value
+        expect(im.reversedChatItems.isEmpty && im.messageLoadError == nil && im.messageLoadInterrupted == secondary.id, "A backgrounded secondary read retains explicit interrupted state")
+        UIApplication.shared.applicationState = .active
+        expect(shouldRetryMessageHistory(chat: secondary, im: im), "Foreground retries interrupted secondary histories even with an empty preview")
+        ChatModel.shared.currentUser = User(userId: 2)
+        expect(!shouldRetryMessageHistory(chat: secondary, im: im), "Interrupted history belongs to its original profile")
+        ChatModel.shared.currentUser = User(userId: 1)
+        scope = .decoy
+        expect(!shouldRetryMessageHistory(chat: secondary, im: im), "Interrupted history belongs to its original storage scope")
+        scope = .primary
+        fetch = { id, _, _ in response(id, [40]) }
+        if shouldRetryMessageHistory(chat: secondary, im: im) { await loadChat(chat: secondary, im: im) }
+        expect(im.reversedChatItems.map(\.id) == [40] && im.messageLoadInterrupted == nil, "Foreground retry restores the secondary messages and clears interrupted state")
+        expect(!shouldRetryMessageHistory(chat: secondary, im: im), "A completed secondary read does not retry on every foreground event")
+        fetch = { id, _, _ in response(id, []) }
+        await loadChat(chatId: secondary.id, im: im)
+        expect(!shouldRetryMessageHistory(chat: secondary, im: im), "A successfully loaded empty secondary history must stay empty without repeated retries")
         print("Message history: \(checks) checks passed")
     }
 }

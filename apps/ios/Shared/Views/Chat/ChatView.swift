@@ -359,6 +359,7 @@ struct ChatView: View {
             selectedChatItems = nil
             revealedItems = Set()
             initChatView()
+            retryMessageHistoryIfNeeded()
             updateSubscriptionRecovery(chatModel.chatSubStatus)
             if im.isLoading {
                 Task {
@@ -428,12 +429,7 @@ struct ChatView: View {
             updateSubscriptionRecovery(status)
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .active, !im.isLoading,
-               im.messageLoadError == chat.id || (im.reversedChatItems.isEmpty && !chat.chatItems.isEmpty) {
-                Task {
-                    await loadChat(chat: chat, im: im, contentTag: contentFilter?.contentTag, search: searchText)
-                }
-            }
+            if phase == .active { retryMessageHistoryIfNeeded() }
         }
         .onChange(of: chatModel.secondaryPendingInviteeChatOpened) { opened in
             if im.secondaryIMFilter != nil && !opened {
@@ -776,6 +772,13 @@ struct ChatView: View {
         .lineLimit(1)
         .foregroundColor(theme.colors.onBackground)
         .frame(width: 220)
+    }
+
+    private func retryMessageHistoryIfNeeded() {
+        guard shouldRetryMessageHistory(chat: chat, im: im) else { return }
+        Task {
+            await loadChat(chat: chat, im: im, contentTag: contentFilter?.contentTag, search: searchText)
+        }
     }
 
     // Spec: spec/client/chat-view.md#initChatView
