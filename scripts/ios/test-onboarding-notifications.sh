@@ -16,7 +16,16 @@ api = (root / 'apps/ios/Shared/Model/SimpleXAPI.swift').read_text()
 
 def declaration(source, marker):
     start = source.index(marker)
-    brace = source.index('{', start)
+    signature_end = start
+    if 'func ' in marker:
+        # The shared API has a closure as a default argument. Its braces are
+        # part of the signature, not the function body.
+        signature_end = source.index('(', start) + 1
+        parentheses = 1
+        while parentheses:
+            parentheses += (source[signature_end] == '(') - (source[signature_end] == ')')
+            signature_end += 1
+    brace = source.index('{', signature_end)
     depth, end = 1, brace + 1
     while depth:
         depth += (source[end] == '{') - (source[end] == '}')
@@ -113,6 +122,7 @@ actions = '\n'.join(declaration(welcome, marker).replace('private func ', 'func 
     'private func applySelectedNotificationMode(',
 ))
 shared = '@MainActor\n' + declaration(api, 'func xauXatApplyNotificationMode(')
+assert 'NtfManager.shared.requestAuthorization(' in shared
 tests = r'''
 }
 @main struct Runner {
