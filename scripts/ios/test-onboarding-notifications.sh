@@ -47,6 +47,8 @@ assert 'applyDefaultNotificationMode' not in welcome
 notice = declaration(home, 'private struct XauXatNotificationPrivacyNotice: View')
 assert notice.index('onEnable()') < notice.index('dismiss()'), 'Accept before sheet dismissal can clear its pending mode'
 finish = declaration(welcome, 'private func finishOnboarding()')
+assert finish.index('xauXatSetNotificationModeIntent(.off)') < finish.index('try apiCreateActiveUser(')
+assert finish.index('chatModel.notificationMode = .off') < finish.index('try startChat(onboarding: true)')
 assert finish.index('kcAppPassword.set(pin)') < finish.index('applySimpleXOnboardingDefaults()')
 defaults = declaration(welcome, 'private func applySimpleXOnboardingDefaults()')
 assert defaults.index('try await acceptConditions(') < defaults.index('applySelectedNotificationMode {')

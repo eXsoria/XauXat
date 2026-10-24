@@ -561,6 +561,10 @@ struct XauXatWelcomeView: View {
 
         do {
             if !profileCreated {
+                // Profile startup reconciles tokens too. Keep an old saved
+                // intent from enabling push before this setup applies its choice.
+                xauXatSetNotificationModeIntent(.off)
+                chatModel.notificationMode = .off
                 AppChatState.shared.set(.active)
                 chatModel.currentUser = try apiCreateActiveUser(Profile(displayName: compactName, fullName: ""))
                 profileCreated = true
