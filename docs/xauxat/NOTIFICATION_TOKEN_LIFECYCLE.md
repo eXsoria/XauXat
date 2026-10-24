@@ -10,9 +10,12 @@ XauXat stores the notification mode selected by the user independently from the
 token currently stored by the SimpleX core. This prevents a late APNs callback
 from losing the onboarding default or a user selection.
 
-- New XauXat profiles persist `OFF` during onboarding. They do not request an
-  APNs device token until the user enables notifications and accepts the
-  privacy notice described in `IOS_NOTIFICATION_PRIVACY.md`.
+- New XauXat profiles remain `OFF` until they finish onboarding. Its final step
+  requires a choice of Instant, Periodic or Off. Accepting the privacy notice
+  selects Instant or Periodic locally; finishing setup then requests iOS
+  permission and persists the choice through the existing mode API. Cancelling
+  the notice leaves the previous selection unchanged. Denied iOS permission
+  completes setup with `OFF`, without registering an APNs token.
 - Existing profiles migrate their current SimpleX notification mode once.
 - Selecting `OFF` is authoritative. It remains off across relaunches and a late
   device-token callback cannot turn notifications back on.
