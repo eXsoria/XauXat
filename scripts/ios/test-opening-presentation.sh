@@ -343,6 +343,11 @@ final class RefreshHarness {
         socksReady = false
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         expect(initializations == 1, "readiness lost during the delay cannot initialize the core")
+        socksReady = true
+        initializeAfterTor()
+        scenePhase = .background
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        expect(initializations == 1, "backgrounding during refresh cannot open a store")
     }
 }
 @main struct RefreshChecks {

@@ -105,6 +105,7 @@ struct SimpleXApp: App {
                         CallController.shared.shouldSuspendChat = false
                         startEmbeddedTor {
                             guard scenePhase == .active else { return }
+                            initializeAfterTor()
                             resumeChatAfterTor()
                         }
                     default:
@@ -116,8 +117,8 @@ struct SimpleXApp: App {
 
     private func initializeAfterTor() {
         guard chatModel.migrationState == nil, !xauXatRequiresUnlockBeforeInitialization() else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            guard isXauXatTorReady(), !chatModel.chatInitialized, !chatModel.ctrlInitInProgress,
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [self] in
+            guard scenePhase == .active, isXauXatTorReady(), !chatModel.chatInitialized, !chatModel.ctrlInitInProgress,
                   chatModel.migrationState == nil, !xauXatRequiresUnlockBeforeInitialization() else { return }
             initChatAndMigrate()
         }
