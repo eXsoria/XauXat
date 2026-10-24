@@ -15,6 +15,7 @@ class NetworkObserver {
     private let queue = DispatchQueue(label: "pt.exsoria.xauxat.NetworkObserver")
     // All monitor state is owned by queue. Old monitor callbacks are ignored.
     private var prevInfo: UserNetworkInfo?
+    private var prevPath: NWPath?
     private var monitor: NWPathMonitor?
     private var monitorGeneration = UUID()
 
@@ -24,6 +25,7 @@ class NetworkObserver {
             let generation = UUID()
             monitorGeneration = generation
             prevInfo = nil
+            prevPath = nil
             let mon = NWPathMonitor()
             mon.pathUpdateHandler = { [weak self] path in
                 guard let self, self.monitorGeneration == generation else { return }
@@ -52,9 +54,12 @@ class NetworkObserver {
             online: path.status == .satisfied
         )
         let infoChanged = prevInfo != info
+        let pathChanged = prevPath != path
         prevInfo = info
-        // A new path may still be Wi-Fi and online. Process every callback for
-        // recovery; send core network-info updates only when those values change.
+        prevPath = path
+        // Compare the complete path, not only Wi-Fi/cellular availability: a
+        // real change on the same interface still invalidates old connections.
+        // Repeated equal snapshots must not cancel a working recovery attempt.
         DispatchQueue.main.async {
             ChatModel.shared.networkInfo = info
             let network: XauXatConnectionRecoveryManager.Network
@@ -64,7 +69,11 @@ class NetworkObserver {
             case .ethernet: network = .ethernet
             default: network = .other
             }
-            XauXatConnectionRecoveryManager.shared.networkChanged(online: info.online, network: network)
+            if pathChanged {
+                XauXatConnectionRecoveryManager.shared.networkChanged(online: info.online, network: network)
+            } else {
+                XauXatConnectionRecoveryManager.shared.networkUnchanged()
+            }
         }
         if infoChanged, hasChatCtrl(), ChatModel.shared.chatInitialized {
             do { try apiSetNetworkInfo(info) }

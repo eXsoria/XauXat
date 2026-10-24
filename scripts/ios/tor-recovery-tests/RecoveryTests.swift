@@ -19,6 +19,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
     var sessionState: Recovery.SessionState = .running
     var resumeCount = 0
     var resume: (() async throws -> Void)?
+    var resumeSucceeds = true
     var ensure: (() async throws -> Void)?
     var applyFailure = false
     var configurationReconnected = false
@@ -59,7 +60,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
             self.resumeCount += 1
             try await self.resume?()
             guard isCurrent() else { throw Recovery.RecoveryError.superseded }
-            self.sessionState = .running
+            if self.resumeSucceeds { self.sessionState = .running }
         },
         now: { self.clock },
         retryJitter: { 1 },
@@ -95,6 +96,11 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await changedContextCannotResumeAfterTor()
         try await failedRouteCannotResumeChat()
         try await failedResumeCannotReconnect()
+        try await sessionFailuresRetryWithoutPendingMessages()
+        try await sessionRetriesBackOffAndRespectGates()
+        try await routeRecoveryCanContinueAsSessionRecovery()
+        try await staleResumeFailureCannotScheduleAnotherProfile()
+        try await configurationCannotClearAnUnresumedSessionRetry()
         try await unlockDuringVerificationPreventsCoreCommands()
         try await identicalRequestsShareWholeOperation()
         try await cancelledWaiterCannotAbortSharedOperation()
@@ -242,6 +248,112 @@ typealias Recovery = XauXatConnectionRecoveryManager
         f.resume = { throw RecoveryFixture.Failure.synthetic }
         await failed(Task { try await f.manager.reconnect() }, "Activation failure must propagate")
         require(f.commands.isEmpty && f.manager.diagnosticText.contains("resume_failed"), "Failed activation must not send relay commands")
+        f.manager.pause()
+    }
+
+    static func sessionFailuresRetryWithoutPendingMessages() async throws {
+        for failure in 0..<3 {
+            let f = RecoveryFixture()
+            f.sessionState = .suspended
+            var delays: [TimeInterval] = []
+            f.sleep = { delay in
+                delays.append(delay)
+                try await Task.sleep(nanoseconds: 2_000_000)
+            }
+            switch failure {
+            case 0:
+                f.applyFailure = true
+                f.ensure = { if f.forces.count > 1 { f.applyFailure = false } }
+            case 1:
+                f.resume = { if f.resumeCount == 1 { throw RecoveryFixture.Failure.synthetic } }
+            default:
+                f.resumeSucceeds = false
+                f.resume = { if f.resumeCount > 1 { f.resumeSucceeds = true } }
+            }
+            await failed(Task { try await f.manager.reconnect(.all, reason: .foreground) }, "Configuration/activation failure must propagate")
+            require(f.commands.isEmpty, "An unresumed session cannot submit relay commands")
+            try await until { f.commands == [.all] }
+            require(delays == [2], "An empty outbox must not prevent a prompt session retry")
+            require(f.forces == [false, false], "A local session failure must not force a new Tor route check")
+            require(f.sessionState == .running && f.manager.diagnosticText.contains("session_retry=false"), "Successful session repair must clear its retry demand")
+            f.manager.pause()
+        }
+    }
+
+    static func sessionRetriesBackOffAndRespectGates() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        var delays: [TimeInterval] = []
+        f.sleep = { delay in
+            delays.append(delay)
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        f.resume = { if f.resumeCount < 4 { throw RecoveryFixture.Failure.synthetic } }
+        f.manager.sessionUnavailable()
+        try await until { f.commands == [.all] }
+        try await Task.sleep(nanoseconds: 15_000_000)
+        require(delays == [2, 5, 10, 20], "Persistent activation failure must retain bounded backoff rather than restart at two seconds")
+        f.manager.pause()
+        for change in 0..<7 {
+            let g = RecoveryFixture()
+            var sleeping: CheckedContinuation<Void, Error>?
+            g.sleep = { _ in try await withCheckedThrowingContinuation { sleeping = $0 } }
+            g.manager.sessionUnavailable()
+            try await until { sleeping != nil }
+            switch change {
+            case 0: g.context.active = false; g.manager.pause()
+            case 1: g.context.online = false; g.manager.networkChanged(online: false)
+            case 2: g.context.userId = 2
+            case 3: g.context.alternateStore = true
+            case 4: g.sessionState = .stopped
+            case 5: g.sessionState = .unlockRequired
+            default: g.sessionState = .uninitialized
+            }
+            sleeping!.resume()
+            try await Task.sleep(nanoseconds: 15_000_000)
+            require(g.forces.isEmpty && g.commands.isEmpty, "Session retries cannot cross lifecycle/profile/network/store gates")
+            g.manager.pause()
+        }
+    }
+
+    static func staleResumeFailureCannotScheduleAnotherProfile() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        f.resume = { f.context.userId = 2; throw RecoveryFixture.Failure.synthetic }
+        await failed(Task { try await f.manager.reconnect() }, "A stale activation failure must propagate")
+        require(!f.manager.diagnosticText.contains("sessionRetry scheduled"), "The previous profile cannot schedule a retry for its replacement")
+        f.manager.pause()
+    }
+
+    static func routeRecoveryCanContinueAsSessionRecovery() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        var delays: [TimeInterval] = []
+        f.sleep = { delay in
+            delays.append(delay)
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        f.ensure = { if f.forces.count == 1 { throw RecoveryFixture.Failure.synthetic } }
+        f.resume = { if f.resumeCount == 1 { throw RecoveryFixture.Failure.synthetic } }
+        await failed(Task { try await f.manager.reconnect() }, "An unavailable route must propagate before activation")
+        try await until { f.commands == [.all] }
+        require(f.forces == [true, true, false], "Once routing succeeds, local activation failure must continue without forcing another Tor probe")
+        require(delays == [2, 5], "Changing the failing stage must not reset bounded retry backoff")
+        require(f.manager.diagnosticText.contains("route_retry=false") && f.manager.diagnosticText.contains("session_retry=false"), "Full recovery must satisfy both route and session retry demands")
+        f.manager.pause()
+    }
+
+    static func configurationCannotClearAnUnresumedSessionRetry() async throws {
+        let f = RecoveryFixture()
+        f.sessionState = .suspended
+        var sleeping: CheckedContinuation<Void, Error>?
+        f.sleep = { _ in try await withCheckedThrowingContinuation { sleeping = $0 } }
+        f.manager.sessionUnavailable()
+        try await until { sleeping != nil }
+        f.manager.configurationApplied()
+        require(f.manager.diagnosticText.contains("session_retry=true"), "Applying config alone cannot declare the store/session resumed")
+        f.manager.pause()
+        sleeping!.resume()
     }
 
     static func unlockDuringVerificationPreventsCoreCommands() async throws {

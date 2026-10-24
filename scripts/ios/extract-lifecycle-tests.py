@@ -25,6 +25,12 @@ app = (root / "apps/ios/Shared/SimpleXApp.swift").read_text(encoding="utf-8")
 appear = app.split(".onAppear()", 1)[1].split("// Spec: spec/architecture.md#scenePhaseHandling", 1)[0]
 assert appear.index("NetworkObserver.shared.startMonitor()") < appear.index("startEmbeddedTor("), "Network monitoring must precede cold Tor bootstrap"
 assert "startRetrying(whileAvailable:" in app, "Cold startup must retain its completion across transient failures"
+resume = function("apps/ios/Shared/SimpleXApp.swift", "resumeChatAfterTor")
+configuration_failure = resume.split('logger.error("XauXat could not apply', 1)[1].split("let userId", 1)[0]
+assert "sessionUnavailable()" in configuration_failure, "Foreground configuration failure needs an incoming-only retry"
+assert "guard xauXatRecoverySessionState() == .running else" in resume, "Foreground activation must confirm the store-backed session"
+activation_failure = resume.split("guard xauXatRecoverySessionState() == .running else", 1)[1].split("guard isXauXatTorReady()", 1)[0]
+assert "sessionUnavailable()" in activation_failure, "Foreground activation failure cannot rely on an outbox to retry"
 assert "NetworkObserver.shared.updateCoreNetworkInfo()" in api, "New core must receive cached availability without restarting the monitor"
 observer = (root / "apps/ios/Shared/Model/NetworkObserver.swift").read_text(encoding="utf-8")
 assert "guard monitor == nil" in observer and "restartMonitor" not in api, "Opening the core must not synthesize another path change"
