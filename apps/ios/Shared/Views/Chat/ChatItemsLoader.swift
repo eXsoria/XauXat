@@ -11,6 +11,8 @@ import SwiftUI
 
 let TRIM_KEEP_COUNT = 200
 
+@MainActor
+@discardableResult
 func apiLoadMessages(
     _ chatId: ChatId,
     _ im: ItemsModel,
@@ -18,15 +20,26 @@ func apiLoadMessages(
     _ contentTag: MsgContentTag? = nil,
     _ search: String = "",
     _ openAroundItemId: ChatItem.ID? = nil,
-    _ visibleItemIndexesNonReversed: @MainActor () -> ClosedRange<Int> = { 0 ... 0 }
-) async {
+    _ visibleItemIndexesNonReversed: @MainActor () -> ClosedRange<Int> = { 0 ... 0 },
+    replaceItems: Bool = false,
+    canApply: @MainActor () -> Bool = { true }
+) async -> Bool {
+    let requestId = im.messageLoadId
+    let userId = ChatModel.shared.currentUser?.userId
+    let alternateStore = xauXatStorageScope() == .decoy
+    func isCurrent() -> Bool {
+        !Task.isCancelled && canApply() && im.messageLoadId == requestId
+            && ChatModel.shared.currentUser?.userId == userId
+            && (xauXatStorageScope() == .decoy) == alternateStore
+    }
+    guard isCurrent() else { return false }
     let chat: Chat
     let navInfo: NavigationInfo
     do {
         (chat, navInfo) = try await apiGetChat(chatId: chatId, scope: im.groupScopeInfo?.toChatScope(), contentTag: contentTag ?? im.contentTag, pagination: pagination, search: search)
     } catch let error {
         logger.error("apiLoadMessages error: \(responseError(error))")
-        return
+        return false
     }
 
     let chatModel = ChatModel.shared
@@ -35,13 +48,16 @@ func apiLoadMessages(
     let paginationIsInitial = switch pagination { case .initial: true; default: false }
     let paginationIsLast = switch pagination { case .last: true; default: false }
     // When openAroundItemId is provided, chatId can be different too
-    if ((chatModel.chatId != chat.id || chat.chatItems.isEmpty) && !paginationIsInitial && !paginationIsLast && openAroundItemId == nil) || Task.isCancelled {
-        return
+    if chat.id != chatId || !isCurrent()
+        || ((chatModel.chatId != chat.id || chat.chatItems.isEmpty) && !paginationIsInitial && !paginationIsLast && openAroundItemId == nil) {
+        return false
     }
+    // An item opened from search may have been deleted in the meantime.
+    if case .around = pagination, chat.chatItems.isEmpty { return false }
 
     let unreadAfterItemId = im.chatState.unreadAfterItemId
 
-    let oldItems = Array(im.reversedChatItems.reversed())
+    let oldItems = replaceItems ? [] : Array(im.reversedChatItems.reversed())
     var newItems: [ChatItem] = []
     switch pagination {
     case .initial:
@@ -49,7 +65,8 @@ func apiLoadMessages(
         if im.secondaryIMFilter == nil && chatModel.getChat(chat.id) == nil {
             chatModel.addChat(chat)
         }
-        await MainActor.run {
+        if isCurrent() {
+            if replaceItems { im.chatState.clear() }
             im.reversedChatItems = chat.chatItems.reversed()
             if im.secondaryIMFilter == nil {
                 chatModel.updateChatInfo(chat.chatInfo)
@@ -68,17 +85,17 @@ func apiLoadMessages(
     case let .before(paginationChatItemId, _):
         newItems.append(contentsOf: oldItems)
         let indexInCurrentItems = oldItems.firstIndex(where: { $0.id == paginationChatItemId })
-        guard let indexInCurrentItems else { return }
+        guard let indexInCurrentItems else { return false }
         let (newIds, _) = mapItemsToIds(chat.chatItems)
         let wasSize = newItems.count
-        let visibleItemIndexes = await MainActor.run { visibleItemIndexesNonReversed() }
+        let visibleItemIndexes = visibleItemIndexesNonReversed()
         let modifiedSplits = removeDuplicatesAndModifySplitsOnBeforePagination(
             unreadAfterItemId, &newItems, newIds, im.chatState.splits, visibleItemIndexes
         )
         let insertAt = max((indexInCurrentItems - (wasSize - newItems.count) + modifiedSplits.trimmedIds.count), 0)
         newItems.insert(contentsOf: chat.chatItems, at: insertAt)
         let newReversed: [ChatItem] = newItems.reversed()
-        await MainActor.run {
+        if isCurrent() {
             im.reversedChatItems = newReversed
             im.chatState.splits = modifiedSplits.newSplits
             im.chatState.moveUnreadAfterItem(modifiedSplits.oldUnreadSplitIndex, modifiedSplits.newUnreadSplitIndex, oldItems)
@@ -86,7 +103,7 @@ func apiLoadMessages(
     case let .after(paginationChatItemId, _):
         newItems.append(contentsOf: oldItems)
         let indexInCurrentItems = oldItems.firstIndex(where: { $0.id == paginationChatItemId })
-        guard let indexInCurrentItems else { return }
+        guard let indexInCurrentItems else { return false }
 
         let mappedItems = mapItemsToIds(chat.chatItems)
         let newIds = mappedItems.0
@@ -98,7 +115,7 @@ func apiLoadMessages(
         newItems.insert(contentsOf: chat.chatItems, at: indexToAdd)
         let new: [ChatItem] = newItems
         let newReversed: [ChatItem] = newItems.reversed()
-        await MainActor.run {
+        if isCurrent() {
             im.reversedChatItems = newReversed
             im.chatState.splits = newSplits
             im.chatState.moveUnreadAfterItem(im.chatState.splits.first ?? new.last!.id, new)
@@ -121,7 +138,8 @@ func apiLoadMessages(
         newSplits.insert(chat.chatItems.last!.id, at: splitIndex)
         let newReversed: [ChatItem] = newItems.reversed()
         let orderedSplits = newSplits
-        await MainActor.run {
+        if isCurrent() {
+            if replaceItems { im.chatState.clear() }
             im.reversedChatItems = newReversed
             im.chatState.splits = orderedSplits
             im.chatState.unreadAfterItemId = chat.chatItems.last!.id
@@ -143,10 +161,11 @@ func apiLoadMessages(
         }
     case .last:
         newItems.append(contentsOf: oldItems)
-        let newSplits = await removeDuplicatesAndUnusedSplits(&newItems, chat, im.chatState.splits)
+        let newSplits = await removeDuplicatesAndUnusedSplits(&newItems, chat, replaceItems ? [] : im.chatState.splits)
         newItems.append(contentsOf: chat.chatItems)
         let items = newItems
-        await MainActor.run {
+        if isCurrent() {
+            if replaceItems { im.chatState.clear() }
             im.reversedChatItems = items.reversed()
             im.chatState.splits = newSplits
             if im.secondaryIMFilter == nil {
@@ -155,6 +174,7 @@ func apiLoadMessages(
             im.chatState.unreadAfterNewestLoaded = 0
         }
     }
+    return isCurrent()
 }
 
 
