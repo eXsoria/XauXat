@@ -777,6 +777,10 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
     let model = ChatModel.shared
     let userId = model.currentUser?.userId
     let alternateStore = xauXatStorageScope() == .decoy
+    guard !Task.isCancelled, userId != nil,
+          UIApplication.shared.applicationState == .active,
+          AppSheetState.shared.scenePhaseActive,
+          kcDecoyPassword.get() == nil || model.contentViewAccessAuthenticated else { return }
     let requestId = UUID()
     let differentChat = im.messageLoadChatId != chatId || im.messageLoadUserId != userId
         || im.messageLoadAlternateStore != alternateStore
@@ -825,7 +829,7 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
         // Opening a conversation can race foreground/NSE store activation.
         // Reuse the existing guarded recovery; never reopen a stopped or locked
         // profile or require a network connection for an already open store.
-        if !isChatStoreOpen() {
+        if attempt == 0 && !isChatStoreOpen() {
             do {
                 try await XauXatConnectionRecoveryManager.shared.reconnect(.all, reason: .foreground)
             } catch {

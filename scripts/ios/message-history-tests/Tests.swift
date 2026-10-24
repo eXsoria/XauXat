@@ -225,6 +225,31 @@ func apiGetChat(chatId: ChatId, scope: GroupChatScope?, contentTag: MsgContentTa
         await first.value
         expect(im.reversedChatItems.map(\.id) == [7] && im.messageLoadError == nil, "A late response cannot overwrite a newer conversation")
 
+        im = reset()
+        let pendingIM = im
+        var oldResponse: CheckedContinuation<(Chat, NavigationInfo), Error>?
+        var newResponse: CheckedContinuation<(Chat, NavigationInfo), Error>?
+        fetch = { id, _, _ in
+            try await withCheckedThrowingContinuation {
+                if id == "a" { oldResponse = $0 } else { newResponse = $0 }
+            }
+        }
+        let oldRequest = Task { await loadChat(chatId: "a", im: pendingIM) }
+        while oldResponse == nil { await Task.yield() }
+        let newRequest = Task { await loadChat(chatId: "b", im: pendingIM) }
+        while newResponse == nil { await Task.yield() }
+        oldResponse!.resume(throwing: TestError.unavailable)
+        await oldRequest.value
+        expect(im.isLoading && im.messageLoadError == nil, "Old failure cannot clear the newer request's loading state")
+        UIApplication.shared.applicationState = .background
+        let generation = im.messageLoadId
+        await loadChat(chatId: "c", im: im)
+        expect(im.messageLoadId == generation, "A background request cannot supersede an in-flight foreground request")
+        UIApplication.shared.applicationState = .active
+        newResponse!.resume(returning: response("b", [8]))
+        await newRequest.value
+        expect(!im.isLoading && im.reversedChatItems.map(\.id) == [8], "The latest request alone completes loading")
+
         im = reset(); let searchIM = im
         fetch = { id, _, _ in response(id, [1, 2]) }
         await loadChat(chatId: "a", im: im)
