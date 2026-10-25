@@ -17,6 +17,8 @@ let bgSuspendTimeout: Int = 5 // seconds
 
 let terminationTimeout: Int = 3 // seconds
 
+let DEFAULT_XAUXAT_EMPTY_SETUP = "xauxatEmptySetup"
+
 let activationDelay: TimeInterval = 1.5
 
 let nseSuspendTimeout: TimeInterval = 5

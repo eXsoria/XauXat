@@ -579,6 +579,7 @@ struct XauXatWelcomeView: View {
                     xauXatSetNotificationModeIntent(.off)
                     chatModel.notificationMode = .off
                     AppChatState.shared.set(.active)
+                    UserDefaults.standard.set(false, forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
                     chatModel.currentUser = try apiCreateActiveUser(Profile(displayName: compactName, fullName: ""))
                     profileCreated = true
                     UserDefaults.standard.set(false, forKey: DEFAULT_PRIVACY_SHOW_FILE_ENCRYPTION)

@@ -118,14 +118,15 @@ struct SimpleXApp: App {
     }
 
     private func initializeNewInstallation() {
-        // New or unfinished setup only needs local data to show its screen,
-        // including after relaunching with an empty database already created.
-        // Completed profiles and alternate-PIN selection keep their startup
-        // boundary; finishing setup still verifies Tor separately.
+        // Only stores known to have no profile can open before Tor, including
+        // after relaunching an empty setup database. Clear this marker before
+        // profile creation; existing profiles keep their startup boundary.
         guard scenePhase == .active, AppChatState.shared.value != .stopped,
-              (!hasDatabase() || onboardingStageDefault.get() != .onboardingComplete), !chatModel.chatInitialized,
+              (!hasDatabase() || (UserDefaults.standard.bool(forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
+                  && onboardingStageDefault.get() == .step1_SimpleXInfo)), !chatModel.chatInitialized,
               !chatModel.ctrlInitInProgress, chatModel.migrationState == nil,
               !xauXatRequiresUnlockBeforeInitialization() else { return }
+        UserDefaults.standard.set(true, forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
         initChatAndMigrate(start: false)
     }
 

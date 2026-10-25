@@ -43,6 +43,7 @@ let chatLastStartGroupDefault = Setting(Date.distantPast)
 let DEFAULT_PRIVACY_SHOW_FILE_ENCRYPTION = "synthetic-file-encryption"
 let DEFAULT_PERFORM_LA = "synthetic-auth"
 let DEFAULT_LA_NOTICE_SHOWN = "synthetic-notice"
+let DEFAULT_XAUXAT_EMPTY_SETUP = "synthetic-empty-setup"
 struct Log { func debug(_ text: String) {} }
 let logger = Log()
 final class ChatModel {
@@ -107,7 +108,11 @@ func apiStartChat() throws -> Bool {
 func withAnimation(_ body: () -> Void) { body() }
 func reconcileXauXatNotificationRegistration(token: String?) {}
 func xauXatSetNotificationModeIntent(_ mode: NotificationsMode) {}
-func apiCreateActiveUser(_ profile: Profile) throws -> Int { profileCreates += 1; return 1 }
+func apiCreateActiveUser(_ profile: Profile) throws -> Int {
+    precondition(!UserDefaults.standard.bool(forKey: DEFAULT_XAUXAT_EMPTY_SETUP), "Clear empty-store eligibility before profile creation")
+    profileCreates += 1
+    return 1
+}
 func isChatStoreOpen() -> Bool { storeOpen }
 func chatReopenStore() -> Bool { storeOpen = reopenSucceeds; return storeOpen }
 func activateChat() -> Bool {
@@ -156,12 +161,14 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
         m.chatRunning = nil; m.contentViewAccessAuthenticated = false
         AppChatState.shared.value = .suspended
         onboardingStageDefault.value = .onboardingComplete
+        UserDefaults.standard.set(false, forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
     }
     static func main() async throws {
         reset()
         let first = StartupHarness()
         first.initializeNewInstallation()
         expect(localStarts == [false], "Fresh setup opens only the local store before Tor")
+        expect(UserDefaults.standard.bool(forKey: DEFAULT_XAUXAT_EMPTY_SETUP), "The known-empty setup marker survives relaunch")
         expect(ChatModel.shared.onboardingStage == .step1_SimpleXInfo && !torReady, "Onboarding is visible without a Tor route")
         expect(coreStarts == 0 && profileCreates == 0, "Showing setup creates no profile or network session")
         first.initializeNewInstallation()
@@ -169,8 +176,19 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
         reset()
         databaseExists = true
         onboardingStageDefault.value = .step1_SimpleXInfo
+        UserDefaults.standard.set(true, forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
         StartupHarness().initializeNewInstallation()
         expect(localStarts == [false] && !torReady, "Relaunching an unfinished empty database still shows setup before Tor")
+        reset()
+        databaseExists = true
+        onboardingStageDefault.value = .step1_SimpleXInfo
+        StartupHarness().initializeNewInstallation()
+        expect(localStarts.isEmpty, "An unfinished profile without an empty-store marker still waits for Tor")
+        reset()
+        databaseExists = true
+        UserDefaults.standard.set(true, forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
+        StartupHarness().initializeNewInstallation()
+        expect(localStarts.isEmpty, "A stale empty-store marker cannot open a completed profile before Tor")
         for blocker in 0..<7 {
             reset()
             let launch = StartupHarness()
@@ -203,6 +221,7 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
 
         reset()
         let setup = SetupHarness()
+        UserDefaults.standard.set(true, forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
         setup.finishOnboarding()
         await until { EmbeddedTorManager.shared.waiter != nil }
         expect(setup.isCompleting && profileCreates == 0 && kcAppPassword.writes == 0, "Finish waits for Tor before profile/PIN changes")
@@ -210,6 +229,7 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
         EmbeddedTorManager.shared.resolve(false)
         await until { !setup.isCompleting }
         expect(setup.errorMessage != nil && profileCreates == 0, "Route failure shows an error and permits retry")
+        expect(UserDefaults.standard.bool(forKey: DEFAULT_XAUXAT_EMPTY_SETUP), "Route failure preserves empty setup for the next launch")
         setup.finishOnboarding()
         await until { EmbeddedTorManager.shared.waiter != nil }
         storeOpen = false
