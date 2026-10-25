@@ -69,6 +69,9 @@ import Tor
         try await missingStatusReplyDiscardsTheChannel()
         try await rejectedStatusReplyIsNotATimeout()
         try await refusedControlConnectionsDoNotPoisonRetry()
+        try await refreshRebuildsNetworkingAndKeepsStartupWaiters()
+        try await concurrentRefreshesShareOneRepair()
+        try await refreshCannotRestartAnUncontrollableRuntime()
         try await repeatedResumeDisposesOldChannels()
         try await manualFailureCannotLeaveReady()
         try await oldManualFailureCannotInvalidateNewReadiness()
@@ -78,6 +81,61 @@ import Tor
         try await diagnosticsCaptureInitialFailureWithoutPrivateData()
         try await realSOCKSProbeCases()
         print("Tor recovery regression checks passed: \(checks)")
+    }
+
+    static func refreshRebuildsNetworkingAndKeepsStartupWaiters() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager()
+        var oldProbe: CheckedContinuation<Bool, Error>?
+        probe.handler = { _ in try await withCheckedThrowingContinuation { oldProbe = $0 } }
+        var startupResults: [Result<UInt16, Error>] = []
+        manager.start { startupResults.append($0) }
+        try await until { oldProbe != nil }
+        probe.handler = { _ in true }
+        let port = try await manager.refreshConnection()
+        require(port == 19051 && publishedPorts == [19051], "Refresh must rebuild and verify a new listener before publication")
+        require(startupResults.count == 1 && (try? startupResults[0].get()) == port, "Refresh must release the original cold-start callback exactly once")
+        require(TorTestState.threadStarts == 1 && TorTestState.closedControllers >= 1, "Refresh must replace the local control channel while retaining the one Tor runtime")
+        require(TorTestState.commands.filter { $0 == "SETCONF DisableNetwork=1" }.count == 1, "An explicit refresh must reset networking even when a new probe would succeed")
+        oldProbe!.resume(returning: true)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        require(publishedPorts == [port] && startupResults.count == 1, "The cancelled old probe cannot publish its old port or repeat initialization")
+        require(!manager.refreshingConnection && manager.diagnosticText.contains("manualRefresh"), "Refresh completion must restore the UI and record the user action")
+    }
+
+    static func concurrentRefreshesShareOneRepair() async throws {
+        reset()
+        let probe = ScriptedProbe(), manager = probe.manager()
+        _ = try await manager.ensureReady()
+        var refreshedProbe: CheckedContinuation<Bool, Error>?
+        probe.handler = { _ in try await withCheckedThrowingContinuation { refreshedProbe = $0 } }
+        let first = Task { try await manager.refreshConnection() }
+        try await until { refreshedProbe != nil }
+        require(manager.refreshingConnection && publishedTorPort == nil, "Ready must be withdrawn throughout an explicit refresh")
+        let joins = manager.diagnosticText.components(separatedBy: "tor joined").count
+        let second = Task { try await manager.refreshConnection() }
+        try await until { manager.diagnosticText.components(separatedBy: "tor joined").count > joins }
+        refreshedProbe!.resume(returning: true)
+        let a = try await first.value, b = try await second.value
+        require(a == b && TorTestState.commands.filter { $0 == "SETCONF DisableNetwork=1" }.count == 1, "Repeated refresh taps must share one repair and verified result")
+    }
+
+    static func refreshCannotRestartAnUncontrollableRuntime() async throws {
+        reset()
+        let probe = ScriptedProbe()
+        let manager = EmbeddedTorManager(routeProbe: { port, _ in try await probe.run(port) },
+                                         startupTimeout: 2_000_000_000, controlPollDelay: 1_000_000)
+        _ = try await manager.ensureReady()
+        TorTestState.refuseConnections = true
+        do { _ = try await manager.refreshConnection(); fatalError("Refused control cannot report successful refresh") }
+        catch { require(error.localizedDescription.contains("close XauXat completely"), "Unreachable Tor must offer an honest app-reopen fallback") }
+        require(TorTestState.threadStarts == 1 && publishedTorPort == nil && !manager.refreshingConnection, "A failed refresh must finish offline without starting another runtime")
+        TorTestState.refuseConnections = false
+        _ = try await manager.refreshConnection()
+        require(publishedTorPort != nil && TorTestState.threadStarts == 1, "A subsequent refresh can recover when local control becomes available again")
+        TorTestState.lastThread!.isFinished = true
+        do { _ = try await manager.refreshConnection(); fatalError("Stopped C-Tor must not be re-entered") } catch { }
+        require(TorTestState.threadStarts == 1 && publishedTorPort == nil, "Refresh retains the stopped-runtime guard")
     }
 
     static func diagnosticsCaptureInitialFailureWithoutPrivateData() async throws {

@@ -28,12 +28,13 @@ final class EmbeddedTorManager: ObservableObject {
     }
 
     @Published private(set) var state: State = .stopped
+    @Published private(set) var refreshingConnection = false
 
     private enum DiagnosticStage: String {
         case start, joined, invalidated, superseded, waiterCancelled, startupRetry, controlReopened, authenticated, bootstrap
         case bootstrapStalled
         case controlPortWait, controlCookieWait, controlSocketWait, authenticating
-        case circuitCheck, probe, probeFailed, repair, failed, ready, manualProbe, manualProbeFailed, manualVerified
+        case circuitCheck, probe, probeFailed, repair, failed, ready, manualProbe, manualProbeFailed, manualVerified, manualRefresh
     }
     private let startedAt = ProcessInfo.processInfo.systemUptime
     private var diagnosticEvents: [String] = []
@@ -116,6 +117,7 @@ final class EmbeddedTorManager: ObservableObject {
     private var routeTask: Task<Void, Never>?
     private var requestingPort = false
     private var recoveryAttempted = false
+    private var refreshNetworkRequested = false
     private var readinessGeneration = UUID()
     private var verifiedAt: TimeInterval?
     private var routeRevision = 0
@@ -210,6 +212,25 @@ final class EmbeddedTorManager: ObservableObject {
     func refreshPendingStartup() async {
         guard attempt != nil, !callbacks.isEmpty else { return }
         _ = try? await ensureReady()
+    }
+
+    /// Replace a stuck check and its local control channel, retaining startup
+    /// callers. Rebuild networking in the one live C-Tor runtime after auth;
+    /// never shut down/re-enter Tor or publish an unverified SOCKS endpoint.
+    func refreshConnection() async throws -> UInt16 {
+        try Task.checkCancellation()
+        if refreshingConnection { return try await ensureReady() }
+        refreshingConnection = true
+        defer { refreshingConnection = false }
+        record(.manualRefresh)
+        invalidateReadiness()
+        refreshNetworkRequested = true
+        removeObservers()
+        controller?.xauxatCloseControlSocket()
+        controller = nil
+        authenticated = false
+        begin()
+        return try await ensureReady()
     }
 
     private func start(waiter: UUID, _ completion: @escaping (Result<UInt16, Error>) -> Void) {
@@ -351,6 +372,7 @@ final class EmbeddedTorManager: ObservableObject {
 
     private func startTor(id: UUID) async {
         do {
+            guard attempt == id else { return }
             // C-Tor cannot safely be run twice concurrently, and re-entering a
             // stopped C runtime is not reliable. Recover a live runtime through
             // its control protocol; a terminated runtime needs a fresh app process.
@@ -489,7 +511,16 @@ final class EmbeddedTorManager: ObservableObject {
         // Restore networking after an interrupted repair before awaiting a circuit.
         try await command(control, "SETCONF", ["DisableNetwork=0"])
         guard attempt == id else { return }
-        observeCircuit(control, id: id)
+        if refreshNetworkRequested {
+            refreshNetworkRequested = false
+            recoveryAttempted = true
+            bootstrapWatch?.cancel()
+            bootstrapWatch = nil
+            requestingPort = true
+            await recover(control, id: id)
+        } else {
+            observeCircuit(control, id: id)
+        }
     }
 
     private func observeCircuit(_ control: TorController, id: UUID) {
@@ -616,6 +647,7 @@ final class EmbeddedTorManager: ObservableObject {
             return
         }
         attempt = nil
+        refreshNetworkRequested = false
         deadline?.cancel()
         deadline = nil
         bootstrapWatch?.cancel()
@@ -784,7 +816,7 @@ private enum EmbeddedTorError: LocalizedError {
         case .controlConnection: "XauXat could not connect to Tor locally."
         case .controlTimeout: "Tor did not open its control port in time."
         case .controlSocketTimeout: "The local Tor control socket could not be opened in time."
-        case .controlSocketRefused: "Tor refused the local control connection."
+        case .controlSocketRefused: "Tor refused the local control connection. If refreshing does not help, close XauXat completely and reopen it."
         case .controlDescriptorLimit: "The app could not open another local socket."
         case .controlCookieTimeout: "The local Tor authentication cookie was not available in time."
         case .controlCommandTimeout: "Tor did not answer a local control command in time."

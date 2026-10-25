@@ -34,6 +34,7 @@ struct ContentView: View {
 
     // Spec: spec/client/navigation.md#contentAccessAuthenticationExtended
     var contentAccessAuthenticationExtended: Bool
+    var refreshConnection: @MainActor () async throws -> Void
 
     @Environment(\.scenePhase) var scenePhase
     @State private var automaticAuthenticationAttempted = false
@@ -267,7 +268,7 @@ struct ContentView: View {
     }
 
     private func initializationView() -> some View {
-        XauXatOpeningView()
+        XauXatOpeningView(refreshConnection: refreshConnection)
     }
 
     private func mainView() -> some View {
@@ -610,7 +611,22 @@ func mkAlert(title: LocalizedStringKey, message: LocalizedStringKey? = nil) -> A
 
 struct XauXatOpeningView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var tor = EmbeddedTorManager.shared
+    @ObservedObject private var chatModel = ChatModel.shared
     var showsProgress = true
+    var refreshConnection: (@MainActor () async throws -> Void)? = nil
+
+    @State private var offersConnectionRefresh = false
+    @State private var refreshTask: Task<Void, Never>?
+    @State private var refreshInProgress = false
+    @State private var showRefreshError = false
+    @State private var refreshError = ""
+
+    private var canRefreshConnection: Bool {
+        showsProgress && refreshConnection != nil && scenePhase == .active
+            && chatModel.networkInfo.online && !isXauXatTorReady()
+    }
 
     @State private var gazeX: CGFloat = 0
     @State private var gazeY: CGFloat = 0
@@ -767,17 +783,65 @@ struct XauXatOpeningView: View {
                 .opacity(showsProgress ? 1 : 0)
                 .accessibilityHidden(!showsProgress)
             }
+
+            if offersConnectionRefresh && canRefreshConnection {
+                VStack(spacing: 8) {
+                    Text("Taking too long?")
+                        .font(.footnote)
+                        .foregroundStyle(loadingGray)
+                    Button(action: refreshTorConnection) {
+                        Text(refreshInProgress ? "Refreshing…" : "Refresh Tor connection")
+                            .font(.footnote.weight(.medium))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                    }
+                    .foregroundStyle(openingAccent)
+                    .disabled(refreshInProgress || tor.refreshingConnection)
+                    .accessibilityIdentifier("refreshTorConnection")
+                }
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 32)
+            }
+        }
+        .task(id: canRefreshConnection) {
+            offersConnectionRefresh = false
+            guard canRefreshConnection else { return }
+            do { try await Task.sleep(nanoseconds: 10_000_000_000) }
+            catch { return }
+            guard !Task.isCancelled, canRefreshConnection else { return }
+            offersConnectionRefresh = true
+        }
+        .alert("Connection refresh failed", isPresented: $showRefreshError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(refreshError)
         }
         .onAppear {
             startEyeAnimation()
             if showsProgress { startLoadingMessages() }
         }
         .onDisappear {
+            refreshTask?.cancel()
+            refreshTask = nil
             animationTask?.cancel()
             animationTask = nil
 
             messageTask?.cancel()
             messageTask = nil
+        }
+    }
+
+    private func refreshTorConnection() {
+        guard canRefreshConnection, !refreshInProgress, let refreshConnection else { return }
+        refreshInProgress = true
+        refreshTask = Task { @MainActor in
+            defer { refreshInProgress = false; refreshTask = nil }
+            do { try await refreshConnection() }
+            catch {
+                guard !Task.isCancelled, scenePhase == .active else { return }
+                refreshError = error.localizedDescription
+                showRefreshError = true
+            }
         }
     }
 
