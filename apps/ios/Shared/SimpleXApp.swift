@@ -75,6 +75,7 @@ struct SimpleXApp: App {
                         onboardingStageDefault.set(.step1_SimpleXInfo)
                         chatModel.onboardingStage = onboardingStageDefault.get()
                     }
+                    initializeNewInstallation()
                     startEmbeddedTor(showError: true) {
                         initializeAfterTor()
                     }
@@ -103,6 +104,7 @@ struct SimpleXApp: App {
                         NtfManager.shared.setNtfBadgeCount(chatModel.totalUnreadCountForAllUsers())
                     case .active:
                         CallController.shared.shouldSuspendChat = false
+                        initializeNewInstallation()
                         startEmbeddedTor {
                             guard scenePhase == .active else { return }
                             initializeAfterTor()
@@ -113,6 +115,18 @@ struct SimpleXApp: App {
                     }
                 }
         }
+    }
+
+    private func initializeNewInstallation() {
+        // New or unfinished setup only needs local data to show its screen,
+        // including after relaunching with an empty database already created.
+        // Completed profiles and alternate-PIN selection keep their startup
+        // boundary; finishing setup still verifies Tor separately.
+        guard scenePhase == .active, AppChatState.shared.value != .stopped,
+              (!hasDatabase() || onboardingStageDefault.get() != .onboardingComplete), !chatModel.chatInitialized,
+              !chatModel.ctrlInitInProgress, chatModel.migrationState == nil,
+              !xauXatRequiresUnlockBeforeInitialization() else { return }
+        initChatAndMigrate(start: false)
     }
 
     private func initializeAfterTor() {

@@ -87,6 +87,7 @@ private enum XauXatOnboardingField: Hashable {
 struct XauXatWelcomeView: View {
     @EnvironmentObject private var chatModel: ChatModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @State private var step = 0
     @State private var displayName = ""
     @State private var pin = ""
@@ -559,32 +560,50 @@ struct XauXatWelcomeView: View {
         focusedField = nil
         isCompleting = true
 
-        do {
-            if !profileCreated {
-                // Profile startup reconciles tokens too. Keep an old saved
-                // intent from enabling push before this setup applies its choice.
-                xauXatSetNotificationModeIntent(.off)
-                chatModel.notificationMode = .off
-                AppChatState.shared.set(.active)
-                chatModel.currentUser = try apiCreateActiveUser(Profile(displayName: compactName, fullName: ""))
-                profileCreated = true
-                UserDefaults.standard.set(false, forKey: DEFAULT_PRIVACY_SHOW_FILE_ENCRYPTION)
+        Task { @MainActor in
+            do {
+                // Setup is available while Tor starts. Never create a profile or
+                // start its networking until this process verifies the route.
+                _ = try await EmbeddedTorManager.shared.ensureReady(maxAge: 15)
+                guard scenePhase == .active, chatModel.networkInfo.online, isXauXatTorReady() else {
+                    throw RuntimeError("Open XauXat with a network connection to finish setup.")
+                }
+                // The empty setup store may have closed while setup was in the
+                // background. It has no profile/session for activateChat to resume.
+                guard isChatStoreOpen() || chatReopenStore() else {
+                    throw RuntimeError("XauXat could not reopen its local database. Please retry.")
+                }
+                if !profileCreated {
+                    // Profile startup reconciles tokens too. Keep an old saved
+                    // intent from enabling push before this setup applies its choice.
+                    xauXatSetNotificationModeIntent(.off)
+                    chatModel.notificationMode = .off
+                    AppChatState.shared.set(.active)
+                    chatModel.currentUser = try apiCreateActiveUser(Profile(displayName: compactName, fullName: ""))
+                    profileCreated = true
+                    UserDefaults.standard.set(false, forKey: DEFAULT_PRIVACY_SHOW_FILE_ENCRYPTION)
+                }
+                // Also retry startup when profile creation previously succeeded
+                // but starting the chat or saving the PIN did not.
                 try startChat(onboarding: true)
-            }
+                guard activateChat() else {
+                    throw RuntimeError("XauXat could not activate its local database. Please retry.")
+                }
 
-            guard kcAppPassword.set(pin) else {
-                throw RuntimeError("The device Keychain did not save the XauXat PIN")
-            }
-            privacyLocalAuthModeDefault.set(.passcode)
-            appLocalAuthEnabledGroupDefault.set(true)
-            UserDefaults.standard.set(true, forKey: DEFAULT_PERFORM_LA)
-            UserDefaults.standard.set(true, forKey: DEFAULT_LA_NOTICE_SHOWN)
-            chatModel.contentViewAccessAuthenticated = true
+                guard kcAppPassword.set(pin) else {
+                    throw RuntimeError("The device Keychain did not save the XauXat PIN")
+                }
+                privacyLocalAuthModeDefault.set(.passcode)
+                appLocalAuthEnabledGroupDefault.set(true)
+                UserDefaults.standard.set(true, forKey: DEFAULT_PERFORM_LA)
+                UserDefaults.standard.set(true, forKey: DEFAULT_LA_NOTICE_SHOWN)
+                chatModel.contentViewAccessAuthenticated = true
 
-            applySimpleXOnboardingDefaults()
-        } catch {
-            isCompleting = false
-            errorMessage = responseError(error)
+                applySimpleXOnboardingDefaults()
+            } catch {
+                isCompleting = false
+                errorMessage = responseError(error)
+            }
         }
     }
 
@@ -3351,7 +3370,10 @@ struct XauXatTorDiagnosticsView: View {
                 Button("Copy connection diagnostics") {
                     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
                     let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-                    UIPasteboard.general.string = "XauXat \(version) (\(build))\nstore_open=\(isChatStoreOpen())\n" + recovery.diagnosticText + "\n\n" + tor.diagnosticText
+                    let model = ChatModel.shared
+                    UIPasteboard.general.string = "XauXat \(version) (\(build))\nstore_open=\(isChatStoreOpen())\n"
+                        + "startup_initialized=\(model.chatInitialized) startup_initializing=\(model.ctrlInitInProgress) onboarding_stage=\(model.onboardingStage?.rawValue ?? "none")\n"
+                        + recovery.diagnosticText + "\n\n" + tor.diagnosticText
                 }
                 .font(.system(size: 14, weight: .bold, design: .default))
                 .foregroundStyle(palette.ink)

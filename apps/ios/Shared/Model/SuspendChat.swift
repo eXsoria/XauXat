@@ -136,14 +136,14 @@ func activateChat(appState: AppState = .active) -> Bool {
     }
 }
 
-func initChatAndMigrate(refreshInvitations: Bool = true) {
+func initChatAndMigrate(refreshInvitations: Bool = true, start: Bool = true) {
     let m = ChatModel.shared
     if (!m.chatInitialized) {
         m.v3DBMigration = v3DBMigrationDefault.get()
         if AppChatState.shared.value == .stopped && storeDBPassphraseGroupDefault.get() && kcDatabasePassword.get() != nil {
-            initialize(start: true, confirmStart: true)
+            initialize(start: start, confirmStart: true)
         } else {
-            initialize(start: true)
+            initialize(start: start)
         }
     }
 

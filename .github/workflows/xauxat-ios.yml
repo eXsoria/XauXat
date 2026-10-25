@@ -55,6 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: bash scripts/ios/test-opening-presentation.sh
+      - run: bash scripts/ios/test-startup-readiness.sh
       - run: bash scripts/ios/test-onboarding-notifications.sh
       - run: bash scripts/ios/test-device-architectures.sh
 
