@@ -2,7 +2,7 @@ import SwiftUI
 import AVFoundation
 import OSLog
 
-let MAX_VOICE_MESSAGE_LENGTH: TimeInterval = 6
+let MAX_VOICE_MESSAGE_LENGTH: TimeInterval = CommandLine.arguments.contains("short-limit") ? 6 : 120
 let logger = Logger(subsystem: "pt.exsoria.voice-harness", category: "recording")
 func durationText(_ seconds: Int) -> String { String(format: "%d:%02d", seconds / 60, seconds % 60) }
 func getAppFilePath(_ name: String) -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(name) }

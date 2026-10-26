@@ -85,6 +85,7 @@ final class VoiceRecordingTests: XCTestCase {
         XCTAssertFalse(app.buttons["voice.send"].exists)
     }
     func testDurationLimitEndsHandsFreeRecording() {
+        app.launchArguments.append("short-limit")
         app.launch()
         let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         origin.press(forDuration: 0.7, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
@@ -101,6 +102,7 @@ final class VoiceRecordingTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Sent 0"].exists)
     }
     func testResumedRecordingHonorsTheTotalDurationLimit() {
+        app.launchArguments.append("short-limit")
         app.launch()
         mic.press(forDuration: 2)
         preview()

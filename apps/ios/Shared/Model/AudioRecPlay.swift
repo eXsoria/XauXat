@@ -261,16 +261,20 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         recordingTimer?.invalidate()
         AppDelegate.keepScreenOn(true)
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-            guard let self, let recorder = self.audioRecorder, recorder.isRecording else { return }
-            self.onTimer?(recorder.currentTime)
-            recorder.updateMeters()
-            self.onLevel?(CGFloat(pow(10, recorder.averagePower(forChannel: 0) / 40)))
-            if recorder.currentTime >= MAX_VOICE_MESSAGE_LENGTH {
-                self.complete()
+            Task { @MainActor [weak self] in
+                self?.updateRecording()
             }
         }
         recordingTimer = timer
         RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func updateRecording() {
+        guard let recorder = audioRecorder, recorder.isRecording else { return }
+        onTimer?(min(recorder.currentTime, MAX_VOICE_MESSAGE_LENGTH))
+        recorder.updateMeters()
+        onLevel?(CGFloat(pow(10, recorder.averagePower(forChannel: 0) / 40)))
+        if recorder.currentTime >= MAX_VOICE_MESSAGE_LENGTH { complete() }
     }
 
     private func complete() {
@@ -279,16 +283,20 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         onFinishRecording?()
     }
 
-    func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        guard audioRecorder === recorder else { return }
-        // AVAudioRecorder resets currentTime after its duration limit fires.
-        if flag { onTimer?(MAX_VOICE_MESSAGE_LENGTH) }
-        complete()
+    nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        Task { @MainActor [weak self] in
+            guard let self, self.audioRecorder === recorder else { return }
+            // AVAudioRecorder resets currentTime after its duration limit fires.
+            if flag { self.onTimer?(MAX_VOICE_MESSAGE_LENGTH) }
+            self.complete()
+        }
     }
 
-    func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        guard audioRecorder === recorder else { return }
-        complete()
+    nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
+        Task { @MainActor [weak self] in
+            guard let self, self.audioRecorder === recorder else { return }
+            self.complete()
+        }
     }
 
     func stop() {

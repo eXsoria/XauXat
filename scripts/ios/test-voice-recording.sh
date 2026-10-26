@@ -22,7 +22,7 @@ xcodebuild -list -json -project "$temp/project/VoiceHarness.xcodeproj" > "$out/p
 # simulator's migration should not compete with SwiftUI compilation.
 xcodebuild -project "$temp/project/VoiceHarness.xcodeproj" -scheme VoiceHarness \
   -destination 'generic/platform=iOS Simulator' -parallel-testing-enabled NO \
-  -derivedDataPath "$temp/build" build-for-testing CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$out/build.log"
+  -derivedDataPath "$temp/build" build-for-testing ARCHS="$(uname -m)" ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$out/build.log"
 runtime=$(xcrun simctl list runtimes available --json | python3 -c 'import json,sys; r=[r for r in json.load(sys.stdin)["runtimes"] if r["name"].startswith("iOS")]; print(max(r,key=lambda x:tuple(map(int,x["version"].split("."))))["identifier"])')
 type=$(xcrun simctl list devicetypes --json | python3 -c 'import json,sys; print(next(d["identifier"] for d in json.load(sys.stdin)["devicetypes"] if d["name"]=="iPhone 14 Pro"))')
 udid=$(xcrun simctl create XauXat-Voice "$type" "$runtime")
