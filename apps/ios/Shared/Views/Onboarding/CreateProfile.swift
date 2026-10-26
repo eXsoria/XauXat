@@ -41,8 +41,6 @@ struct CreateProfile: View {
     @State private var showImagePicker = false
     @State private var showTakePhoto = false
     @State private var chosenImage: UIImage? = nil
-    @State private var imageToEdit: UIImage? = nil
-    @State private var showAvatarEditor = false
     @State private var profileImage: String? = nil
 
     var body: some View {
@@ -159,70 +157,16 @@ struct CreateProfile: View {
                 showImagePicker = true
             }
         }
-        .fullScreenCover(isPresented: $showTakePhoto) {
-            ZStack {
-                Color.black.edgesIgnoringSafeArea(.all)
-                CameraImagePicker(image: $chosenImage)
+        .modifier(XauXatAvatarPicker(
+            showCamera: $showTakePhoto,
+            showLibrary: $showImagePicker,
+            image: $chosenImage
+        ) { croppedImage in
+            Task {
+                let resized = await resizeImageToStrSize(croppedImage, maxDataSize: 12500)
+                await MainActor.run { profileImage = resized }
             }
-        }
-        .sheet(isPresented: $showImagePicker) {
-            LibraryImagePicker(image: $chosenImage) { didSelectImage in
-                if !didSelectImage {
-                    await MainActor.run {
-                        showImagePicker = false
-                    }
-                }
-            }
-        }
-        .onChange(of: chosenImage) { image in
-            guard let image else { return }
-
-            imageToEdit = image
-
-            if showImagePicker {
-                showImagePicker = false
-            } else if !showTakePhoto {
-                showAvatarEditor = true
-            }
-        }
-        .onChange(of: showImagePicker) { isPresented in
-            if !isPresented, imageToEdit != nil {
-                showAvatarEditor = true
-            }
-        }
-        .onChange(of: showTakePhoto) { isPresented in
-            if !isPresented, imageToEdit != nil {
-                showAvatarEditor = true
-            }
-        }
-        .fullScreenCover(isPresented: $showAvatarEditor) {
-            if let imageToEdit {
-                XauXatAvatarEditor(
-                    image: imageToEdit,
-                    onCancel: {
-                        showAvatarEditor = false
-                        chosenImage = nil
-                        self.imageToEdit = nil
-                    },
-                    onConfirm: { croppedImage in
-                        showAvatarEditor = false
-                        chosenImage = nil
-                        self.imageToEdit = nil
-
-                        Task {
-                            let resized = await resizeImageToStrSize(
-                                croppedImage,
-                                maxDataSize: 12500
-                            )
-
-                            await MainActor.run {
-                                profileImage = resized
-                            }
-                        }
-                    }
-                )
-            }
-        }
+        })
         .onAppear() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 focusDisplayName = true
