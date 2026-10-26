@@ -72,6 +72,15 @@ final class VoiceRecordingTests: XCTestCase {
         app.activate()
         preview()
     }
+    func testLockedRecordingCanBeDeleted() {
+        app.launch()
+        let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        origin.press(forDuration: 0.8, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
+        XCTAssertTrue(app.buttons["voice.cancel"].waitForExistence(timeout: 3))
+        app.buttons["voice.cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Phase idle"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["voice.send"].exists)
+    }
     func testDurationLimitEndsHandsFreeRecording() {
         app.launch()
         let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))

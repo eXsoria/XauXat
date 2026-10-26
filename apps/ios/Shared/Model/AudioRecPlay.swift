@@ -290,6 +290,7 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     }
 
     func stop() {
+        let wasRecording = recordingTimer != nil
         if let recorder = audioRecorder {
             recorder.delegate = nil
             recorder.stop()
@@ -299,7 +300,7 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
             timer.invalidate()
         }
         recordingTimer = nil
-        AppDelegate.keepScreenOn(false)
+        if wasRecording { AppDelegate.keepScreenOn(false) }
         releaseAudioSession()
     }
 

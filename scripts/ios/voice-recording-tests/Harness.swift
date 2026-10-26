@@ -104,7 +104,7 @@ struct HarnessView: View {
             }
             HStack(spacing: 0) {
                 if voiceInteraction.active {
-                    VoiceRecordingStatus(interaction: voiceInteraction, time: voiceMessageRecordingTime ?? 0, levels: voiceRecordingLevels, color: .accentColor)
+                    VoiceRecordingStatus(interaction: voiceInteraction, time: voiceMessageRecordingTime ?? 0, levels: voiceRecordingLevels, color: .accentColor, deleteRecording: discardVoiceMessageRecording)
                 } else {
                     Text(composeState.noPreview ? "Message" : "Voice message…").foregroundColor(.secondary)
                     Spacer()

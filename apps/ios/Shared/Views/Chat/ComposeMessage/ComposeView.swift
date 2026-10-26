@@ -1341,6 +1341,7 @@ struct ComposeView: View {
                 moveVoiceMessageRecording: moveVoiceMessageRecording,
                 releaseVoiceMessageRecording: releaseVoiceMessageRecording,
                 cancelVoiceMessageTouch: cancelVoiceMessageTouch,
+                discardVoiceMessageRecording: discardVoiceMessageRecording,
                 finishVoiceMessageRecording: finishVoiceMessageRecording,
                 allowVoiceMessagesToContact: allowVoiceMessagesToContact,
                 timedMessageAllowed: chat.chatInfo.featureEnabled(.timedMessages),
@@ -2503,7 +2504,7 @@ struct ComposeView: View {
         var preview = composeState.preview
         if let recordingFileName = composeState.voiceMessageRecordingFileName,
            let recordingTime = voiceMessageRecordingTime {
-            preview = .voicePreview(recordingFileName: recordingFileName, duration: Int(recordingTime.rounded()))
+            preview = .voicePreview(recordingFileName: recordingFileName, duration: max(1, Int(recordingTime.rounded())))
         }
         composeState = composeState.copy(
             preview: preview,

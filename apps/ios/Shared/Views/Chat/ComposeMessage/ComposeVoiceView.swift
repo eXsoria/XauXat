@@ -41,7 +41,6 @@ struct ComposeVoiceView: View {
     @State private var audioPlayer: AudioPlayer?
     @State private var playbackState: VoiceMessagePlaybackState = .noPlayback
     @State private var playbackTime: TimeInterval?
-    @State private var startingPlayback: Bool = false
     @State private var showMaskPicker = false
 
     var body: some View {
@@ -211,13 +210,11 @@ struct ComposeVoiceView: View {
         .onDisappear {
             audioPlayer?.stop()
         }
-        .onChange(of: chatModel.stopPreviousRecPlay) { _ in
-            if !startingPlayback {
+        .onChange(of: chatModel.stopPreviousRecPlay) { source in
+            if source != getAppFilePath(recordingFileName) {
                 audioPlayer?.stop()
                 playbackState = .noPlayback
                 playbackTime = TimeInterval(0)
-            } else {
-                startingPlayback = false
             }
         }
     }
@@ -277,7 +274,6 @@ struct ComposeVoiceView: View {
     }
 
     private func startPlayback() {
-        startingPlayback = true
         chatModel.stopPreviousRecPlay = getAppFilePath(recordingFileName)
         audioPlayer = AudioPlayer(
             onTimer: { playbackTime = $0 },

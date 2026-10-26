@@ -36,6 +36,7 @@ struct SendMessageView: View {
     var moveVoiceMessageRecording: ((Double, Double) -> Void)? = nil
     var releaseVoiceMessageRecording: (() -> Void)? = nil
     var cancelVoiceMessageTouch: (() -> Void)? = nil
+    var discardVoiceMessageRecording: (() -> Void)? = nil
     var finishVoiceMessageRecording: (() -> Void)? = nil
     var allowVoiceMessagesToContact: (() -> Void)? = nil
     var timedMessageAllowed: Bool = false
@@ -61,7 +62,7 @@ struct SendMessageView: View {
         let trailingContentInset: CGFloat = composeState.progressByTimeout ? progressTrailingContentInset : 32
         ZStack(alignment: .leading) {
             if voiceInteraction.active {
-                VoiceRecordingStatus(interaction: voiceInteraction, time: voiceRecordingTime, levels: voiceRecordingLevels, color: sendButtonColor)
+                VoiceRecordingStatus(interaction: voiceInteraction, time: voiceRecordingTime, levels: voiceRecordingLevels, color: sendButtonColor, deleteRecording: discardVoiceMessageRecording)
                     .padding(.leading, 12)
                     .padding(.trailing, 52)
                     .frame(minHeight: 44)

@@ -6,16 +6,26 @@ struct VoiceRecordingStatus: View {
     let time: TimeInterval
     let levels: [CGFloat]
     let color: Color
+    var deleteRecording: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
+            if interaction.phase == .locked, let deleteRecording {
+                Button(action: deleteRecording) {
+                    Image(systemName: "trash")
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Delete recording")
+                .accessibilityIdentifier("voice.cancel")
+            } else {
+              Circle()
                 .fill(Color.red)
                 .frame(width: 8, height: 8)
                 .opacity(pulse && !reduceMotion ? 0.35 : 1)
                 .accessibilityHidden(true)
+            }
             Text(durationText(Int(time)))
                 .monospacedDigit()
                 .font(.callout)
