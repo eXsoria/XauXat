@@ -627,7 +627,11 @@ func setUserPrivacy_(_ cmd: ChatCommand) async throws -> User {
 }
 
 func apiDeleteUser(_ userId: Int64, _ delSMPQueues: Bool, viewPwd: String?) async throws {
+    let expressions = getAppFilesDirectory().appendingPathComponent("expressions-\(userId)", isDirectory: true)
+    let scope = xauXatStorageScope()
     try await sendCommandOkResp(.apiDeleteUser(userId: userId, delSMPQueues: delSMPQueues, viewPwd: viewPwd))
+    try? FileManager.default.removeItem(at: expressions)
+    xauXatRemoveExpressionLibraryKey(userID: userId, scope: scope)
 }
 
 func apiStartChat(ctrl: chat_ctrl? = nil) throws -> Bool {
