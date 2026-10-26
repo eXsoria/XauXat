@@ -122,6 +122,9 @@ struct HarnessView: View {
                 Text("Phase \(String(describing: voiceInteraction.phase))").accessibilityIdentifier("voice.phase")
                 Text("Duration \(String(format: "%.2f", voiceMessageRecordingTime ?? 0))").accessibilityIdentifier("voice.duration")
                 Text("Playable \(String(format: "%.2f", validDuration))").accessibilityIdentifier("voice.playable")
+                Text("Error \(audioRecorder?.preparationError ?? "none")")
+                    .lineLimit(3)
+                    .accessibilityIdentifier("voice.error")
             }
             .font(.system(size: 12))
             Spacer()

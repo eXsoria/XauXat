@@ -185,6 +185,7 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     private var segmentOffset: TimeInterval = 0
     private(set) var duration: TimeInterval = 0
     private(set) var cancelled = false
+    private(set) var preparationError: String?
     private var operation = UUID()
     private var finalizationTask: Task<Void, Error>?
     private var exporter: AVAssetExportSession?
@@ -259,13 +260,23 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         guard let fileName = recordingFileName, !cancelled else {
             return Task { throw CancellationError() }
         }
+        preparationError = nil
         Self.pendingRecorders[fileName] = self
         let request = operation
         let task = Task { @MainActor [self] in
             defer { finalizationTask = nil }
-            try await joinSegments(fileName: fileName, request: request)
-            guard operation == request, !cancelled else { throw CancellationError() }
-            if Self.pendingRecorders[fileName] === self { Self.pendingRecorders[fileName] = nil }
+            do {
+                try await joinSegments(fileName: fileName, request: request)
+                guard operation == request, !cancelled else { throw CancellationError() }
+                if Self.pendingRecorders[fileName] === self { Self.pendingRecorders[fileName] = nil }
+            } catch {
+                let detail = error as NSError
+                preparationError = "\(detail.domain) (\(detail.code)): \(detail.localizedDescription)"
+                if let underlying = detail.userInfo[NSUnderlyingErrorKey] as? NSError {
+                    preparationError! += " — \(underlying.domain) (\(underlying.code)): \(underlying.localizedDescription)"
+                }
+                throw error
+            }
         }
         finalizationTask = task
         onFinishing?()
@@ -305,33 +316,42 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
             position = CMTimeAdd(position, length)
         }
         guard operation == request, !cancelled else { throw CancellationError() }
-        // All parts have identical AAC settings, so joining can usually copy
-        // packets without another lossy encode.
-        var session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough)
-        if session?.supportedFileTypes.contains(.m4a) != true {
-            session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A)
-        }
-        guard let session else { throw RecordingError.unavailable }
-        let output = getAppFilePath(generateNewFileName("voice-joined-\(UUID().uuidString)", "m4a"))
-        defer { removeRecordingFile(output) }
-        exporter = session
-        defer { exporter = nil }
-        session.outputURL = output
-        session.outputFileType = .m4a
-        session.metadata = []
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            session.exportAsynchronously {
-                if session.status == .completed {
-                    continuation.resume(returning: ())
-                } else {
-                    continuation.resume(throwing: session.error ?? RecordingError.unavailable)
+        // Prefer a packet copy; some OS/codec combinations advertise M4A
+        // passthrough but reject the composition at export time.
+        var lastError: Error = RecordingError.unavailable
+        for preset in [AVAssetExportPresetPassthrough, AVAssetExportPresetAppleM4A] {
+            guard let session = AVAssetExportSession(asset: composition, presetName: preset),
+                  session.supportedFileTypes.contains(.m4a) else { continue }
+            let output = getAppFilePath(generateNewFileName("voice-joined-\(UUID().uuidString)", "m4a"))
+            defer { removeRecordingFile(output) }
+            exporter = session
+            defer { exporter = nil }
+            session.outputURL = output
+            session.outputFileType = .m4a
+            session.metadata = []
+            do {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    session.exportAsynchronously {
+                        if session.status == .completed {
+                            continuation.resume(returning: ())
+                        } else {
+                            continuation.resume(throwing: session.error ?? RecordingError.unavailable)
+                        }
+                    }
                 }
+                guard operation == request, !cancelled else { throw CancellationError() }
+                // Commit through an atomic write, retaining the existing playable
+                // draft if replacing it fails (for example, when storage is full).
+                try Data(contentsOf: output).write(to: canonical, options: .atomic)
+                for part in parts { removeRecordingFile(part) }
+                pendingSegments.removeAll()
+                return
+            } catch {
+                guard operation == request, !cancelled else { throw CancellationError() }
+                lastError = error
             }
         }
-        guard operation == request, !cancelled else { throw CancellationError() }
-        _ = try FileManager.default.replaceItemAt(canonical, withItemAt: output)
-        for part in parts { removeRecordingFile(part) }
-        pendingSegments.removeAll()
+        throw lastError
     }
 
     private func startTimer() {

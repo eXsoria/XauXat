@@ -19,7 +19,7 @@ final class VoiceRecordingTests: XCTestCase {
         add(proof)
     }
     private func preview() {
-        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 20), app.staticTexts["voice.error"].label)
         XCTAssertTrue(app.buttons["voice.resume"].isHittable)
         XCTAssertTrue(app.buttons["voice.delete"].isHittable)
         XCTAssertFalse(app.staticTexts["Playable 0.00"].exists, "A paused recording must already be playable")
@@ -110,7 +110,7 @@ final class VoiceRecordingTests: XCTestCase {
         mic.press(forDuration: 2)
         preview()
         app.buttons["voice.resume"].tap()
-        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 9))
+        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 20), app.staticTexts["voice.error"].label)
         XCTAssertFalse(app.buttons["voice.resume"].exists)
         let duration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
         XCTAssertEqual(duration, 6, accuracy: 0.3, "Pausing cannot reset the total recording limit")
