@@ -14,6 +14,7 @@ struct XauXatExpressionsView: View {
     var sending = false
     let close: () -> Void
     let select: (XauXatExpression, Data) -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var kind: XauXatExpressionKind = .sticker
     @State private var pack = "all"
     @State private var query = ""
@@ -54,6 +55,7 @@ struct XauXatExpressionsView: View {
                 Button(action: close) { Image(systemName: "chevron.down").font(.body.weight(.semibold)) }
                     .accessibilityLabel("Close stickers and sounds")
             }
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .padding(.horizontal, 12).padding(.vertical, 6)
             Divider()
             HStack(spacing: 8) {
@@ -76,11 +78,14 @@ struct XauXatExpressionsView: View {
                     Text("No items here yet. Use + to import your own.")
                         .font(.subheadline).foregroundColor(.secondary).padding()
                 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: kind == .sticker ? 76 : 120))], spacing: 12) {
+                LazyVGrid(columns: kind == .sound && dynamicTypeSize.isAccessibilitySize
+                          ? [GridItem(.flexible())]
+                          : [GridItem(.adaptive(minimum: kind == .sticker ? 76 : 120))], spacing: 12) {
                     ForEach(visibleItems) { item in tile(item) }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
             }
+            .accessibilityIdentifier("expression-items")
             if busy { ProgressView("Preparing media…").font(.footnote) }
             Divider()
             HStack(spacing: 24) {
@@ -138,10 +143,22 @@ struct XauXatExpressionsView: View {
 
     private func kindButton(_ value: XauXatExpressionKind, _ icon: String, _ title: LocalizedStringKey) -> some View {
         Button { kind = value } label: {
-            Label(title, systemImage: icon).font(.subheadline.weight(kind == value ? .semibold : .regular))
-                .foregroundColor(kind == value ? .accentColor : .secondary)
-                .padding(.vertical, 4)
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(spacing: 2) {
+                        Image(systemName: icon).font(.body)
+                        Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Label(title, systemImage: icon).font(.subheadline)
+                }
+            }
+            .fontWeight(kind == value ? .semibold : .regular)
+            .foregroundColor(kind == value ? .accentColor : .secondary)
+            .padding(.vertical, 4)
         }
+        .accessibilityLabel(title)
         .accessibilityAddTraits(kind == value ? .isSelected : [])
     }
 
@@ -158,7 +175,7 @@ struct XauXatExpressionsView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "waveform").font(.title2)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title).font(.subheadline).lineLimit(1)
+                                Text(item.title).font(.subheadline).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                                 Text("\(item.duration)s").font(.caption).foregroundColor(.secondary)
                             }
                             Image(systemName: "arrow.up.circle.fill").accessibilityHidden(true)

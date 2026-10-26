@@ -87,5 +87,8 @@ final class ExpressionUITests: XCTestCase {
         app.buttons["Soundboard"].tap()
         XCTAssertTrue(app.buttons["Choose sound Pop"].isHittable)
         proof(app, "soundboard-large-text")
+        // XCTest scrolls this action into view in the keyboard-sized tray.
+        app.buttons["Preview Pop"].tap()
+        XCTAssertEqual(app.staticTexts["selection"].label, "Nothing sent")
     }
 }
