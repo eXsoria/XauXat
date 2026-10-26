@@ -12,6 +12,24 @@ import SimpleXChat
 
 private let xauxatConsumedOneTimePhotosKey = "xauxat.consumedOneTimePhotos"
 
+func xauXatIsSticker(_ item: ChatItem) -> Bool {
+    guard case let .image(text, _) = item.content.msgContent, text.isEmpty,
+          let name = item.file?.fileName else { return false }
+    return XauXatExpressionLibrary.isStickerFilename(name)
+}
+
+@MainActor func xauXatFavoriteSticker(_ item: ChatItem, userID: Int64) {
+    guard xauXatIsSticker(item), let image = getLoadedXauXatImage(item) else { return }
+    do {
+        let library = try XauXatExpressionLibrary.forProfile(userID)
+        try library.seedIfNeeded()
+        try library.addStickerToFavorites(image)
+        AlertManager.shared.showAlertMsg(title: "Added to Favorites")
+    } catch {
+        AlertManager.shared.showAlertMsg(title: "Could not save sticker", message: XauXatExpressionError.unavailable.localizedDescription)
+    }
+}
+
 func xauxatIsOneTimePhoto(_ chatItem: ChatItem) -> Bool {
     xauxatOneTimePhotoPolicy(chatItem) != nil
 }
@@ -159,7 +177,19 @@ struct CIImageView: View {
                     view.modifier(PrivacyBlur(blurred: $blurred))
                 }
                 .if(!blurred) { v in
-                    v.simultaneousGesture(TapGesture().onEnded { showFullScreenImage = true })
+                    v.simultaneousGesture(TapGesture().onEnded {
+                        if xauXatIsSticker(chatItem), let user = m.currentUser {
+                            let scope = xauXatStorageScope()
+                            AlertManager.shared.showAlert(Alert(
+                                title: Text("Sticker"),
+                                primaryButton: .default(Text("Add to Favorites")) {
+                                    guard user.userId == m.currentUser?.userId, scope == xauXatStorageScope() else { return }
+                                    xauXatFavoriteSticker(chatItem, userID: user.userId)
+                                },
+                                secondaryButton: .cancel()
+                            ))
+                        } else { showFullScreenImage = true }
+                    })
                 }
                 .onChange(of: m.activeCallViewIsCollapsed) { _ in
                     showFullScreenImage = false
@@ -319,7 +349,7 @@ struct CIImageView: View {
     }
 
     private func imageView(_ img: UIImage) -> some View {
-        let w = img.size.width <= img.size.height ? maxWidth * 0.75 : maxWidth
+        let w = xauXatIsSticker(chatItem) ? min(maxWidth, 180) : (img.size.width <= img.size.height ? maxWidth * 0.75 : maxWidth)
         return ZStack(alignment: .topTrailing) {
             if img.imageData == nil {
                 Image(uiImage: img)

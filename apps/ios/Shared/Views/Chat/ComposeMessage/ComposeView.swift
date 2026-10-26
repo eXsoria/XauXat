@@ -1502,7 +1502,10 @@ struct ComposeView: View {
                           scope == xauXatStorageScope(), chat.chatInfo.sendMsgEnabled,
                           chat.chatInfo.groupChatScope() == conversationScope,
                           !composeState.attachmentDisabled, expressionsAllowStickers else { return }
-                    guard let file = saveImage(image) else { throw XauXatExpressionError.unavailable }
+                    guard let png = resizeImageToDataSize(image, maxDataSize: MAX_IMAGE_SIZE, hasAlpha: true),
+                          let file = saveFile(png, "sticker_\(UUID().uuidString).png", encrypted: privacyEncryptLocalFilesGroupDefault.get()) else {
+                        throw XauXatExpressionError.unavailable
+                    }
                     let info = chat.chatInfo
                     let quoted: Int64?
                     if case let .quotedItem(ci) = context { quoted = ci.id } else { quoted = nil }

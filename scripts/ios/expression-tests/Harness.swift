@@ -174,5 +174,11 @@ func privacyChecks() async throws -> Int {
     var deletedRejected = false
     do { _ = try lib.data(for: first) } catch { deletedRejected = true }
     try check(deletedRejected, "deleted entry rejected")
+    try lib.addStickerToFavorites(UIImage(data: pixels)!)
+    let favoritesCount = lib.items.count
+    try lib.addStickerToFavorites(UIImage(data: pixels)!)
+    try check(lib.items.count == favoritesCount && lib.items.contains(where: { $0.favorite }), "received favorite deduplicated")
+    try check(XauXatExpressionLibrary.isStickerFilename("sticker_\(UUID().uuidString).png"), "sticker filename recognized")
+    try check(!XauXatExpressionLibrary.isStickerFilename("sticker_not-a-uuid.png") && !XauXatExpressionLibrary.isStickerFilename("../sticker_\(UUID().uuidString).png"), "ordinary filenames not treated as stickers")
     return checks
 }

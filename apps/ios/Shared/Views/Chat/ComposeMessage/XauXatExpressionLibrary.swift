@@ -20,6 +20,7 @@ struct XauXatExpression: Identifiable, Codable, Equatable {
     let duration: Int
     var favorite: Bool = false
     var lastUsed: Date? = nil
+    var contentHash: String? = nil
 }
 
 enum XauXatExpressionError: LocalizedError {
@@ -40,18 +41,25 @@ enum XauXatExpressionError: LocalizedError {
 /// with a device-only key belonging to one profile in one storage scope.
 @MainActor
 final class XauXatExpressionLibrary: ObservableObject {
-    static let maxInputBytes = 10 * 1024 * 1024
-    static let maxItems = 100
-    static let maxSoundSeconds = 15.0
+    nonisolated static let maxInputBytes = 10 * 1024 * 1024
+    nonisolated static let maxItems = 100
+    nonisolated static let maxSoundSeconds = 15.0
     @Published private(set) var items: [XauXatExpression] = []
     private let directory: URL
     private let key: SymmetricKey
+    private let keyFingerprint: Data
+    private final class WeakLibrary {
+        weak var value: XauXatExpressionLibrary?
+        init(_ value: XauXatExpressionLibrary) { self.value = value }
+    }
+    private static var openLibraries: [String: WeakLibrary] = [:]
     private var manifest: URL { directory.appendingPathComponent("pack.sealed") }
 
     init(directory: URL, key: Data) throws {
         guard key.count == 32, directory.isFileURL else { throw XauXatExpressionError.unavailable }
         self.directory = directory
         self.key = SymmetricKey(data: key)
+        keyFingerprint = Data(SHA256.hash(data: key))
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                               attributes: [.protectionKey: FileProtectionType.complete])
         try excludeBackup(directory)
@@ -72,7 +80,12 @@ final class XauXatExpressionLibrary: ObservableObject {
         guard let key = xauXatExpressionLibraryKey(userID: userID, create: !exists) else {
             throw XauXatExpressionError.unavailable
         }
-        return try XauXatExpressionLibrary(directory: directory, key: key)
+        openLibraries = openLibraries.filter { $0.value.value != nil }
+        if let existing = openLibraries[directory.path]?.value,
+           existing.keyFingerprint == Data(SHA256.hash(data: key)) { return existing }
+        let library = try XauXatExpressionLibrary(directory: directory, key: key)
+        openLibraries[directory.path] = WeakLibrary(library)
+        return library
     }
 #endif
 
@@ -145,6 +158,33 @@ final class XauXatExpressionLibrary: ObservableObject {
         return try open(Data(contentsOf: assetURL(item)), context: item.id.uuidString)
     }
 
+    func addStickerToFavorites(_ image: UIImage) throws {
+        guard let png = image.pngData() else { throw XauXatExpressionError.invalidFile }
+        let data = try Self.normalizeSticker(png)
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        if let index = items.firstIndex(where: { $0.kind == .sticker && $0.contentHash == hash }) {
+            var updated = items
+            updated[index].favorite = true
+            try persist(updated)
+            items = updated
+            return
+        }
+        guard items.count < Self.maxItems else { throw XauXatExpressionError.libraryFull }
+        try append(data, kind: .sticker, title: NSLocalizedString("Sticker", comment: "received sticker"))
+        var updated = items
+        updated[updated.count - 1].favorite = true
+        do { try persist(updated); items = updated }
+        catch {
+            if let item = items.last { try? FileManager.default.removeItem(at: assetURL(item)); items.removeLast() }
+            throw error
+        }
+    }
+
+    nonisolated static func isStickerFilename(_ name: String) -> Bool {
+        guard name.hasPrefix("sticker_"), name.hasSuffix(".png") else { return false }
+        return UUID(uuidString: String(name.dropFirst(8).dropLast(4))) != nil
+    }
+
     func toggleFavorite(_ item: XauXatExpression) throws {
         var updated = items
         guard let i = updated.firstIndex(where: { $0.id == item.id }) else { return }
@@ -169,7 +209,8 @@ final class XauXatExpressionLibrary: ObservableObject {
     }
 
     private func append(_ data: Data, kind: XauXatExpressionKind, title: String, builtin: Bool = false, duration: Int = 0) throws {
-        let item = XauXatExpression(id: UUID(), kind: kind, title: title, builtin: builtin, duration: duration)
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let item = XauXatExpression(id: UUID(), kind: kind, title: title, builtin: builtin, duration: duration, contentHash: hash)
         try write(data, to: assetURL(item), context: item.id.uuidString)
         items.append(item)
     }

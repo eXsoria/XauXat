@@ -77,6 +77,14 @@ struct ChatItemView: View {
         } else if ci.quotedItem == nil && ci.meta.itemForwarded == nil && ci.meta.itemDeleted == nil && !ci.meta.isLive {
             if let mc = ci.content.msgContent, mc.isText && isShortEmoji(ci.content.text) {
                 EmojiItemView(chat: chat, chatItem: ci)
+            } else if xauXatIsSticker(ci) {
+                VStack(alignment: .trailing, spacing: 4) {
+                    CIImageView(chatItem: ci, senderProfile: ciSenderProfile(ci, chat.chatInfo), scrollToItem: scrollToItem,
+                                preview: ci.content.msgContent.flatMap { if case let .image(_, data) = $0 { imageFromBase64(data) } else { nil } },
+                                maxWidth: min(maxWidth, 180), showFullScreenImage: .constant(false))
+                    CIMetaView(chat: chat, chatItem: ci, metaColor: theme.colors.secondary)
+                        .padding(.horizontal, 4).padding(.bottom, 4)
+                }
             } else if ci.content.text.isEmpty, case let .voice(_, duration) = ci.content.msgContent {
                 CIVoiceView(chat: chat, chatItem: ci, recordingFile: ci.file, duration: duration, allowMenu: $allowMenu)
             } else if ci.content.msgContent == nil {

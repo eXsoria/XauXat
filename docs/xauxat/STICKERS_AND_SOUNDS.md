@@ -34,8 +34,12 @@ explicit reset of only that profile's local pack before reimporting.
 Outgoing attachments use the existing native SimpleX send APIs and configured
 Tor route; no transport or cryptographic protocol is added. Standard image and
 voice rendering preserves compatibility with existing clients. In this first
-version a received sticker is rendered as an image, and packs are local: there
-is no WhatsApp pack/ZIP import, pack sharing or received-sticker management.
+version, a generated `sticker_<UUID>.png` filename identifies presentation only;
+it remains an ordinary image attachment on the wire. XauXat shows the sticker
+without a photo frame and lets the recipient tap or long-press to add it to
+Favorites. Existing clients show a regular image. The marker never grants
+permissions or bypasses media download, blur, encryption or export policies.
+Packs are local: there is no WhatsApp pack/ZIP import or pack sharing.
 
 The simulator harness compiles the production library and tray. It exercises
 real media encoding/metadata removal, encrypted persistence, wrong keys,
