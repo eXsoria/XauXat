@@ -42,9 +42,7 @@ concurrency:
 jobs:
   home-chat-actions:
     name: Deleted contact removal
-    # These production SwiftUI views use adapters for the native core, so the
-    # interaction tests can run on Intel without waiting for an ARM runner.
-    runs-on: macos-26-intel
+    runs-on: macos-26
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
