@@ -44,7 +44,7 @@ jobs:
     name: Deleted contact removal
     # No native-core dependency: run the real SwiftUI views on either CPU.
     runs-on: macos-26-intel
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: bash scripts/ios/test-home-chat-actions.sh

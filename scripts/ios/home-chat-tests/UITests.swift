@@ -17,13 +17,19 @@ final class HomeChatTests: XCTestCase {
         return buttons.allElementsBoundByIndex.first(where: { $0.isHittable }) ?? buttons.firstMatch
     }
 
+    private func waitUntil(_ condition: @escaping () -> Bool,
+                           file: StaticString = #filePath, line: UInt = #line) {
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed, file: file, line: line)
+    }
+
     private func revealActions() {
         XCTAssertFalse(app.staticTexts["legacy.row"].exists, "Deleted contacts must use the ScrollView-compatible row")
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
         let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
         start.press(forDuration: 0.1, thenDragTo: end)
-        XCTAssertTrue(action("Delete").isHittable)
+        waitUntil { self.action("Delete").isHittable }
     }
 
     private func requestDeletion() {
@@ -58,7 +64,7 @@ final class HomeChatTests: XCTestCase {
             XCTAssertTrue(dismissRegion.waitForExistence(timeout: 3))
             dismissRegion.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9)).tap()
         }
-        XCTAssertFalse(app.buttons["Delete chat"].exists)
+        waitUntil { !self.app.buttons["Delete chat"].exists }
         XCTAssertTrue(row.exists)
         XCTAssertEqual(result.label, "No deletion")
         requestDeletion()
@@ -90,6 +96,7 @@ final class HomeChatTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Local store unavailable"].exists)
         proof("deletion-error-retains-contact")
         app.alerts.buttons.firstMatch.tap()
+        waitUntil { !self.app.alerts.firstMatch.exists }
         XCTAssertTrue(row.exists)
         XCTAssertEqual(result.label, "No deletion")
         requestDeletion()

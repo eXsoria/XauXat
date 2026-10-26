@@ -36,7 +36,7 @@ set +e
 xcodebuild -project "$temp/project/HomeChatHarness.xcodeproj" -scheme HomeChatHarness \
   -destination "platform=iOS Simulator,id=$udid" -parallel-testing-enabled NO \
   -derivedDataPath "$temp/build" -resultBundlePath "$out/HomeChats.xcresult" \
-  test CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$out/tests.log"
+  test CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES 2>&1 | tee "$out/tests.log"
 result=${PIPESTATUS[0]}
 set -e
 if [[ -d "$out/HomeChats.xcresult" ]]; then
