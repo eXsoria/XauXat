@@ -22,7 +22,9 @@ def declaration(source, marker):
         end += 1
     return source[start:end]
 
-sources = [(compose / name).read_text(encoding="utf-8") for name in ("VoiceRecordingInteraction.swift", "VoiceRecordingControls.swift")]
+sources = [(compose / name).read_text(encoding="utf-8").replace("import SimpleXChat", "") for name in ("VoiceRecordingInteraction.swift", "VoiceRecordingControls.swift")]
+chat_types = (root / "apps/ios/SimpleXChat/ChatTypes.swift").read_text(encoding="utf-8")
+sources += [declaration(chat_types, "public func durationText(")]
 audio = (root / "apps/ios/Shared/Model/AudioRecPlay.swift").read_text(encoding="utf-8")
 sources += ["import AVFoundation\nimport OSLog\n", declaration(audio, "@MainActor\nclass AudioRecorder:"), declaration(audio, "class AudioPlayer:")]
 preview = (compose / "ComposeVoiceView.swift").read_text(encoding="utf-8")

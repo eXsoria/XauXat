@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import SimpleXChat
 
 struct VoiceRecordingStatus: View {
     let interaction: VoiceRecordingInteraction
