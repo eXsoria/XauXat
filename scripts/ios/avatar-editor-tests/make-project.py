@@ -22,6 +22,7 @@ objects = []
 
 
 def add(ident, body):
+    assert all(not line.startswith(ident + " =") for line in objects), ident
     objects.append(f"{ident} = {{{body}}};")
 
 
@@ -37,8 +38,8 @@ for ident, ref in [("B1", "F1"), ("B2", "F2"), ("B3", "F3")]:
 add("AS", "isa=PBXSourcesBuildPhase; buildActionMask=2147483647; files=(B1,B2); runOnlyForDeploymentPostprocessing=0;")
 add("TS", "isa=PBXSourcesBuildPhase; buildActionMask=2147483647; files=(B3); runOnlyForDeploymentPostprocessing=0;")
 add("A", 'isa=PBXNativeTarget; buildConfigurationList=AC; buildPhases=(AS); buildRules=(); dependencies=(); name=AvatarHarness; productName=AvatarHarness; productReference=AP; productType="com.apple.product-type.application";')
-add("T", 'isa=PBXNativeTarget; buildConfigurationList=TC; buildPhases=(TS); buildRules=(); dependencies=(TD); name=AvatarHarnessUITests; productName=AvatarHarnessUITests; productReference=TP; productType="com.apple.product-type.bundle.ui-testing";')
-add("TD", "isa=PBXTargetDependency; target=A; targetProxy=PX;")
+add("T", 'isa=PBXNativeTarget; buildConfigurationList=TC; buildPhases=(TS); buildRules=(); dependencies=(DEP); name=AvatarHarnessUITests; productName=AvatarHarnessUITests; productReference=TP; productType="com.apple.product-type.bundle.ui-testing";')
+add("DEP", "isa=PBXTargetDependency; target=A; targetProxy=PX;")
 add("PX", "isa=PBXContainerItemProxy; containerPortal=P; proxyType=1; remoteGlobalIDString=A; remoteInfo=AvatarHarness;")
 common = 'SDKROOT=iphoneos; IPHONEOS_DEPLOYMENT_TARGET=15.0; SWIFT_VERSION=5.0; CODE_SIGNING_ALLOWED=NO; TARGETED_DEVICE_FAMILY=1; GENERATE_INFOPLIST_FILE=YES; PRODUCT_NAME="$(TARGET_NAME)";'
 for prefix, settings in [("P", common), ("A", 'PRODUCT_BUNDLE_IDENTIFIER=pt.exsoria.avatar-harness; INFOPLIST_KEY_UILaunchScreen_Generation=YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation=YES;'), ("T", 'PRODUCT_BUNDLE_IDENTIFIER=pt.exsoria.avatar-harness.tests; TEST_TARGET_NAME=AvatarHarness;')]:

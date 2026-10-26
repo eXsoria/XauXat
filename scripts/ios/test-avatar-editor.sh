@@ -14,6 +14,7 @@ cleanup() {
 }
 trap cleanup EXIT
 python3 "$root/scripts/ios/avatar-editor-tests/make-project.py" "$root" "$temp/project"
+xcodebuild -list -json -project "$temp/project/AvatarHarness.xcodeproj" > "$out/project.json"
 sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun swiftc -swift-version 5 -typecheck -sdk "$sdk" -target arm64-apple-ios15.0-simulator "$temp/project/Camera.swift"
 runtime=$(xcrun simctl list runtimes available --json | python3 -c 'import json,sys; r=[r for r in json.load(sys.stdin)["runtimes"] if r["name"].startswith("iOS")]; print(max(r,key=lambda x:tuple(map(int,x["version"].split("."))))["identifier"])')

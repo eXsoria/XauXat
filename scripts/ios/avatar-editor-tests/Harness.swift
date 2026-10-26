@@ -83,6 +83,7 @@ struct Harness: View {
                 Text("Saved \(saveCount)").accessibilityIdentifier("profile.saved")
                 if let saved {
                     Image(uiImage: saved).resizable().frame(width: 128, height: 128)
+                        .accessibilityLabel("Saved avatar")
                         .accessibilityIdentifier("profile.avatar")
                 }
             }

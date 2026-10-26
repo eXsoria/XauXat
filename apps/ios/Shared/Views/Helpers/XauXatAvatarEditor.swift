@@ -63,7 +63,7 @@ struct XauXatAvatarPicker: ViewModifier {
     }
 
     private func presentEditor() {
-        guard let image else { return }
+        guard editorImage == nil, let image else { return }
         editorImage = EditorImage(image: image)
     }
 
