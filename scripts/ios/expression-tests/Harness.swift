@@ -123,8 +123,17 @@ func privacyChecks() async throws -> Int {
     let tagged = NSMutableData()
     let destination = CGImageDestinationCreateWithData(tagged, UTType.jpeg.identifier as CFString, 1, nil)!
     let image = UIImage(data: pixels)!.cgImage!
-    CGImageDestinationAddImage(destination, image, [kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 38.72, kCGImagePropertyGPSLongitude: -9.14]] as CFDictionary)
-    try check(CGImageDestinationFinalize(destination), "tagged fixture encoded")
+    CGImageDestinationAddImage(destination, image, [
+        kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 38.72, kCGImagePropertyGPSLatitudeRef: "N", kCGImagePropertyGPSLongitude: 9.14, kCGImagePropertyGPSLongitudeRef: "W"],
+        kCGImagePropertyExifDictionary: [kCGImagePropertyExifUserComment: "PRIVATE_IMAGE_TAG"]
+    ] as CFDictionary)
+    guard CGImageDestinationFinalize(destination),
+          let taggedSource = CGImageSourceCreateWithData(tagged, nil),
+          let taggedProps = CGImageSourceCopyPropertiesAtIndex(taggedSource, 0, nil) as? [CFString: Any] else {
+        throw NSError(domain: "tagged fixture encoding", code: 1)
+    }
+    let originalExif = taggedProps[kCGImagePropertyExifDictionary] as? [CFString: Any]
+    try check(taggedProps[kCGImagePropertyGPSDictionary] != nil && originalExif?[kCGImagePropertyExifUserComment] as? String == "PRIVATE_IMAGE_TAG", "tagged fixture has private GPS and EXIF")
     let clean = try XauXatExpressionLibrary.normalizeSticker(tagged as Data)
     let source = CGImageSourceCreateWithData(clean as CFData, nil)!
     let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)! as NSDictionary
