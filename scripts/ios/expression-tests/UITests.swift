@@ -66,4 +66,12 @@ final class ExpressionUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Preview Pop"].isEnabled)
         XCTAssertTrue(app.buttons["Choose sound Pop"].isEnabled)
     }
+
+    func testLargeTextControlsRemainReachable() {
+        let app = launch(["--large-text"])
+        XCTAssertTrue(app.buttons["Close stickers and sounds"].isHittable)
+        app.buttons["Soundboard"].tap()
+        XCTAssertTrue(app.buttons["Choose sound Pop"].isHittable)
+        proof(app, "soundboard-large-text")
+    }
 }

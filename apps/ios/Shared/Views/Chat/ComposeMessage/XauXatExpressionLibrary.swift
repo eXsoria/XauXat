@@ -95,7 +95,7 @@ final class XauXatExpressionLibrary: ObservableObject {
             }
             for (title, notes) in [("Pop", [740.0]), ("Ta-da", [523.25, 659.25, 783.99]), ("Boing", [180.0, 360.0, 240.0])] {
                 let url = try Self.writeTone(notes)
-                defer { try? FileManager.default.removeItem(at: url) }
+                defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
                 let (data, duration) = try Self.readSound(url)
                 try append(data, kind: .sound, title: title, builtin: true, duration: duration)
             }
@@ -237,8 +237,8 @@ final class XauXatExpressionLibrary: ObservableObject {
             throw XauXatExpressionError.invalidFile
         }
         try input.read(into: buffer)
-        let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".m4a")
-        defer { try? FileManager.default.removeItem(at: output) }
+        let output = try temporaryMediaURL("m4a")
+        defer { try? FileManager.default.removeItem(at: output.deletingLastPathComponent()) }
         do {
             let writer = try AVAudioFile(forWriting: output, settings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -266,9 +266,21 @@ final class XauXatExpressionLibrary: ObservableObject {
             let local = Double(i % noteLength) / Double(noteLength)
             buffer.floatChannelData![0][i] = Float(sin(2 * .pi * notes[i / noteLength] * Double(i) / rate) * sin(.pi * local) * 0.25)
         }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
-        let file = try AVAudioFile(forWriting: url, settings: format.settings)
-        try file.write(from: buffer)
-        return url
+        let url = try temporaryMediaURL("caf")
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            try file.write(from: buffer)
+            return url
+        } catch {
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            throw error
+        }
+    }
+
+    nonisolated private static func temporaryMediaURL(_ ext: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+                                              attributes: [.protectionKey: FileProtectionType.complete])
+        return directory.appendingPathComponent("audio." + ext)
     }
 }

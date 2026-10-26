@@ -41,6 +41,7 @@ struct HarnessView: View {
                 .frame(height: 320)
             }
         }
+        .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("--large-text") ? .accessibility3 : .large)
         .task {
             do {
                 result = "Privacy checks passed: \(try await privacyChecks())"
@@ -75,6 +76,22 @@ func privacyChecks() async throws -> Int {
     let soundURL = root.appendingPathComponent("input.m4a")
     try lib.data(for: audio).write(to: soundURL)
     try check(AVAudioFile(forReading: soundURL).length > 0, "valid encoded sound")
+    let taggedAudio = root.appendingPathComponent("tagged.m4a")
+    let exporter = AVAssetExportSession(asset: AVURLAsset(url: soundURL), presetName: AVAssetExportPresetPassthrough)!
+    exporter.outputURL = taggedAudio
+    exporter.outputFileType = .m4a
+    let title = AVMutableMetadataItem()
+    title.identifier = .commonIdentifierTitle
+    title.value = "PRIVATE_AUDIO_TITLE" as NSString
+    exporter.metadata = [title]
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        exporter.exportAsynchronously { continuation.resume() }
+    }
+    try check(exporter.status == .completed && AVURLAsset(url: taggedAudio).commonMetadata.contains { $0.stringValue == "PRIVATE_AUDIO_TITLE" }, "tagged sound fixture")
+    try await lib.importFile(taggedAudio, kind: .sound)
+    let cleanAudio = root.appendingPathComponent("clean.m4a")
+    try lib.data(for: lib.items.last!).write(to: cleanAudio)
+    try check(!AVURLAsset(url: cleanAudio).commonMetadata.contains { $0.stringValue == "PRIVATE_AUDIO_TITLE" }, "audio tags stripped")
     try lib.toggleFavorite(first)
     try lib.markUsed(first)
     let reopened = try XauXatExpressionLibrary(directory: root, key: key)
@@ -123,6 +140,19 @@ func privacyChecks() async throws -> Int {
     do { try await lib.importFile(URL(string: "https://example.invalid/sticker.png")!, kind: .sticker) }
     catch { remoteRejected = true }
     try check(remoteRejected && lib.items.count == count, "remote URL rejected without import")
+    let oversized = root.appendingPathComponent("large.png")
+    FileManager.default.createFile(atPath: oversized.path, contents: nil)
+    let handle = try FileHandle(forWritingTo: oversized)
+    try handle.truncate(atOffset: UInt64(XauXatExpressionLibrary.maxInputBytes + 1))
+    try handle.close()
+    var largeRejected = false
+    do { try await lib.importFile(oversized, kind: .sticker) } catch { largeRejected = true }
+    try check(largeRejected && lib.items.count == count, "oversized file rejected")
+    let cancelled = Task { try await lib.importFile(imported, kind: .sticker) }
+    cancelled.cancel()
+    var cancellationRejected = false
+    do { try await cancelled.value } catch { cancellationRejected = true }
+    try check(cancellationRejected && lib.items.count == count, "cancelled import not committed")
     let longURL = root.appendingPathComponent("long.caf")
     do {
         let format = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)!

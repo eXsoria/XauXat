@@ -748,7 +748,7 @@ struct ComposeView: View {
                     allowStickers: expressionsAllowStickers,
                     allowSounds: expressionsAllowSounds,
                     allowPlayback: chatModel.activeCall == nil,
-                    sending: expressionSending,
+                    sending: expressionSending || composeState.inProgress,
                     close: closeExpressions,
                     select: stageExpression
                 )
@@ -1355,7 +1355,7 @@ struct ComposeView: View {
                 ? .indigo.opacity(colorScheme == .dark ? 1 : 0.7)
                 : theme.colors.primary
             )
-            .disabled(!chat.chatInfo.sendMsgEnabled)
+            .disabled(!chat.chatInfo.sendMsgEnabled || expressionSending)
 
             if let disabledText {
                 Text(disabledText)
@@ -1380,7 +1380,7 @@ struct ComposeView: View {
         }
         if expressionsAllowStickers || expressionsAllowSounds {
             Button {
-                if showExpressions { closeExpressions() } else { openExpressions() }
+                if showExpressions { closeExpressions(); keyboardVisible = true } else { openExpressions() }
             } label: {
                 Image(systemName: showExpressions ? "keyboard" : "face.smiling")
                     .font(.title3).frame(width: 32, height: 32)
@@ -1452,7 +1452,23 @@ struct ComposeView: View {
             keyboardVisible = false
             withAnimation(.easeInOut(duration: 0.2)) { showExpressions = true }
         } catch {
-            AlertManager.shared.showAlertMsg(title: "Could not open local pack", message: XauXatExpressionError.unavailable.localizedDescription)
+            let scope = xauXatStorageScope()
+            AlertManager.shared.showAlert(Alert(
+                title: Text("Could not open local pack"),
+                message: Text("Try again, or reset this local pack to import your stickers and sounds again. Resetting removes only this profile's pack."),
+                primaryButton: .destructive(Text("Reset local pack")) {
+                    guard chatModel.currentUser?.userId == user.userId, xauXatStorageScope() == scope else { return }
+                    let directory = getAppFilesDirectory().appendingPathComponent("expressions-\(user.userId)", isDirectory: true)
+                    do {
+                        if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
+                        xauXatRemoveExpressionLibraryKey(userID: user.userId, scope: scope)
+                        openExpressions()
+                    } catch {
+                        AlertManager.shared.showAlertMsg(title: "Could not reset local pack")
+                    }
+                },
+                secondaryButton: .cancel()
+            ))
         }
     }
 
@@ -1467,9 +1483,14 @@ struct ComposeView: View {
               let library = expressionLibrary else { return }
         let chatID = chat.id
         let scope = xauXatStorageScope()
+        let conversationScope = chat.chatInfo.groupChatScope()
+        let context = composeState.contextItem
         if item.kind == .sticker { expressionSending = true }
         Task { @MainActor in
             defer { expressionSending = false }
+            guard userID == chatModel.currentUser?.userId, chat.id == chatID,
+                  scope == xauXatStorageScope(), chat.chatInfo.groupChatScope() == conversationScope,
+                  chat.chatInfo.sendMsgEnabled, !composeState.attachmentDisabled else { return }
             do {
                 switch item.kind {
                 case .sticker:
@@ -1479,10 +1500,10 @@ struct ComposeView: View {
                     }
                     guard userID == chatModel.currentUser?.userId, chat.id == chatID,
                           scope == xauXatStorageScope(), chat.chatInfo.sendMsgEnabled,
+                          chat.chatInfo.groupChatScope() == conversationScope,
                           !composeState.attachmentDisabled, expressionsAllowStickers else { return }
                     guard let file = saveImage(image) else { throw XauXatExpressionError.unavailable }
                     let info = chat.chatInfo
-                    let context = composeState.contextItem
                     let quoted: Int64?
                     if case let .quotedItem(ci) = context { quoted = ci.id } else { quoted = nil }
                     let message = ComposedMessage(fileSource: file, quotedItemId: quoted, msgContent: .image(text: "", image: preview))

@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
+import ImageIO
 
 /// Keyboard-sized tray with local pack shortcuts and search. Stickers send on
 /// tap; sounds have separate preview and composer-selection actions.
@@ -196,8 +197,13 @@ struct XauXatExpressionsView: View {
 
     private func refreshThumbnails() {
         thumbnails = Dictionary(uniqueKeysWithValues: library.items.compactMap { item in
-            guard item.kind == .sticker, let data = try? library.data(for: item), let image = UIImage(data: data) else { return nil }
-            return (item.id, image)
+            guard item.kind == .sticker, let data = try? library.data(for: item),
+                  let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let pixels = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 192
+                  ] as CFDictionary) else { return nil }
+            return (item.id, UIImage(cgImage: pixels))
         })
     }
 

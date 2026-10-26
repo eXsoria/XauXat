@@ -25,9 +25,11 @@ Library media, titles, favorites and recents are AES-GCM encrypted with a random
 device-only key in the existing Keychain access group. Each profile in each
 primary/decoy storage scope has a separate key and directory under app_files.
 Files use complete iOS file protection and are excluded from system backups.
-Profile deletion removes the directory and key; whole-database file deletion
-also removes the library directories. Device migration does not transfer the
+Profile deletion removes the directory and key; whole-database/decoy deletion
+also removes the library directories and keys. Device migration does not transfer the
 device-only keys, so users must import their packs again on another device.
+If a transferred or damaged pack cannot be decrypted, opening it offers an
+explicit reset of only that profile's local pack before reimporting.
 
 Outgoing attachments use the existing native SimpleX send APIs and configured
 Tor route; no transport or cryptographic protocol is added. Standard image and
