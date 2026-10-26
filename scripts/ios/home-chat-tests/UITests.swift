@@ -26,6 +26,7 @@ final class HomeChatTests: XCTestCase {
     private func revealActions() {
         XCTAssertFalse(app.staticTexts["legacy.row"].exists, "Deleted contacts must use the ScrollView-compatible row")
         XCTAssertTrue(row.waitForExistence(timeout: 5))
+        waitUntil { self.row.isHittable }
         let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
         let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
         start.press(forDuration: 0.1, thenDragTo: end)
