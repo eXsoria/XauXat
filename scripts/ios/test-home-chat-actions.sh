@@ -17,7 +17,7 @@ python3 "$root/scripts/ios/home-chat-tests/make-project.py" "$root" "$temp/proje
 xcodebuild -list -json -project "$temp/project/HomeChatHarness.xcodeproj" > "$out/project.json"
 sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun swiftc -swift-version 5 -typecheck -parse-as-library -sdk "$sdk" \
-  -target arm64-apple-ios15.0-simulator "$temp/project/Harness.swift" "$temp/project/Rows.swift"
+  -target "$(uname -m)-apple-ios15.0-simulator" "$temp/project/Harness.swift" "$temp/project/Rows.swift"
 runtime=$(xcrun simctl list runtimes available --json | python3 -c 'import json,sys; r=[r for r in json.load(sys.stdin)["runtimes"] if r["name"].startswith("iOS")]; print(max(r,key=lambda x:tuple(map(int,x["version"].split("."))))["identifier"])')
 type=$(xcrun simctl list devicetypes --json | python3 -c 'import json,sys; print(next(d["identifier"] for d in json.load(sys.stdin)["devicetypes"] if d["name"]=="iPhone 14 Pro"))')
 udid=$(xcrun simctl create XauXat-Home-Chats "$type" "$runtime")
@@ -28,9 +28,9 @@ import sys
 with open(sys.argv[2], "w") as log:
     try:
         subprocess.run(["xcrun", "simctl", "bootstatus", sys.argv[1], "-b"],
-                       stdout=log, stderr=subprocess.STDOUT, timeout=300, check=True)
+                       stdout=log, stderr=subprocess.STDOUT, timeout=600, check=True)
     except subprocess.TimeoutExpired:
-        raise SystemExit("Simulator boot did not finish within five minutes; see boot.log")
+        raise SystemExit("Simulator boot did not finish within ten minutes; see boot.log")
 PY
 set +e
 xcodebuild -project "$temp/project/HomeChatHarness.xcodeproj" -scheme HomeChatHarness \
