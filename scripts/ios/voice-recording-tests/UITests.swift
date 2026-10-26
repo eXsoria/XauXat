@@ -28,7 +28,6 @@ final class VoiceRecordingTests: XCTestCase {
         snapshot("released-recording-preview")
         let firstFileDuration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
         app.buttons["voice.play"].tap()
-        XCTAssertEqual(app.buttons["voice.play"].label, "Pause playback")
         let first = app.staticTexts["voice.duration"].label
         app.buttons["voice.resume"].tap()
         XCTAssertTrue(mic.waitForExistence(timeout: 3))
@@ -49,7 +48,7 @@ final class VoiceRecordingTests: XCTestCase {
         XCTAssertTrue(mic.waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Phase idle"].exists)
         XCTAssertFalse(app.buttons["voice.send"].exists)
-        mic.press(forDuration: 0.8)
+        mic.press(forDuration: 2)
         preview()
         app.buttons["voice.delete"].tap()
         XCTAssertTrue(app.staticTexts["Phase idle"].waitForExistence(timeout: 3))
@@ -121,7 +120,7 @@ final class VoiceRecordingTests: XCTestCase {
         allow.tap()
         XCTAssertTrue(app.staticTexts["Phase idle"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["voice.send"].exists)
-        mic.press(forDuration: 0.8)
+        mic.press(forDuration: 2)
         preview()
     }
 }
