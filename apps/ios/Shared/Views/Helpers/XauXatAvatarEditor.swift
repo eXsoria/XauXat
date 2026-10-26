@@ -88,9 +88,12 @@ struct XauXatAvatarEditor: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button("Cancel", action: onCancel)
-                    .accessibilityIdentifier("avatar.cancel")
-                    .frame(minHeight: 44)
+                Button(action: onCancel) {
+                    Text("Cancel")
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("avatar.cancel")
 
                 Spacer(minLength: 8)
 
@@ -107,10 +110,12 @@ struct XauXatAvatarEditor: View {
                 } label: {
                     Text("Use Photo")
                         .fontWeight(.semibold)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("avatar.confirm")
-                .frame(minHeight: 44)
             }
+            .buttonStyle(.plain)
             .foregroundColor(Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255))
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
@@ -141,6 +146,7 @@ struct XauXatAvatarEditor: View {
                     width: geometry.size.width,
                     height: geometry.size.height
                 )
+                .contentShape(Rectangle())
                 .clipped()
                 .accessibilityIdentifier("avatar.crop")
             }
