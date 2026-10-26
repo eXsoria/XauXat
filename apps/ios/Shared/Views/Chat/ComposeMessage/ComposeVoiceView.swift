@@ -42,6 +42,7 @@ struct ComposeVoiceView: View {
     @State private var playbackState: VoiceMessagePlaybackState = .noPlayback
     @State private var playbackTime: TimeInterval?
     @State private var showMaskPicker = false
+    @ScaledMetric(relativeTo: .body) private var timeLabelSize: CGFloat = 17
 
     var body: some View {
         VStack(spacing: 0) {
@@ -151,7 +152,7 @@ struct ComposeVoiceView: View {
                     }
                     .accessibilityLabel("Play recording")
                     .accessibilityIdentifier("voice.play")
-                    Text(voiceMessageTime_(recordingTime))
+                    timeLabel(recordingTime)
                 case .playing:
                     Button {
                         audioPlayer?.pause()
@@ -161,7 +162,7 @@ struct ComposeVoiceView: View {
                     }
                     .accessibilityLabel("Pause playback")
                     .accessibilityIdentifier("voice.play")
-                    Text(voiceMessageTime_(playbackTime))
+                    timeLabel(playbackTime)
                 case .paused:
                     Button {
                         audioPlayer?.play()
@@ -171,7 +172,7 @@ struct ComposeVoiceView: View {
                     }
                     .accessibilityLabel("Play recording")
                     .accessibilityIdentifier("voice.play")
-                    Text(voiceMessageTime_(playbackTime))
+                    timeLabel(playbackTime)
                 }
                 VoiceRecordingWaveform(levels: recordingLevels, color: theme.colors.primary)
                 if let resumeRecording {
@@ -182,6 +183,7 @@ struct ComposeVoiceView: View {
                         resumeRecording()
                     } label: {
                         Image(systemName: "mic.fill")
+                            .font(.system(size: 21))
                             .foregroundColor(.red)
                             .frame(width: 44, height: 44)
                     }
@@ -228,12 +230,19 @@ struct ComposeVoiceView: View {
             .frame(width: 44, height: 44)
     }
 
+    private func timeLabel(_ time: TimeInterval?) -> some View {
+        Text(voiceMessageTime_(time))
+            .font(.system(size: min(timeLabelSize, 28), weight: .regular, design: .monospaced))
+            .fixedSize()
+    }
+
     private func cancelButton() -> some View {
         Button {
             audioPlayer?.stop()
             cancelVoiceMessage(recordingFileName)
         } label: {
             Image(systemName: "trash")
+                .font(.system(size: 20))
                 .frame(width: 44, height: 44)
         }
         .tint(theme.colors.primary)

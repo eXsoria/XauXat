@@ -69,7 +69,9 @@ struct SendMessageView: View {
                     .frame(minHeight: 44)
             } else if case .voicePreview = composeState.preview {
                 Text("Voice message…")
-                    .font(teFont.italic())
+                    .font(.callout.italic())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .multilineTextAlignment(.leading)
                     .foregroundColor(theme.colors.secondary)
                     .padding(.horizontal, 10)

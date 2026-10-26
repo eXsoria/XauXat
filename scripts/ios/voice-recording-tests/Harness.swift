@@ -116,7 +116,7 @@ struct HarnessView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Voice messages").font(.title2)
+            Text("Voice messages").font(.system(size: 20, weight: .semibold))
             VStack(spacing: 4) {
                 Text("Sent \(sent)")
                 Text("Phase \(String(describing: voiceInteraction.phase))").accessibilityIdentifier("voice.phase")

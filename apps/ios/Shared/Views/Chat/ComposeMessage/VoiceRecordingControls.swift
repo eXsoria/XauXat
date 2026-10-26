@@ -9,12 +9,14 @@ struct VoiceRecordingStatus: View {
     var deleteRecording: (() -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
+    @ScaledMetric(relativeTo: .callout) private var timeLabelSize: CGFloat = 16
 
     var body: some View {
         HStack(spacing: 8) {
             if interaction.phase == .locked || interaction.phase == .finishing, let deleteRecording {
                 Button(action: deleteRecording) {
                     Image(systemName: "trash")
+                        .font(.system(size: 20))
                         .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("Delete recording")
@@ -28,7 +30,7 @@ struct VoiceRecordingStatus: View {
             }
             Text(durationText(Int(time)))
                 .monospacedDigit()
-                .font(.callout)
+                .font(.system(size: min(timeLabelSize, 28), weight: .regular, design: .monospaced))
                 .fixedSize()
                 .accessibilityLabel("Recording duration")
                 .accessibilityValue(durationText(Int(time)))

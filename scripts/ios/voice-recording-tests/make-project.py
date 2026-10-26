@@ -34,7 +34,8 @@ adapters = r'''
     private func sendMessageButton() -> some View {
         Button { sendMessage(nil) } label: {
             Image(systemName: "arrow.up.circle.fill")
-                .font(.title)
+                .resizable()
+                .frame(width: 29, height: 29)
                 .frame(width: 44, height: 44)
         }
         .accessibilityIdentifier("voice.send")
@@ -42,7 +43,7 @@ adapters = r'''
     private func sendToConnectButton(_ connect: @escaping () -> Void) -> some View { Button("Connect", action: connect) }
     private func voiceMessageNotAllowedButton() -> some View { Image(systemName: "mic") }
     private func startLiveMessageButton(send: @escaping () async -> Void, update: @escaping () async -> Void) -> some View {
-        Image(systemName: "bolt.fill").frame(width: 29, height: 29).padding([.bottom, .horizontal], 4)
+        Image(systemName: "bolt.fill").resizable().scaledToFit().frame(width: 20, height: 20).frame(width: 29, height: 29).padding([.bottom, .horizontal], 4)
     }
     private func finishVoiceMessageRecordingButton() -> some View { Button("Pause") { finishVoiceMessageRecording?() } }
     private func cancelLiveMessageButton(cancel: @escaping () -> Void) -> some View { Button("Cancel", action: cancel) }
