@@ -108,8 +108,17 @@ struct AvatarHarnessApp: App {
     var body: some Scene {
         WindowGroup {
             Harness()
-                .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("large-text")
-                    ? .accessibility5 : .large)
+                .onAppear {
+                    // Set UIKit's scene trait so newly presented hosting
+                    // controllers receive the same category as the root view.
+                    if #available(iOS 17.0, *) {
+                        let category: UIContentSizeCategory = ProcessInfo.processInfo.arguments.contains("large-text")
+                            ? .accessibilityExtraExtraExtraLarge : .large
+                        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                            scene.traitOverrides.preferredContentSizeCategory = category
+                        }
+                    }
+                }
         }
     }
 }

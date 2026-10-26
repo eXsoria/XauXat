@@ -89,6 +89,8 @@ final class AvatarEditorTests: XCTestCase {
     func testExitControlsWithAccessibilityText() {
         app.launchArguments.append("large-text")
         app.launch()
+        XCTAssertGreaterThan(app.buttons["profile.camera"].frame.height, 55,
+                             "The fixture must use the larger UIKit content size category")
         openCamera()
         XCTAssertGreaterThan(app.buttons["avatar.cancel"].frame.height, 55,
                              "The presented editor must actually use accessibility text")
