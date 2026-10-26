@@ -1,14 +1,16 @@
 import XCTest
 
 final class ExpressionUITests: XCTestCase {
+    override func setUp() { continueAfterFailure = false }
     func launch(_ arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = arguments
         app.launch()
         XCTAssertTrue(app.staticTexts["validation"].waitForExistence(timeout: 20))
-        let ready = NSPredicate(format: "label BEGINSWITH 'Privacy checks passed:'")
+        let ready = NSPredicate(format: "label BEGINSWITH 'Privacy checks passed:' OR label BEGINSWITH 'FAILED:'")
         expectation(for: ready, evaluatedWith: app.staticTexts["validation"])
         waitForExpectations(timeout: 30)
+        XCTAssertTrue(app.staticTexts["validation"].label.hasPrefix("Privacy checks passed:"), app.staticTexts["validation"].label)
         XCTAssertTrue(app.buttons[arguments.contains("--limited") ? "Choose sound Pop" : "Send sticker 👍"].waitForExistence(timeout: 10))
         return app
     }
