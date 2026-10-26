@@ -27,6 +27,30 @@ audio = (root / "apps/ios/Shared/Model/AudioRecPlay.swift").read_text()
 sources += ["import AVFoundation\nimport OSLog\n", declaration(audio, "@MainActor\nclass AudioRecorder:"), declaration(audio, "class AudioPlayer:")]
 preview = (compose / "ComposeVoiceView.swift").read_text()
 sources += [preview[:preview.index("private struct XauXatVoiceMaskPickerView")].replace("import SimpleXChat", "")]
+send = (compose / "SendMessageView.swift").read_text()
+send = send[:send.index("    private func deleteTextButton()")].replace("import SimpleXChat", "")
+send = "\n".join(line for line in send.splitlines() if "@UserDefault" not in line)
+adapters = r'''
+    private func sendMessageButton() -> some View {
+        Button { sendMessage(nil) } label: {
+            Image(systemName: "arrow.up.circle.fill")
+                .font(.title)
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityIdentifier("voice.send")
+    }
+    private func sendToConnectButton(_ connect: @escaping () -> Void) -> some View { Button("Connect", action: connect) }
+    private func voiceMessageNotAllowedButton() -> some View { Image(systemName: "mic") }
+    private func startLiveMessageButton(send: @escaping () async -> Void, update: @escaping () async -> Void) -> some View {
+        Image(systemName: "bolt.fill").frame(width: 29, height: 29).padding([.bottom, .horizontal], 4)
+    }
+    private func finishVoiceMessageRecordingButton() -> some View { Button("Pause") { finishVoiceMessageRecording?() } }
+    private func cancelLiveMessageButton(cancel: @escaping () -> Void) -> some View { Button("Cancel", action: cancel) }
+    private func deleteTextButton() -> some View { EmptyView() }
+    private func updateFont(_ text: String) {}
+}
+'''
+sources += [(fixtures / "ComposerAdapters.swift").read_text(), send + adapters]
 controller = (compose / "ComposeView.swift").read_text()
 methods = ["beginVoiceMessageRecording", "moveVoiceMessageRecording", "releaseVoiceMessageRecording", "cancelVoiceMessageTouch", "discardVoiceMessageRecording", "startVoiceMessageRecording", "finishVoiceMessageRecording", "resumeVoiceMessageRecording", "updateComposeVMRFinished", "cancelCurrentVoiceRecording", "cancelVoiceMessageRecording"]
 sources += ["extension HarnessView {\n" + "\n".join(declaration(controller, "private func " + name + "(").replace("private func", "func", 1) for name in methods) + "\n}"]

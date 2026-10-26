@@ -60,11 +60,12 @@ struct SendMessageView: View {
     var body: some View {
         let composeShape = RoundedRectangle(cornerSize: CGSize(width: 20, height: 20))
         let trailingContentInset: CGFloat = composeState.progressByTimeout ? progressTrailingContentInset : 32
+        let recordingActionInset: CGFloat = sendLiveMessage != nil && updateLiveMessage != nil && composeState.contextItem == .noContextItem ? 96 : 52
         ZStack(alignment: .leading) {
             if voiceInteraction.active {
                 VoiceRecordingStatus(interaction: voiceInteraction, time: voiceRecordingTime, levels: voiceRecordingLevels, color: sendButtonColor, deleteRecording: discardVoiceMessageRecording)
                     .padding(.leading, 12)
-                    .padding(.trailing, 52)
+                    .padding(.trailing, recordingActionInset)
                     .frame(minHeight: 44)
             } else if case .voicePreview = composeState.preview {
                 Text("Voice message…")

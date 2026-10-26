@@ -28,16 +28,26 @@ class XauXatPlusEntitlements: ObservableObject {
 }
 class ChatModel: ObservableObject { @Published var stopPreviousRecPlay: URL? }
 struct ChatInfo {
+    enum ShowEnableVoiceMessagesAlert { case other }
     var sendMsgEnabled = true
     func featureEnabled(_ feature: Feature) -> Bool { true }
 }
 struct Chat { var chatInfo = ChatInfo() }
 enum ComposePreview { case noPreview, voicePreview(recordingFileName: String, duration: Int) }
+enum ContextItem: Equatable { case noContextItem, reportedItem }
+struct FixtureLiveMessage { var sentMsg: String? }
 struct ComposeState {
     var preview = ComposePreview.noPreview
     var voiceMessageRecordingState = VoiceMessageRecordingState.noRecording
     var voiceMaskingState = VoiceMaskingState.unavailable
     var inProgress = false
+    var message = ""
+    var editing = false
+    var forwarding = false
+    var progressByTimeout = false
+    var liveMessage: FixtureLiveMessage?
+    var contextItem = ContextItem.noContextItem
+    var placeholder: String { "Message" }
     var noPreview: Bool { if case .noPreview = preview { return true }; return false }
     var voiceMessageRecordingFileName: String? { if case let .voicePreview(name, _) = preview { return name }; return nil }
     func copy(preview: ComposePreview? = nil, voiceMessageRecordingState: VoiceMessageRecordingState? = nil, voiceMaskingState: VoiceMaskingState? = nil) -> Self {
@@ -48,7 +58,7 @@ struct ComposeState {
         return result
     }
 }
-struct ThemeColors { let primary = Color.accentColor; let secondary = Color.secondary; let sentMessage = Color(uiColor: .secondarySystemBackground) }
+struct ThemeColors { let primary = Color.accentColor; let secondary = Color.secondary; let sentMessage = Color(uiColor: .secondarySystemBackground); let background = Color(uiColor: .systemBackground) }
 class AppTheme: ObservableObject { let colors = ThemeColors(); let appColors = ThemeColors() }
 class AlertManager {
     static let shared = AlertManager()
@@ -89,6 +99,9 @@ struct HarnessView: View {
     @State var stopPlayback = false
     @State var sent = 0
     @State var validDuration: TimeInterval = 0
+    @State var selectedRange = NSRange()
+    @State var keyboardVisible = false
+    @State var keyboardHiddenDate = Date()
     @Environment(\.scenePhase) var scenePhase
 
     var body: some View {
@@ -102,17 +115,10 @@ struct HarnessView: View {
             if composeState.voiceMessageRecordingState == .finished, let name = composeState.voiceMessageRecordingFileName {
                 ComposeVoiceView(recordingFileName: name, recordingTime: $voiceMessageRecordingTime, recordingState: $composeState.voiceMessageRecordingState, maskingState: $composeState.voiceMaskingState, recordingLevels: voiceRecordingLevels, resumeRecording: audioRecorder == nil ? nil : resumeVoiceMessageRecording, applyVoiceMask: { _, _ in }, cancelVoiceMessage: { _ in discardVoiceMessageRecording() }, cancelEnabled: true, stopPlayback: $stopPlayback)
             }
-            HStack(spacing: 0) {
-                if voiceInteraction.active {
-                    VoiceRecordingStatus(interaction: voiceInteraction, time: voiceMessageRecordingTime ?? 0, levels: voiceRecordingLevels, color: .accentColor, deleteRecording: discardVoiceMessageRecording)
-                } else {
-                    Text(composeState.noPreview ? "Message" : "Voice message…").foregroundColor(.secondary)
-                    Spacer()
-                }
-                if composeState.noPreview || voiceInteraction.active {
-                    VoiceRecordingButton(interaction: voiceInteraction, color: .accentColor, begin: beginVoiceMessageRecording, move: moveVoiceMessageRecording, release: releaseVoiceMessageRecording, cancelTouch: cancelVoiceMessageTouch, pause: finishVoiceMessageRecording)
-                } else {
-                    Button {
+            SendMessageView(
+                composeState: $composeState,
+                selectedRange: $selectedRange,
+                sendMessage: { _ in
                         audioRecorder?.stop()
                         audioRecorder = nil
                         if let name = composeState.voiceMessageRecordingFileName {
@@ -120,13 +126,22 @@ struct HarnessView: View {
                         }
                         sent += 1
                         discardVoiceMessageRecording()
-                    } label: { Image(systemName: "arrow.up.circle.fill").font(.largeTitle).frame(width: 44, height: 44) }
-                    .accessibilityIdentifier("voice.send")
-                }
-            }
-            .padding(8)
-            .frame(minHeight: 60)
-            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 24))
+                },
+                sendLiveMessage: {},
+                updateLiveMessage: {},
+                voiceInteraction: voiceInteraction,
+                voiceRecordingTime: voiceMessageRecordingTime ?? 0,
+                voiceRecordingLevels: voiceRecordingLevels,
+                startVoiceMessageRecording: beginVoiceMessageRecording,
+                moveVoiceMessageRecording: moveVoiceMessageRecording,
+                releaseVoiceMessageRecording: releaseVoiceMessageRecording,
+                cancelVoiceMessageTouch: cancelVoiceMessageTouch,
+                discardVoiceMessageRecording: discardVoiceMessageRecording,
+                finishVoiceMessageRecording: finishVoiceMessageRecording,
+                onMediaAdded: { _ in },
+                keyboardVisible: $keyboardVisible,
+                keyboardHiddenDate: $keyboardHiddenDate
+            )
         }
         .padding()
         .onChange(of: composeState.voiceMessageRecordingState) { state in
