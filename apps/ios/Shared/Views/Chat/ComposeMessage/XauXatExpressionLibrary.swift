@@ -104,7 +104,7 @@ final class XauXatExpressionLibrary: ObservableObject {
                     text.draw(at: CGPoint(x: (256 - size.width) / 2, y: (256 - size.height) / 2), withAttributes: attributes)
                 }
                 guard let data = image.pngData() else { throw XauXatExpressionError.invalidFile }
-                try append(data, kind: .sticker, title: emoji, builtin: true)
+                try append(try Self.normalizeSticker(data), kind: .sticker, title: emoji, builtin: true)
             }
             for (title, notes) in [("Pop", [740.0]), ("Ta-da", [523.25, 659.25, 783.99]), ("Boing", [180.0, 360.0, 240.0])] {
                 let url = try Self.writeTone(notes)
@@ -260,8 +260,16 @@ final class XauXatExpressionLibrary: ObservableObject {
         let rebuilt = UIGraphicsImageRenderer(size: size, format: format).image { _ in
             UIImage(cgImage: pixels).draw(in: CGRect(origin: .zero, size: size))
         }
-        guard let png = rebuilt.pngData() else { throw XauXatExpressionError.invalidFile }
-        return png
+        // UIImage.pngData can add an EXIF dictionary of its own. Encode the
+        // newly rendered pixels directly, with no source metadata properties.
+        guard let cleanPixels = rebuilt.cgImage else { throw XauXatExpressionError.invalidFile }
+        let png = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(png, UTType.png.identifier as CFString, 1, nil) else {
+            throw XauXatExpressionError.invalidFile
+        }
+        CGImageDestinationAddImage(destination, cleanPixels, nil)
+        guard CGImageDestinationFinalize(destination) else { throw XauXatExpressionError.invalidFile }
+        return png as Data
     }
 
     /// Reading PCM and encoding a fresh AAC stream drops artwork, tags, extra
