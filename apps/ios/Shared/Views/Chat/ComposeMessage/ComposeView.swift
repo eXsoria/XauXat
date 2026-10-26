@@ -1538,7 +1538,7 @@ struct ComposeView: View {
                     closeExpressions()
                 }
             } catch {
-                AlertManager.shared.showAlertMsg(title: "Could not prepare media", message: XauXatExpressionError.unavailable.localizedDescription)
+                AlertManager.shared.showAlertMsg(title: "Could not prepare media", message: LocalizedStringKey(XauXatExpressionError.unavailable.localizedDescription))
             }
         }
     }

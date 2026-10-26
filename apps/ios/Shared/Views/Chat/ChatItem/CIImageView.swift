@@ -26,7 +26,7 @@ func xauXatIsSticker(_ item: ChatItem) -> Bool {
         try library.addStickerToFavorites(image)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     } catch {
-        AlertManager.shared.showAlertMsg(title: "Could not save sticker", message: XauXatExpressionError.unavailable.localizedDescription)
+        AlertManager.shared.showAlertMsg(title: "Could not save sticker", message: LocalizedStringKey(XauXatExpressionError.unavailable.localizedDescription))
     }
 }
 
