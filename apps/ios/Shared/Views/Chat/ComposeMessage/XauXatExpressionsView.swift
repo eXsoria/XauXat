@@ -146,15 +146,15 @@ struct XauXatExpressionsView: View {
             Group {
                 if dynamicTypeSize.isAccessibilitySize {
                     VStack(spacing: 2) {
-                        Image(systemName: icon).font(.body)
-                        Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.8)
+                        Image(systemName: icon).font(.body.weight(kind == value ? .semibold : .regular))
+                        Text(title).font(.caption.weight(kind == value ? .semibold : .regular))
+                            .lineLimit(1).minimumScaleFactor(0.8)
                     }
                     .frame(maxWidth: .infinity)
                 } else {
-                    Label(title, systemImage: icon).font(.subheadline)
+                    Label(title, systemImage: icon).font(.subheadline.weight(kind == value ? .semibold : .regular))
                 }
             }
-            .fontWeight(kind == value ? .semibold : .regular)
             .foregroundColor(kind == value ? .accentColor : .secondary)
             .padding(.vertical, 4)
         }
