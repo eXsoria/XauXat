@@ -100,6 +100,16 @@ final class VoiceRecordingTests: XCTestCase {
         XCTAssertFalse(app.buttons["voice.send"].exists)
         XCTAssertTrue(app.staticTexts["Sent 0"].exists)
     }
+    func testResumedRecordingHonorsTheTotalDurationLimit() {
+        app.launch()
+        mic.press(forDuration: 2)
+        preview()
+        app.buttons["voice.resume"].tap()
+        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 9))
+        XCTAssertFalse(app.buttons["voice.resume"].exists)
+        let duration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
+        XCTAssertEqual(duration, 6, accuracy: 0.3, "Pausing cannot reset the total recording limit")
+    }
     func testPermissionGrantedAfterFingerReleasedDoesNotStartRecording() {
         app.resetAuthorizationStatus(for: .microphone)
         app.launch()

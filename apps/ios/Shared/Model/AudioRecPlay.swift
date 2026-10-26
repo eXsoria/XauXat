@@ -243,7 +243,9 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
             try AVAudioSession.sharedInstance().setCategory(.playAndRecord, options: .defaultToSpeaker)
             ownsAudioSession = true
             try AVAudioSession.sharedInstance().setActive(true)
-            guard recorder.record(forDuration: MAX_VOICE_MESSAGE_LENGTH - recorder.currentTime) else {
+            // record() resumes the open file. The common-mode timer enforces
+            // the total limit, including audio captured before a pause.
+            guard recorder.record() else {
                 pause()
                 return false
             }
