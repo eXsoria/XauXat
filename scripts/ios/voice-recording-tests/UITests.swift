@@ -92,9 +92,12 @@ final class VoiceRecordingTests: XCTestCase {
         openRecorder()
         let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         origin.press(forDuration: 0.7, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
-        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 10))
+        // The limit is media time; hosted simulator accessibility queries can stall longer.
+        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 30), app.staticTexts["voice.error"].label)
         XCTAssertFalse(app.buttons["voice.resume"].exists, "The completed recorder cannot resume past the limit")
         XCTAssertFalse(app.staticTexts["Playable 0.00"].exists)
+        let duration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
+        XCTAssertEqual(duration, 6, accuracy: 0.3, "Hands-free capture must stop at the recording limit")
         XCTAssertTrue(app.staticTexts["Sent 0"].exists)
     }
     func testQuickTapDoesNotKeepRecording() {
