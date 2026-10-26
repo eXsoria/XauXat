@@ -1380,9 +1380,9 @@ struct ComposeView: View {
         }
         if expressionsAllowStickers || expressionsAllowSounds {
             Button {
-                if showExpressions { closeExpressions(); keyboardVisible = true } else { openExpressions() }
+                if showExpressions { closeExpressions() } else { openExpressions() }
             } label: {
-                Image(systemName: showExpressions ? "keyboard" : "face.smiling")
+                Image(systemName: showExpressions ? "chevron.down" : "face.smiling")
                     .font(.title3).frame(width: 32, height: 32)
             }
             .accessibilityLabel(showExpressions ? "Close stickers and sounds" : "Stickers & sounds")
