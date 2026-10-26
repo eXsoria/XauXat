@@ -3,6 +3,14 @@ import Foundation
 // These adapters replace native/iOS services. All startup decisions, ordering
 // and setup retry behavior are extracted from production by the test runner.
 enum Phase { case active, inactive, background }
+final class UIApplication {
+    static let shared = UIApplication()
+    var applicationState = Phase.active
+}
+final class AppSheetState {
+    static let shared = AppSheetState()
+    var scenePhaseActive = true
+}
 enum NotificationsMode { case off }
 enum OnboardingStage { case step1_SimpleXInfo, step2_CreateProfile, step4_NetworkCommitments, onboardingComplete }
 enum AppState { case active, suspended, stopped }
@@ -46,6 +54,7 @@ let DEFAULT_LA_NOTICE_SHOWN = "synthetic-notice"
 let DEFAULT_XAUXAT_EMPTY_SETUP = "synthetic-empty-setup"
 struct Log { func debug(_ text: String) {} }
 let logger = Log()
+func xauXatRecordStartup(_ event: String, capturedScene: String) {}
 final class ChatModel {
     static let shared = ChatModel()
     var migrationState: Int?
@@ -162,10 +171,13 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
         AppChatState.shared.value = .suspended
         onboardingStageDefault.value = .onboardingComplete
         UserDefaults.standard.set(false, forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
+        UIApplication.shared.applicationState = .active
+        AppSheetState.shared.scenePhaseActive = true
     }
     static func main() async throws {
         reset()
         let first = StartupHarness()
+        first.scenePhase = .inactive // The App value captured before UIKit became active.
         first.initializeNewInstallation()
         expect(localStarts == [false], "Fresh setup opens only the local store before Tor")
         expect(UserDefaults.standard.bool(forKey: DEFAULT_XAUXAT_EMPTY_SETUP), "The known-empty setup marker survives relaunch")
@@ -189,17 +201,18 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
         UserDefaults.standard.set(true, forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
         StartupHarness().initializeNewInstallation()
         expect(localStarts.isEmpty, "A stale empty-store marker cannot open a completed profile before Tor")
-        for blocker in 0..<7 {
+        for blocker in 0..<8 {
             reset()
             let launch = StartupHarness()
             switch blocker {
             case 0: databaseExists = true
             case 1: alternatePIN = true
-            case 2: launch.scenePhase = .background
-            case 3: launch.scenePhase = .inactive
+            case 2: UIApplication.shared.applicationState = .background
+            case 3: UIApplication.shared.applicationState = .inactive
             case 4: ChatModel.shared.ctrlInitInProgress = true
             case 5: ChatModel.shared.migrationState = 1
-            default: AppChatState.shared.value = .stopped
+            case 6: AppChatState.shared.value = .stopped
+            default: AppSheetState.shared.scenePhaseActive = false
             }
             launch.initializeNewInstallation()
             expect(localStarts.isEmpty, "Existing, protected, inactive or migrating stores keep their startup boundary")
@@ -221,6 +234,7 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
 
         reset()
         let setup = SetupHarness()
+        setup.scenePhase = .inactive // A stale environment must not prevent active setup.
         UserDefaults.standard.set(true, forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
         setup.finishOnboarding()
         await until { EmbeddedTorManager.shared.waiter != nil }
@@ -244,8 +258,8 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
             setup.finishOnboarding()
             await until { EmbeddedTorManager.shared.waiter != nil }
             switch failure {
-            case 0: setup.scenePhase = .background
-            case 1: setup.scenePhase = .inactive
+            case 0: UIApplication.shared.applicationState = .background
+            case 1: UIApplication.shared.applicationState = .inactive
             case 2: ChatModel.shared.networkInfo.online = false
             case 3: storeOpen = false; reopenSucceeds = false
             default: activationSucceeds = false

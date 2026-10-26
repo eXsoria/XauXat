@@ -17,8 +17,10 @@ def declaration(path, marker):
 
 app_path = "apps/ios/Shared/SimpleXApp.swift"
 app = (root / app_path).read_text(encoding="utf-8")
-assert app.count("initializeNewInstallation()") == 3, "Fresh setup must run on appearance and foreground"
+assert app.count("initializeNewInstallation()") == 4, "Fresh setup must run on appearance and foreground"
+assert "UIApplication.didBecomeActiveNotification" in app, "UIKit activation must retry a cold setup that appeared while inactive"
 text = "import Foundation\n"
+text += declaration("apps/ios/Shared/Model/SuspendChat.swift", "func xauXatAppIsForeground()") + "\n"
 text += declaration("apps/ios/Shared/Model/SimpleXAPI.swift", "func startChat(")
 text += "\n" + declaration("apps/ios/Shared/Model/SuspendChat.swift", "func initChatAndMigrate(")
 text += "\n@MainActor final class StartupHarness {\n"

@@ -87,7 +87,6 @@ private enum XauXatOnboardingField: Hashable {
 struct XauXatWelcomeView: View {
     @EnvironmentObject private var chatModel: ChatModel
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.scenePhase) private var scenePhase
     @State private var step = 0
     @State private var displayName = ""
     @State private var pin = ""
@@ -565,7 +564,7 @@ struct XauXatWelcomeView: View {
                 // Setup is available while Tor starts. Never create a profile or
                 // start its networking until this process verifies the route.
                 _ = try await EmbeddedTorManager.shared.ensureReady(maxAge: 15)
-                guard scenePhase == .active, chatModel.networkInfo.online, isXauXatTorReady() else {
+                guard xauXatAppIsForeground(), chatModel.networkInfo.online, isXauXatTorReady() else {
                     throw RuntimeError("Open XauXat with a network connection to finish setup.")
                 }
                 // The empty setup store may have closed while setup was in the

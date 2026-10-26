@@ -14,6 +14,7 @@ content = (root / 'apps/ios/Shared/ContentView.swift').read_text()
 sheet = (root / 'apps/ios/Shared/Views/Helpers/AppSheet.swift').read_text()
 auth = (root / 'apps/ios/Shared/Views/Helpers/LocalAuthenticationUtils.swift').read_text()
 app = (root / 'apps/ios/Shared/SimpleXApp.swift').read_text()
+suspend = (root / 'apps/ios/Shared/Model/SuspendChat.swift').read_text()
 
 def declaration(source, marker):
     start = source.index(marker)
@@ -42,6 +43,14 @@ import Foundation
     init(wrappedValue: Value) { self.wrappedValue = wrappedValue }
 }
 enum Phase: Equatable { case active, inactive, background }
+final class UIApplication {
+    static let shared = UIApplication()
+    var applicationState = Phase.active
+}
+final class AppSheetState {
+    static let shared = AppSheetState()
+    var scenePhaseActive = true
+}
 enum TorState { case starting, ready(UInt16) }
 final class Tor { var state: TorState = .starting }
 var socksReady = false
@@ -105,6 +114,7 @@ func authenticate(reason: String, selfDestruct: Bool, completed: (LAResult) -> V
 func dismissAllSheets(animated: Bool, _ completed: () -> Void) { completed() }
 struct Log { func debug(_ text: String) {} }
 let logger = Log()
+func xauXatRecordStartup(_ event: String, capturedScene: String) {}
 final class AlertManager {
     static let shared = AlertManager()
     var alerts: [String] = []
@@ -295,7 +305,7 @@ struct OpeningUsage: View {
 # the alternate-PIN boundary. The action must also work after startup timed out.
 refresh_gate = declaration(content, 'private var canRefreshConnection: Bool').replace('private ', '', 1)
 initializer = declaration(app, 'private func initializeAfterTor()').replace('private ', '', 1)
-(temp / 'Refresh.swift').write_text(adapters[:adapters.index('struct Harness {')] + selection + '''
+(temp / 'Refresh.swift').write_text(adapters[:adapters.index('struct Harness {')] + selection + '\n' + declaration(suspend, 'func xauXatAppIsForeground()') + '''
 final class RefreshHarness {
     var showsProgress = true
     var refreshConnection: (() -> Void)? = {}
@@ -329,6 +339,9 @@ final class RefreshHarness {
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         expect(initializations == 0, "refresh cannot select a store before the alternate PIN")
         kcDecoyPassword.value = nil
+        // Startup callbacks captured an inactive App value. The live UIKit
+        // state must let the initial screen open once the process is active.
+        scenePhase = .inactive
         initializeAfterTor()
         initializeAfterTor()
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
@@ -345,7 +358,8 @@ final class RefreshHarness {
         expect(initializations == 1, "readiness lost during the delay cannot initialize the core")
         socksReady = true
         initializeAfterTor()
-        scenePhase = .background
+        scenePhase = .active // The captured view can still say active after backgrounding.
+        UIApplication.shared.applicationState = .background
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         expect(initializations == 1, "backgrounding during refresh cannot open a store")
     }
