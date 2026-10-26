@@ -41,7 +41,7 @@ add("A", 'isa=PBXNativeTarget; buildConfigurationList=AC; buildPhases=(AS); buil
 add("T", 'isa=PBXNativeTarget; buildConfigurationList=TC; buildPhases=(TS); buildRules=(); dependencies=(DEP); name=AvatarHarnessUITests; productName=AvatarHarnessUITests; productReference=TP; productType="com.apple.product-type.bundle.ui-testing";')
 add("DEP", "isa=PBXTargetDependency; target=A; targetProxy=PX;")
 add("PX", "isa=PBXContainerItemProxy; containerPortal=P; proxyType=1; remoteGlobalIDString=A; remoteInfo=AvatarHarness;")
-common = 'SDKROOT=iphoneos; IPHONEOS_DEPLOYMENT_TARGET=15.0; SWIFT_VERSION=5.0; CODE_SIGNING_ALLOWED=NO; TARGETED_DEVICE_FAMILY=1; GENERATE_INFOPLIST_FILE=YES; PRODUCT_NAME="$(TARGET_NAME)";'
+common = 'SDKROOT=iphoneos; IPHONEOS_DEPLOYMENT_TARGET=15.0; SWIFT_VERSION=5.0; CODE_SIGNING_ALLOWED=NO; TARGETED_DEVICE_FAMILY=1; GENERATE_INFOPLIST_FILE=YES; CURRENT_PROJECT_VERSION=1; MARKETING_VERSION=1.0; PRODUCT_NAME="$(TARGET_NAME)";'
 for prefix, settings in [("P", common), ("A", 'PRODUCT_BUNDLE_IDENTIFIER=pt.exsoria.avatar-harness; INFOPLIST_KEY_UILaunchScreen_Generation=YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation=YES;'), ("T", 'PRODUCT_BUNDLE_IDENTIFIER=pt.exsoria.avatar-harness.tests; TEST_TARGET_NAME=AvatarHarness;')]:
     add(prefix + "C", f'isa=XCConfigurationList; buildConfigurations=({prefix}D,{prefix}R); defaultConfigurationIsVisible=0; defaultConfigurationName=Debug;')
     for suffix, name in [("D", "Debug"), ("R", "Release")]:
