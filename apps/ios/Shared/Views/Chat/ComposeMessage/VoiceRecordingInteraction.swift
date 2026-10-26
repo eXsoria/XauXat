@@ -3,7 +3,7 @@ import Foundation
 // A request identifies one recording, including the microphone permission wait.
 // Releasing/cancelling invalidates it so a late permission result cannot record.
 struct VoiceRecordingInteraction {
-    enum Phase { case idle, holding, locked, preview }
+    enum Phase { case idle, holding, locked, finishing, preview }
     enum Action { case none, cancel, lock, finish }
 
     private(set) var phase: Phase = .idle
@@ -12,7 +12,7 @@ struct VoiceRecordingInteraction {
     private(set) var cancelProgress: Double = 0
     private(set) var lockProgress: Double = 0
 
-    var active: Bool { phase == .holding || phase == .locked }
+    var active: Bool { phase == .holding || phase == .locked || phase == .finishing }
 
     mutating func begin(locked: Bool = false) -> UUID? {
         guard phase == .idle else { return nil }
@@ -54,6 +54,19 @@ struct VoiceRecordingInteraction {
         ready = false
         cancelProgress = 0
         lockProgress = 0
+    }
+
+    mutating func prepareToFinish() {
+        phase = .finishing
+        ready = false
+        requestID = nil
+        cancelProgress = 0
+        lockProgress = 0
+    }
+
+    mutating func finishFailed() {
+        phase = .locked
+        ready = true
     }
 
     mutating func resume() {

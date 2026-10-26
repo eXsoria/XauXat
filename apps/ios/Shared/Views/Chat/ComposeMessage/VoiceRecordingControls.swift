@@ -12,7 +12,7 @@ struct VoiceRecordingStatus: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if interaction.phase == .locked, let deleteRecording {
+            if interaction.phase == .locked || interaction.phase == .finishing, let deleteRecording {
                 Button(action: deleteRecording) {
                     Image(systemName: "trash")
                         .frame(width: 44, height: 44)
@@ -34,7 +34,7 @@ struct VoiceRecordingStatus: View {
                 .accessibilityValue(durationText(Int(time)))
             if !interaction.ready {
                 ProgressView().controlSize(.small)
-                Text("Starting…").font(.caption).lineLimit(1)
+                Text(interaction.phase == .finishing ? "Preparing audio…" : "Starting…").font(.caption).lineLimit(1)
             } else if interaction.phase == .holding {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left")
@@ -102,7 +102,7 @@ struct VoiceRecordingButton: View {
                 .foregroundColor(interaction.active ? .white : color)
                 .accessibilityHidden(true)
             VoiceRecordingTouchSurface(
-                enabled: !disabled,
+                enabled: !disabled && interaction.phase != .finishing,
                 label: interaction.phase == .locked ? NSLocalizedString("Pause recording", comment: "voice recording button") : NSLocalizedString("Record voice message", comment: "voice recording button"),
                 hint: interaction.active ? "" : NSLocalizedString("Hold to record. Release to stop. Slide left to cancel or up to lock. Double-tap to record hands-free.", comment: "voice recording accessibility hint"),
                 touchDown: { interaction.phase == .locked ? pause() : begin(false) },
@@ -113,7 +113,7 @@ struct VoiceRecordingButton: View {
             )
         }
         .frame(width: 44, height: 44)
-        .opacity(disabled ? 0.4 : 1)
+        .opacity(disabled || interaction.phase == .finishing ? 0.4 : 1)
         .overlay(alignment: .bottom) {
             if interaction.phase == .holding {
                 VStack(spacing: 10) {

@@ -565,6 +565,8 @@ struct ComposeView: View {
     @State private var voiceInteraction = VoiceRecordingInteraction()
     @State private var voiceRecordingLevels: [CGFloat] = []
     @State private var voiceRecordingViewVisible = false
+    @State private var finishingVoiceFileName: String?
+    @State private var voiceRecordingOwner = UUID()
     @Environment(\.scenePhase) private var scenePhase
     // for some reason voice message preview playback occasionally
     // fails to stop on ComposeVoiceView.playbackMode().onDisappear,
@@ -917,7 +919,7 @@ struct ComposeView: View {
         }
         .onDisappear {
             voiceRecordingViewVisible = false
-            if voiceInteraction.active && !voiceInteraction.ready {
+            if voiceInteraction.active && !voiceInteraction.ready && voiceInteraction.phase != .finishing {
                 cancelCurrentVoiceRecording()
             }
             if codeLockCode != nil {
@@ -946,8 +948,10 @@ struct ComposeView: View {
                 clearCurrentDraft()
                 clearState()
             }
-            audioRecorder?.stop()
-            audioRecorder = nil
+            if finishingVoiceFileName == nil {
+                audioRecorder?.stop()
+                audioRecorder = nil
+            }
             chatModel.removeLiveDummy(animated: false)
             codeLockCode = nil
             codeLockMaxAttempts = nil
@@ -967,7 +971,7 @@ struct ComposeView: View {
         }
         .onChange(of: scenePhase) { phase in
             if phase == .background {
-                if voiceInteraction.active && !voiceInteraction.ready {
+                if voiceInteraction.active && !voiceInteraction.ready && voiceInteraction.phase != .finishing {
                     cancelCurrentVoiceRecording()
                 } else if composeState.voiceMessageRecordingState == .recording {
                     finishVoiceMessageRecording()
@@ -977,7 +981,7 @@ struct ComposeView: View {
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notification in
             if let type = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                type == AVAudioSession.InterruptionType.began.rawValue {
-                if voiceInteraction.active && !voiceInteraction.ready {
+                if voiceInteraction.active && !voiceInteraction.ready && voiceInteraction.phase != .finishing {
                     cancelCurrentVoiceRecording()
                 } else if composeState.voiceMessageRecordingState == .recording {
                     finishVoiceMessageRecording()
@@ -986,8 +990,18 @@ struct ComposeView: View {
         }
         .onAppear {
             voiceRecordingViewVisible = true
-            if case let .voicePreview(_, duration) = composeState.preview {
+            if case let .voicePreview(fileName, duration) = composeState.preview {
                 voiceMessageRecordingTime = TimeInterval(duration)
+                if composeState.voiceMessageRecordingState == .recording {
+                    if let pending = AudioRecorder.pending(fileName) {
+                        bindVoiceRecorder(pending)
+                        audioRecorder = pending
+                        voiceMessageRecordingTime = pending.duration
+                        finishVoiceMessageRecording()
+                    } else {
+                        updateComposeVMRFinished()
+                    }
+                }
             }
         }
         .alert("Send report to moderators?", isPresented: $showReportSendConfirmation) {
@@ -1740,7 +1754,7 @@ struct ComposeView: View {
                     recordingState: $composeState.voiceMessageRecordingState,
                     maskingState: $composeState.voiceMaskingState,
                     recordingLevels: voiceRecordingLevels,
-                    resumeRecording: audioRecorder != nil && composeState.voiceMaskingState == .available && !composeState.inProgress ? resumeVoiceMessageRecording : nil,
+                    resumeRecording: audioRecorder?.canResume == true && composeState.voiceMaskingState == .available && !composeState.inProgress ? resumeVoiceMessageRecording : nil,
                     applyVoiceMask: applyVoiceMask,
                     cancelVoiceMessage: {
                         cancelVoiceMessageRecording($0)
@@ -2363,21 +2377,8 @@ struct ComposeView: View {
         guard voiceInteraction.requestID == requestID else { return }
         let fileName = generateNewFileName("voice-\(requestID.uuidString)", "m4a")
         chatModel.stopPreviousRecPlay = getAppFilePath(fileName)
-        let recorder = AudioRecorder(
-            onTimer: { voiceMessageRecordingTime = $0 },
-            onFinishRecording: {
-                voiceInteraction.finish()
-                audioRecorder = nil
-                updateComposeVMRFinished()
-                if let fileSize = fileSize(getAppFilePath(fileName)) {
-                    logger.debug("onFinishRecording recording file size = \(fileSize)")
-                }
-            },
-            onLevel: { level in
-                voiceRecordingLevels.append(level)
-                if voiceRecordingLevels.count > 40 { voiceRecordingLevels.removeFirst() }
-            }
-        )
+        let recorder = AudioRecorder(onTimer: { _ in }, onFinishRecording: {})
+        bindVoiceRecorder(recorder)
         audioRecorder = recorder
         let recStartError = await recorder.start(fileName: fileName, shouldStart: {
             voiceInteraction.requestID == requestID && voiceInteraction.active && voiceRecordingViewVisible && chat.chatInfo.sendMsgEnabled && chat.chatInfo.featureEnabled(.voice) && chatModel.stopPreviousRecPlay == getAppFilePath(fileName)
@@ -2421,24 +2422,70 @@ struct ComposeView: View {
         }
     }
 
+    private func bindVoiceRecorder(_ recorder: AudioRecorder) {
+        recorder.owner = voiceRecordingOwner
+        recorder.onTimer = { voiceMessageRecordingTime = $0 }
+        recorder.onFinishRecording = finishVoiceMessageRecording
+        recorder.onFinishing = finishVoiceMessageRecording
+        recorder.onLevel = { level in
+            voiceRecordingLevels.append(level)
+            if voiceRecordingLevels.count > 40 { voiceRecordingLevels.removeFirst() }
+        }
+    }
+
     // Spec: spec/client/compose.md#finishVoiceMessageRecording
     private func finishVoiceMessageRecording() {
+        guard finishingVoiceFileName == nil else { return }
         guard voiceInteraction.ready || composeState.voiceMessageRecordingState == .recording else {
             if voiceInteraction.active { discardVoiceMessageRecording() }
             return
         }
-        audioRecorder?.pause()
-        // Accidental taps produce no draft and never leave the microphone on.
-        if (voiceMessageRecordingTime ?? 0) < 0.3 {
-            discardVoiceMessageRecording()
+        guard let recorder = audioRecorder, let fileName = composeState.voiceMessageRecordingFileName else {
+            updateComposeVMRFinished()
             return
         }
-        voiceInteraction.finish()
-        updateComposeVMRFinished()
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        if let fileName = composeState.voiceMessageRecordingFileName,
-           let fileSize = fileSize(getAppFilePath(fileName)) {
-            logger.debug("finishVoiceMessageRecording recording file size = \(fileSize)")
+        guard recorder.owner == voiceRecordingOwner else { return }
+        finishingVoiceFileName = fileName
+        let finalization = recorder.pause()
+        voiceInteraction.prepareToFinish()
+        voiceMessageRecordingTime = recorder.duration
+        composeState = composeState.copy(preview: .voicePreview(recordingFileName: fileName, duration: max(1, Int(recorder.duration.rounded()))))
+        Task {
+            do {
+                try await finalization.value
+                guard audioRecorder === recorder, recorder.owner == voiceRecordingOwner, composeState.voiceMessageRecordingFileName == fileName, !recorder.cancelled else { return }
+                finishingVoiceFileName = nil
+                if recorder.duration < 0.3 {
+                    discardVoiceMessageRecording()
+                    return
+                }
+                voiceMessageRecordingTime = recorder.duration
+                voiceInteraction.finish()
+                updateComposeVMRFinished()
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                if !voiceRecordingViewVisible {
+                    if saveLastDraft,
+                       chatModel.draftChatId == draftChatId(chat.id, chat.chatInfo.groupChatScope()),
+                       chatModel.draft?.voiceMessageRecordingFileName == fileName {
+                        saveCurrentDraft()
+                    }
+                    recorder.stop()
+                    audioRecorder = nil
+                } else if !recorder.canResume {
+                    recorder.stop()
+                    audioRecorder = nil
+                }
+            } catch {
+                guard audioRecorder === recorder, recorder.owner == voiceRecordingOwner, composeState.voiceMessageRecordingFileName == fileName, !recorder.cancelled else { return }
+                finishingVoiceFileName = nil
+                voiceInteraction.finishFailed()
+                AlertManager.shared.showAlert(Alert(
+                    title: Text("Unable to prepare voice message"),
+                    message: Text("Your audio has been kept. Try again to prepare it for playback and sending."),
+                    primaryButton: .default(Text("Try again")) { finishVoiceMessageRecording() },
+                    secondaryButton: .destructive(Text("Delete recording")) { discardVoiceMessageRecording() }
+                ))
+            }
         }
     }
 
@@ -2513,6 +2560,13 @@ struct ComposeView: View {
     }
 
     private func cancelCurrentVoiceRecording() {
+        if let recorder = audioRecorder, recorder.owner != voiceRecordingOwner {
+            audioRecorder = nil
+            voiceInteraction.reset()
+            finishingVoiceFileName = nil
+            return
+        }
+        finishingVoiceFileName = nil
         voiceInteraction.reset()
         audioRecorder?.stop()
         audioRecorder = nil
@@ -2523,6 +2577,7 @@ struct ComposeView: View {
 
     // Spec: spec/client/compose.md#cancelVoiceMessageRecording
     private func cancelVoiceMessageRecording(_ fileName: String) {
+        finishingVoiceFileName = nil
         voiceInteraction.reset()
         stopPlayback.toggle()
         audioRecorder?.stop()
@@ -2532,6 +2587,7 @@ struct ComposeView: View {
 
     // Spec: spec/client/compose.md#clearState
     private func clearState(live: Bool = false) {
+        finishingVoiceFileName = nil
         voiceInteraction.reset()
         audioRecorder?.stop()
         if live {

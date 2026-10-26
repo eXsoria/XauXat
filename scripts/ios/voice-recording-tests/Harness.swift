@@ -26,13 +26,20 @@ class XauXatPlusEntitlements: ObservableObject {
     static let shared = XauXatPlusEntitlements()
     func isAuthorized(for feature: Feature) -> Bool { false }
 }
-class ChatModel: ObservableObject { @Published var stopPreviousRecPlay: URL? }
+class ChatModel: ObservableObject {
+    @Published var stopPreviousRecPlay: URL?
+    var draft: ComposeState?
+    var draftChatId: String?
+}
 struct ChatInfo {
+    let id = "chat"
     enum ShowEnableVoiceMessagesAlert { case other }
     var sendMsgEnabled = true
     func featureEnabled(_ feature: Feature) -> Bool { true }
+    func groupChatScope() -> Int? { nil }
 }
-struct Chat { var chatInfo = ChatInfo() }
+struct Chat { var chatInfo = ChatInfo(); var id: String { chatInfo.id } }
+func draftChatId(_ id: String, _ scope: Int?) -> String { id }
 enum ComposePreview { case noPreview, voicePreview(recordingFileName: String, duration: Int) }
 enum ContextItem: Equatable { case noContextItem, reportedItem }
 struct FixtureLiveMessage { var sentMsg: String? }
@@ -96,6 +103,9 @@ struct HarnessView: View {
     @State var voiceMessageRecordingTime: TimeInterval?
     @State var voiceRecordingLevels: [CGFloat] = []
     @State var voiceRecordingViewVisible = true
+    @State var finishingVoiceFileName: String?
+    @State var voiceRecordingOwner = UUID()
+    let saveLastDraft = true
     @State var stopPlayback = false
     @State var sent = 0
     @State var validDuration: TimeInterval = 0
@@ -107,13 +117,16 @@ struct HarnessView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text("Voice messages").font(.title2)
-            Text("Sent \(sent)")
-            Text("Phase \(String(describing: voiceInteraction.phase))").accessibilityIdentifier("voice.phase")
-            Text("Duration \(String(format: "%.2f", voiceMessageRecordingTime ?? 0))").accessibilityIdentifier("voice.duration")
-            Text("Playable \(String(format: "%.2f", validDuration))").accessibilityIdentifier("voice.playable")
+            VStack(spacing: 4) {
+                Text("Sent \(sent)")
+                Text("Phase \(String(describing: voiceInteraction.phase))").accessibilityIdentifier("voice.phase")
+                Text("Duration \(String(format: "%.2f", voiceMessageRecordingTime ?? 0))").accessibilityIdentifier("voice.duration")
+                Text("Playable \(String(format: "%.2f", validDuration))").accessibilityIdentifier("voice.playable")
+            }
+            .font(.system(size: 12))
             Spacer()
             if composeState.voiceMessageRecordingState == .finished, let name = composeState.voiceMessageRecordingFileName {
-                ComposeVoiceView(recordingFileName: name, recordingTime: $voiceMessageRecordingTime, recordingState: $composeState.voiceMessageRecordingState, maskingState: $composeState.voiceMaskingState, recordingLevels: voiceRecordingLevels, resumeRecording: audioRecorder == nil ? nil : resumeVoiceMessageRecording, applyVoiceMask: { _, _ in }, cancelVoiceMessage: { _ in discardVoiceMessageRecording() }, cancelEnabled: true, stopPlayback: $stopPlayback)
+                ComposeVoiceView(recordingFileName: name, recordingTime: $voiceMessageRecordingTime, recordingState: $composeState.voiceMessageRecordingState, maskingState: $composeState.voiceMaskingState, recordingLevels: voiceRecordingLevels, resumeRecording: audioRecorder?.canResume == true ? resumeVoiceMessageRecording : nil, applyVoiceMask: { _, _ in }, cancelVoiceMessage: { _ in discardVoiceMessageRecording() }, cancelEnabled: true, stopPlayback: $stopPlayback)
             }
             SendMessageView(
                 composeState: $composeState,

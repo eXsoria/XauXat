@@ -8,6 +8,10 @@ final class VoiceRecordingTests: XCTestCase {
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
     }
     private var mic: XCUIElement { app.buttons["voice.record"] }
+    private func openRecorder() {
+        app.launch()
+        XCTAssertTrue(mic.waitForExistence(timeout: 20), "The composer must be ready before sending a gesture")
+    }
     private func snapshot(_ name: String) {
         let proof = XCTAttachment(screenshot: app.screenshot())
         proof.name = name
@@ -15,14 +19,14 @@ final class VoiceRecordingTests: XCTestCase {
         add(proof)
     }
     private func preview() {
-        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["voice.resume"].isHittable)
         XCTAssertTrue(app.buttons["voice.delete"].isHittable)
         XCTAssertFalse(app.staticTexts["Playable 0.00"].exists, "A paused recording must already be playable")
         XCTAssertTrue(app.staticTexts["Sent 0"].exists, "Releasing must never send")
     }
     func testHoldReleasePreviewResumeAndSend() {
-        app.launch()
+        openRecorder()
         mic.press(forDuration: 2)
         preview()
         snapshot("released-recording-preview")
@@ -42,7 +46,7 @@ final class VoiceRecordingTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Playable 0.00"].exists, "Finalized AAC must be playable")
     }
     func testSlideLeftCancelsWithoutLeavingMicrophoneRunning() {
-        app.launch()
+        openRecorder()
         let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         origin.press(forDuration: 0.7, thenDragTo: origin.withOffset(CGVector(dx: -140, dy: 0)))
         XCTAssertTrue(mic.waitForExistence(timeout: 3))
@@ -55,7 +59,7 @@ final class VoiceRecordingTests: XCTestCase {
     }
     func testSlideUpLocksAndPauseShowsPreview() {
         app.launchArguments += ["dark", "large-text"]
-        app.launch()
+        openRecorder()
         let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         origin.press(forDuration: 0.8, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
         XCTAssertTrue(app.staticTexts["Phase locked"].waitForExistence(timeout: 3))
@@ -66,7 +70,7 @@ final class VoiceRecordingTests: XCTestCase {
         snapshot("preview-dark-accessibility-text")
     }
     func testBackgroundStopsLockedRecording() {
-        app.launch()
+        openRecorder()
         let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         origin.press(forDuration: 0.8, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
         XCTAssertTrue(app.staticTexts["Phase locked"].waitForExistence(timeout: 3))
@@ -75,7 +79,7 @@ final class VoiceRecordingTests: XCTestCase {
         preview()
     }
     func testLockedRecordingCanBeDeleted() {
-        app.launch()
+        openRecorder()
         let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         origin.press(forDuration: 0.8, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
         XCTAssertTrue(app.buttons["voice.cancel"].waitForExistence(timeout: 3))
@@ -85,7 +89,7 @@ final class VoiceRecordingTests: XCTestCase {
     }
     func testDurationLimitEndsHandsFreeRecording() {
         app.launchArguments.append("short-limit")
-        app.launch()
+        openRecorder()
         let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         origin.press(forDuration: 0.7, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
         XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 10))
@@ -94,7 +98,7 @@ final class VoiceRecordingTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Sent 0"].exists)
     }
     func testQuickTapDoesNotKeepRecording() {
-        app.launch()
+        openRecorder()
         mic.tap()
         XCTAssertTrue(app.staticTexts["Phase idle"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["voice.send"].exists)
@@ -102,7 +106,7 @@ final class VoiceRecordingTests: XCTestCase {
     }
     func testResumedRecordingHonorsTheTotalDurationLimit() {
         app.launchArguments.append("short-limit")
-        app.launch()
+        openRecorder()
         mic.press(forDuration: 2)
         preview()
         app.buttons["voice.resume"].tap()
@@ -113,7 +117,7 @@ final class VoiceRecordingTests: XCTestCase {
     }
     func testPermissionGrantedAfterFingerReleasedDoesNotStartRecording() {
         app.resetAuthorizationStatus(for: .microphone)
-        app.launch()
+        openRecorder()
         mic.press(forDuration: 0.2)
         let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"]
         XCTAssertTrue(allow.waitForExistence(timeout: 5))

@@ -52,7 +52,7 @@ adapters = r'''
 '''
 sources += [(fixtures / "ComposerAdapters.swift").read_text(), send + adapters]
 controller = (compose / "ComposeView.swift").read_text()
-methods = ["beginVoiceMessageRecording", "moveVoiceMessageRecording", "releaseVoiceMessageRecording", "cancelVoiceMessageTouch", "discardVoiceMessageRecording", "startVoiceMessageRecording", "finishVoiceMessageRecording", "resumeVoiceMessageRecording", "updateComposeVMRFinished", "cancelCurrentVoiceRecording", "cancelVoiceMessageRecording"]
+methods = ["beginVoiceMessageRecording", "moveVoiceMessageRecording", "releaseVoiceMessageRecording", "cancelVoiceMessageTouch", "discardVoiceMessageRecording", "startVoiceMessageRecording", "bindVoiceRecorder", "finishVoiceMessageRecording", "resumeVoiceMessageRecording", "updateComposeVMRFinished", "cancelCurrentVoiceRecording", "cancelVoiceMessageRecording", "saveCurrentDraft"]
 sources += ["extension HarnessView {\n" + "\n".join(declaration(controller, "private func " + name + "(").replace("private func", "func", 1) for name in methods) + "\n}"]
 (out / "Editor.swift").write_text("\n".join(sources))
 
