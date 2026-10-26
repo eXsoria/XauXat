@@ -108,6 +108,18 @@ final class HomeChatTests: XCTestCase {
         assertResult("Full deletion notify=false")
     }
 
+    func testMoreMenuDeletesActiveContactWithNotification() {
+        app.launchArguments.append("active")
+        app.launch()
+        revealActions()
+        action("More").tap()
+        XCTAssertTrue(app.buttons["Delete contact"].waitForExistence(timeout: 3))
+        app.buttons["Delete contact"].tap()
+        XCTAssertTrue(app.staticTexts["This contact and its conversation will be permanently deleted."].waitForExistence(timeout: 5))
+        app.buttons["Delete contact"].tap()
+        assertResult("Full deletion notify=true")
+    }
+
     func testReceivedDeletionKeepsSwipeAvailableWithoutDeletingAutomatically() {
         app.launchArguments.append("active")
         app.launch()
