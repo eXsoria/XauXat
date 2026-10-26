@@ -55,6 +55,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: bash scripts/ios/test-opening-presentation.sh
+      - run: bash scripts/ios/test-startup-readiness.sh
+      - run: swiftc -swift-version 5 -typecheck scripts/ios/verify-onboarding-screenshot.swift
       - run: bash scripts/ios/test-onboarding-notifications.sh
       - run: bash scripts/ios/test-device-architectures.sh
 
@@ -322,13 +324,20 @@ jobs:
             kill -0 "$app_pid"
           done
           xcrun simctl io '${{ steps.simulator.outputs.udid }}' screenshot "$RUNNER_TEMP/XauXat-Simulator.png"
+          xcrun simctl spawn '${{ steps.simulator.outputs.udid }}' log show --last 3m --style compact \
+            --predicate 'process == "SimpleX" AND eventMessage CONTAINS "XauXat startup:"' \
+            > "$RUNNER_TEMP/XauXat-Startup.log"
+          cat "$RUNNER_TEMP/XauXat-Startup.log"
+          swift -swift-version 5 scripts/ios/verify-onboarding-screenshot.swift "$RUNNER_TEMP/XauXat-Simulator.png"
 
-      - name: Upload runnable arm64 simulator app
+      - name: Upload simulator app and startup evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: XauXat-iOS-Simulator-arm64-${{ github.sha }}
           path: |
             ${{ runner.temp }}/XauXatSimulatorDerivedData/Build/Products/Debug-iphonesimulator/SimpleX.app
             ${{ runner.temp }}/XauXat-Simulator.png
+            ${{ runner.temp }}/XauXat-Startup.log
           if-no-files-found: error
           retention-days: 14

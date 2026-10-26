@@ -48,9 +48,9 @@ struct SimpleXApp: App {
             // contentAccessAuthenticationExtended has to be passed to ContentView on view initialization,
             // so that it's computed by the time view renders, and not on event after rendering
             ContentView(contentAccessAuthenticationExtended: !authenticationExpired(), refreshConnection: {
-                guard scenePhase == .active, chatModel.networkInfo.online else { throw CancellationError() }
+                guard xauXatAppIsForeground(), chatModel.networkInfo.online else { throw CancellationError() }
                 _ = try await EmbeddedTorManager.shared.refreshConnection()
-                guard scenePhase == .active else { return }
+                guard xauXatAppIsForeground() else { return }
                 initializeAfterTor()
                 if chatModel.chatInitialized { resumeChatAfterTor() }
             })
@@ -66,7 +66,7 @@ struct SimpleXApp: App {
                     }
                 }
                 .onAppear() {
-                    AppSheetState.shared.scenePhaseActive = scenePhase == .active
+                    AppSheetState.shared.scenePhaseActive = UIApplication.shared.applicationState == .active
                     NetworkObserver.shared.startMonitor()
                     plusEntitlements.start()
                     // Present screen for continue migration if it wasn't finished yet
@@ -75,9 +75,13 @@ struct SimpleXApp: App {
                         onboardingStageDefault.set(.step1_SimpleXInfo)
                         chatModel.onboardingStage = onboardingStageDefault.get()
                     }
+                    initializeNewInstallation()
                     startEmbeddedTor(showError: true) {
                         initializeAfterTor()
                     }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                    initializeNewInstallation()
                 }
 // Spec: spec/architecture.md#scenePhaseHandling
                 .onChange(of: scenePhase) { phase in
@@ -103,8 +107,9 @@ struct SimpleXApp: App {
                         NtfManager.shared.setNtfBadgeCount(chatModel.totalUnreadCountForAllUsers())
                     case .active:
                         CallController.shared.shouldSuspendChat = false
+                        initializeNewInstallation()
                         startEmbeddedTor {
-                            guard scenePhase == .active else { return }
+                            guard xauXatAppIsForeground() else { return }
                             initializeAfterTor()
                             resumeChatAfterTor()
                         }
@@ -115,10 +120,25 @@ struct SimpleXApp: App {
         }
     }
 
+    private func initializeNewInstallation() {
+        xauXatRecordStartup("local_setup", capturedScene: String(describing: scenePhase))
+        // Only stores known to have no profile can open before Tor, including
+        // after relaunching an empty setup database. Clear this marker before
+        // profile creation; existing profiles keep their startup boundary.
+        guard xauXatAppIsForeground(), AppChatState.shared.value != .stopped,
+              (!hasDatabase() || (UserDefaults.standard.bool(forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
+                  && onboardingStageDefault.get() == .step1_SimpleXInfo)), !chatModel.chatInitialized,
+              !chatModel.ctrlInitInProgress, chatModel.migrationState == nil,
+              !xauXatRequiresUnlockBeforeInitialization() else { return }
+        UserDefaults.standard.set(true, forKey: DEFAULT_XAUXAT_EMPTY_SETUP)
+        initChatAndMigrate(start: false)
+    }
+
     private func initializeAfterTor() {
         guard chatModel.migrationState == nil, !xauXatRequiresUnlockBeforeInitialization() else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [self] in
-            guard scenePhase == .active, isXauXatTorReady(), !chatModel.chatInitialized, !chatModel.ctrlInitInProgress,
+            xauXatRecordStartup("after_tor", capturedScene: String(describing: scenePhase))
+            guard xauXatAppIsForeground(), isXauXatTorReady(), !chatModel.chatInitialized, !chatModel.ctrlInitInProgress,
                   chatModel.migrationState == nil, !xauXatRequiresUnlockBeforeInitialization() else { return }
             initChatAndMigrate()
         }
@@ -126,8 +146,7 @@ struct SimpleXApp: App {
 
     private func startEmbeddedTor(showError: Bool = false, _ completion: @escaping () -> Void) {
         EmbeddedTorManager.shared.startRetrying(whileAvailable: {
-            UIApplication.shared.applicationState == .active
-                && AppSheetState.shared.scenePhaseActive && ChatModel.shared.networkInfo.online
+            xauXatAppIsForeground() && ChatModel.shared.networkInfo.online
         }) { result in
             switch result {
             case .success:
@@ -149,6 +168,7 @@ struct SimpleXApp: App {
     }
 
     private func resumeChatAfterTor() {
+        guard xauXatAppIsForeground() else { return }
         // With a decoy PIN configured, the unlock PIN must select the storage
         // scope before the native core is allowed to open either database.
         if kcDecoyPassword.get() != nil && !chatModel.contentViewAccessAuthenticated {
@@ -170,13 +190,13 @@ struct SimpleXApp: App {
         let userId = chatModel.currentUser?.userId
         let storageScope = xauXatStorageScope()
         startChatAndActivate(ifAllowed: {
-            scenePhase == .active && isXauXatTorReady()
+            xauXatAppIsForeground() && isXauXatTorReady()
                 && chatModel.currentUser?.userId == userId
                 && xauXatStorageScope() == storageScope
                 && AppChatState.shared.value != .stopped
                 && (kcDecoyPassword.get() == nil || chatModel.contentViewAccessAuthenticated)
         }) {
-            guard scenePhase == .active, chatModel.currentUser?.userId == userId,
+            guard xauXatAppIsForeground(), chatModel.currentUser?.userId == userId,
                   xauXatStorageScope() == storageScope else { return }
             guard xauXatRecoverySessionState() == .running else {
                 XauXatConnectionRecoveryManager.shared.sessionUnavailable()

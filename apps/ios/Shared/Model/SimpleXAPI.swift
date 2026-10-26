@@ -2919,7 +2919,9 @@ func startChat(refreshInvitations: Bool = true, onboarding: Bool = false) throws
     try setNetworkConfig(getNetCfg())
     let chatRunning = try apiCheckChatRunning()
     m.users = try listUsers()
-    if !chatRunning {
+    // A core started by another app entry point may precede the first local
+    // screen. Running networking alone must never leave onboardingStage nil.
+    if !chatRunning || m.onboardingStage == nil {
         try getUserChatData()
         NtfManager.shared.setNtfBadgeCount(m.totalUnreadCountForAllUsers())
         if (refreshInvitations) {
@@ -2927,7 +2929,7 @@ func startChat(refreshInvitations: Bool = true, onboarding: Bool = false) throws
         }
         (m.savedToken, m.tokenStatus, m.notificationMode, m.notificationServer) = apiGetNtfToken()
         xauXatMigrateNotificationModeIntentIfNeeded(m.notificationMode)
-        _ = try apiStartChat()
+        if !chatRunning { _ = try apiStartChat() }
         if !onboarding {
             withAnimation {
                 let savedOnboardingStage = onboardingStageDefault.get()

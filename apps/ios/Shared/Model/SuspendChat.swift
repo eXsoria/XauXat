@@ -17,6 +17,20 @@ let bgSuspendTimeout: Int = 5 // seconds
 
 let terminationTimeout: Int = 3 // seconds
 
+let DEFAULT_XAUXAT_EMPTY_SETUP = "xauxatEmptySetup"
+
+// App/View values captured by a startup callback retain their old environment.
+// Read the live process and scene state when delayed work actually executes.
+func xauXatAppIsForeground() -> Bool {
+    UIApplication.shared.applicationState == .active && AppSheetState.shared.scenePhaseActive
+}
+
+func xauXatRecordStartup(_ event: String, capturedScene: String) {
+    let model = ChatModel.shared
+    let screen = model.onboardingStage?.rawValue ?? "none"
+    logger.notice("XauXat startup: event=\(event, privacy: .public) scene_snapshot=\(capturedScene, privacy: .public) foreground=\(xauXatAppIsForeground(), privacy: .public) initialized=\(model.chatInitialized, privacy: .public) initializing=\(model.ctrlInitInProgress, privacy: .public) screen=\(screen, privacy: .public)")
+}
+
 let activationDelay: TimeInterval = 1.5
 
 let nseSuspendTimeout: TimeInterval = 5
@@ -136,14 +150,14 @@ func activateChat(appState: AppState = .active) -> Bool {
     }
 }
 
-func initChatAndMigrate(refreshInvitations: Bool = true) {
+func initChatAndMigrate(refreshInvitations: Bool = true, start: Bool = true) {
     let m = ChatModel.shared
     if (!m.chatInitialized) {
         m.v3DBMigration = v3DBMigrationDefault.get()
         if AppChatState.shared.value == .stopped && storeDBPassphraseGroupDefault.get() && kcDatabasePassword.get() != nil {
-            initialize(start: true, confirmStart: true)
+            initialize(start: start, confirmStart: true)
         } else {
-            initialize(start: true)
+            initialize(start: start)
         }
     }
 
