@@ -169,28 +169,37 @@ struct XauXatVoiceMask {
     }
 }
 
-class AudioRecorder {
+@MainActor
+class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     var onTimer: ((TimeInterval) -> Void)?
     var onFinishRecording: (() -> Void)?
+    var onLevel: ((CGFloat) -> Void)?
 
     var audioRecorder: AVAudioRecorder?
     var recordingTimer: Timer?
+    private var ownsAudioSession = false
 
-    init(onTimer: @escaping ((TimeInterval) -> Void), onFinishRecording: @escaping (() -> Void)) {
+    init(onTimer: @escaping ((TimeInterval) -> Void), onFinishRecording: @escaping (() -> Void), onLevel: ((CGFloat) -> Void)? = nil) {
         self.onTimer = onTimer
         self.onFinishRecording = onFinishRecording
+        self.onLevel = onLevel
+        super.init()
     }
 
     enum StartError {
         case permission
         case error(String)
+        case cancelled
     }
 
-    func start(fileName: String) async -> StartError? {
+    func start(fileName: String, shouldStart: () -> Bool = { true }) async -> StartError? {
         let av = AVAudioSession.sharedInstance()
-        if !(await checkPermission()) { return .permission }
+        let allowed = await checkPermission()
+        guard shouldStart(), !Task.isCancelled else { return .cancelled }
+        if !allowed { return .permission }
         do {
             try av.setCategory(AVAudioSession.Category.playAndRecord, options: .defaultToSpeaker)
+            ownsAudioSession = true
             try av.setActive(true)
             let settings: [String : Any] = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -200,33 +209,89 @@ class AudioRecorder {
                 AVNumberOfChannelsKey: 1
             ]
             let url = getAppFilePath(fileName)
-            audioRecorder = try AVAudioRecorder(url: url, settings: settings)
-            audioRecorder?.record(forDuration: MAX_VOICE_MESSAGE_LENGTH)
-
-            await MainActor.run {
-                AppDelegate.keepScreenOn(true)
-                recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { timer in
-                    guard let time = self.audioRecorder?.currentTime else { return }
-                    self.onTimer?(time)
-                    if time >= MAX_VOICE_MESSAGE_LENGTH {
-                        self.stop()
-                        self.onFinishRecording?()
-                    }
-                }
+            let recorder = try AVAudioRecorder(url: url, settings: settings)
+            audioRecorder = recorder
+            recorder.delegate = self
+            recorder.isMeteringEnabled = true
+            guard recorder.record(forDuration: MAX_VOICE_MESSAGE_LENGTH) else {
+                stop()
+                return .error("The microphone could not start recording.")
             }
+            startTimer()
             return nil
         } catch let error {
-            await MainActor.run {
-                AppDelegate.keepScreenOn(false)
-            }
-            try? av.setCategory(AVAudioSession.Category.soloAmbient)
+            stop()
             logger.error("AudioRecorder startAudioRecording error \(error.localizedDescription)")
             return .error(error.localizedDescription)
         }
     }
 
+    func pause() {
+        if let recorder = audioRecorder {
+            onTimer?(recorder.currentTime)
+            recorder.pause()
+        }
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        AppDelegate.keepScreenOn(false)
+        releaseAudioSession()
+    }
+
+    func resume() -> Bool {
+        guard let recorder = audioRecorder, recorder.currentTime < MAX_VOICE_MESSAGE_LENGTH else { return false }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playAndRecord, options: .defaultToSpeaker)
+            ownsAudioSession = true
+            try AVAudioSession.sharedInstance().setActive(true)
+            guard recorder.record(forDuration: MAX_VOICE_MESSAGE_LENGTH - recorder.currentTime) else {
+                pause()
+                return false
+            }
+            startTimer()
+            return true
+        } catch {
+            pause()
+            return false
+        }
+    }
+
+    private func startTimer() {
+        recordingTimer?.invalidate()
+        AppDelegate.keepScreenOn(true)
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self, let recorder = self.audioRecorder, recorder.isRecording else { return }
+            self.onTimer?(recorder.currentTime)
+            recorder.updateMeters()
+            self.onLevel?(CGFloat(pow(10, recorder.averagePower(forChannel: 0) / 40)))
+            if recorder.currentTime >= MAX_VOICE_MESSAGE_LENGTH {
+                self.complete()
+            }
+        }
+        recordingTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func complete() {
+        guard audioRecorder != nil else { return }
+        stop()
+        onFinishRecording?()
+    }
+
+    func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        guard audioRecorder === recorder else { return }
+        // AVAudioRecorder resets currentTime after its duration limit fires.
+        if flag { onTimer?(MAX_VOICE_MESSAGE_LENGTH) }
+        complete()
+    }
+
+    func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
+        guard audioRecorder === recorder else { return }
+        complete()
+    }
+
     func stop() {
         if let recorder = audioRecorder {
+            recorder.delegate = nil
             recorder.stop()
         }
         audioRecorder = nil
@@ -235,7 +300,13 @@ class AudioRecorder {
         }
         recordingTimer = nil
         AppDelegate.keepScreenOn(false)
-        try? AVAudioSession.sharedInstance().setCategory(AVAudioSession.Category.soloAmbient)
+        releaseAudioSession()
+    }
+
+    private func releaseAudioSession() {
+        guard ownsAudioSession else { return }
+        ownsAudioSession = false
+        try? AVAudioSession.sharedInstance().setCategory(.soloAmbient)
     }
 
     private func checkPermission() async -> Bool {

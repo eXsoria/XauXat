@@ -31,6 +31,8 @@ struct ComposeVoiceView: View {
     @Binding var recordingTime: TimeInterval?
     @Binding var recordingState: VoiceMessageRecordingState
     @Binding var maskingState: VoiceMaskingState
+    var recordingLevels: [CGFloat] = []
+    var resumeRecording: (() -> Void)? = nil
     let applyVoiceMask: (XauXatVoiceMaskPreset, Bool) -> Void
     let cancelVoiceMessage: ((String) -> Void)
     let cancelEnabled: Bool
@@ -42,21 +44,17 @@ struct ComposeVoiceView: View {
     @State private var startingPlayback: Bool = false
     @State private var showMaskPicker = false
 
-    private var previewHeight: CGFloat {
-        recordingState == .finished && maskingState != .unavailable ? 94 : 55
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             if recordingState != .finished {
                 recordingMode()
+                    .frame(height: 55)
             } else {
                 playbackMode()
                 maskingMode()
             }
         }
-        .padding(.vertical, 1)
-        .frame(height: previewHeight)
+        .padding(.vertical, 6)
         .background(theme.appColors.sentMessage)
         .frame(minHeight: 54)
         .frame(maxWidth: .infinity)
@@ -84,7 +82,7 @@ struct ComposeVoiceView: View {
                         .foregroundColor(theme.colors.secondary)
                 }
                 .padding(.horizontal, 12)
-                .frame(height: 38)
+                .frame(minHeight: 38)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -99,7 +97,7 @@ struct ComposeVoiceView: View {
                 Spacer()
             }
             .padding(.horizontal, 12)
-            .frame(height: 38)
+            .frame(minHeight: 38)
         case let .applied(preset):
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.shield.fill")
@@ -111,7 +109,7 @@ struct ComposeVoiceView: View {
             }
             .foregroundColor(theme.colors.primary)
             .padding(.horizontal, 12)
-            .frame(height: 38)
+            .frame(minHeight: 38)
             .accessibilityElement(children: .combine)
         }
     }
@@ -143,7 +141,7 @@ struct ComposeVoiceView: View {
     }
 
     private func playbackMode() -> some View {
-        ZStack {
+        VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 8) {
                 switch playbackState {
                 case .noPlayback:
@@ -152,6 +150,8 @@ struct ComposeVoiceView: View {
                     } label: {
                         playPauseIcon("play.fill", theme.colors.primary)
                     }
+                    .accessibilityLabel("Play recording")
+                    .accessibilityIdentifier("voice.play")
                     Text(voiceMessageTime_(recordingTime))
                 case .playing:
                     Button {
@@ -160,6 +160,8 @@ struct ComposeVoiceView: View {
                     } label: {
                         playPauseIcon("pause.fill", theme.colors.primary)
                     }
+                    .accessibilityLabel("Pause playback")
+                    .accessibilityIdentifier("voice.play")
                     Text(voiceMessageTime_(playbackTime))
                 case .paused:
                     Button {
@@ -168,20 +170,37 @@ struct ComposeVoiceView: View {
                     } label: {
                         playPauseIcon("play.fill", theme.colors.primary)
                     }
+                    .accessibilityLabel("Play recording")
+                    .accessibilityIdentifier("voice.play")
                     Text(voiceMessageTime_(playbackTime))
                 }
-                Spacer()
+                VoiceRecordingWaveform(levels: recordingLevels, color: theme.colors.primary)
+                if let resumeRecording {
+                    Button {
+                        audioPlayer?.stop()
+                        playbackState = .noPlayback
+                        playbackTime = nil
+                        resumeRecording()
+                    } label: {
+                        Image(systemName: "mic.fill")
+                            .foregroundColor(.red)
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Resume recording")
+                    .accessibilityIdentifier("voice.resume")
+                }
                 if cancelEnabled {
                     cancelButton()
                 }
             }
-            .padding(.trailing, 12)
+            .padding(.trailing, 8)
             .padding(.top, 4)
 
-            if let recordingLength = recordingTime {
-                GeometryReader { _ in
-                    SliderBar(length: recordingLength, progress: $playbackTime, seek: { audioPlayer?.seek($0) })
-                }
+            if let recordingLength = recordingTime, recordingLength > 0 {
+                SliderBar(length: recordingLength, progress: $playbackTime, seek: { audioPlayer?.seek($0) })
+                    .padding(.horizontal, 12)
+                    .frame(height: 24)
+                    .accessibilityLabel("Recording position")
             }
         }
         .onChange(of: stopPlayback) { _ in
@@ -209,7 +228,7 @@ struct ComposeVoiceView: View {
             .aspectRatio(contentMode: .fit)
             .frame(width: 20, height: 20)
             .foregroundColor(color)
-            .padding(.leading, 12)
+            .frame(width: 44, height: 44)
     }
 
     private func cancelButton() -> some View {
@@ -217,9 +236,12 @@ struct ComposeVoiceView: View {
             audioPlayer?.stop()
             cancelVoiceMessage(recordingFileName)
         } label: {
-            Image(systemName: "multiply")
+            Image(systemName: "trash")
+                .frame(width: 44, height: 44)
         }
         .tint(theme.colors.primary)
+        .accessibilityLabel("Delete recording")
+        .accessibilityIdentifier("voice.delete")
     }
 
     struct SliderBar: View {
