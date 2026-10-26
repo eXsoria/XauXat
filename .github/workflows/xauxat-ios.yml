@@ -42,7 +42,9 @@ concurrency:
 jobs:
   expressions:
     name: Private stickers and soundboard
-    runs-on: macos-26-intel
+    # The standalone tray also exercises compatibility with the older SDK/runtime
+    # pool; full application jobs below continue building against current iOS.
+    runs-on: macos-15-intel
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
