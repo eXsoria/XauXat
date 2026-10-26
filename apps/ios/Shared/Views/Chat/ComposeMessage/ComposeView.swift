@@ -1483,13 +1483,13 @@ struct ComposeView: View {
               let library = expressionLibrary else { return }
         let chatID = chat.id
         let scope = xauXatStorageScope()
-        let conversationScope = chat.chatInfo.groupChatScope()
+        let conversationScope = draftChatId(chatID, chat.chatInfo.groupChatScope())
         let context = composeState.contextItem
         if item.kind == .sticker { expressionSending = true }
         Task { @MainActor in
             defer { expressionSending = false }
             guard userID == chatModel.currentUser?.userId, chat.id == chatID,
-                  scope == xauXatStorageScope(), chat.chatInfo.groupChatScope() == conversationScope,
+                  scope == xauXatStorageScope(), draftChatId(chat.id, chat.chatInfo.groupChatScope()) == conversationScope,
                   chat.chatInfo.sendMsgEnabled, !composeState.attachmentDisabled else { return }
             do {
                 switch item.kind {
@@ -1500,7 +1500,7 @@ struct ComposeView: View {
                     }
                     guard userID == chatModel.currentUser?.userId, chat.id == chatID,
                           scope == xauXatStorageScope(), chat.chatInfo.sendMsgEnabled,
-                          chat.chatInfo.groupChatScope() == conversationScope,
+                          draftChatId(chat.id, chat.chatInfo.groupChatScope()) == conversationScope,
                           !composeState.attachmentDisabled, expressionsAllowStickers else { return }
                     guard let png = resizeImageToDataSize(image, maxDataSize: MAX_IMAGE_SIZE, hasAlpha: true),
                           let file = saveFile(png, "sticker_\(UUID().uuidString).png", encrypted: privacyEncryptLocalFilesGroupDefault.get()) else {
