@@ -7,10 +7,10 @@ final class ExpressionUITests: XCTestCase {
         app.launchArguments = arguments
         app.launch()
         XCTAssertTrue(app.staticTexts["validation"].waitForExistence(timeout: 20))
-        let ready = NSPredicate(format: "label BEGINSWITH 'Privacy checks passed:' OR label BEGINSWITH 'FAILED:'")
+        let ready = NSPredicate(format: "label == 'Ready' OR label BEGINSWITH 'FAILED:'")
         expectation(for: ready, evaluatedWith: app.staticTexts["validation"])
         waitForExpectations(timeout: 30)
-        XCTAssertTrue(app.staticTexts["validation"].label.hasPrefix("Privacy checks passed:"), app.staticTexts["validation"].label)
+        XCTAssertEqual(app.staticTexts["validation"].label, "Ready")
         XCTAssertTrue(app.buttons[arguments.contains("--limited") ? "Choose sound Pop" : "Send sticker 👍"].waitForExistence(timeout: 10))
         return app
     }
@@ -20,6 +20,18 @@ final class ExpressionUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    func testPrivacyProperties() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--privacy"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["validation"].waitForExistence(timeout: 20))
+        let ready = NSPredicate(format: "label BEGINSWITH 'Privacy checks passed:' OR label BEGINSWITH 'FAILED:'")
+        expectation(for: ready, evaluatedWith: app.staticTexts["validation"])
+        waitForExpectations(timeout: 30)
+        XCTAssertTrue(app.staticTexts["validation"].label.hasPrefix("Privacy checks passed:"), app.staticTexts["validation"].label)
+        proof(app, "privacy-checks")
     }
 
     func testStickerTrayRecentsAndFavorites() {
