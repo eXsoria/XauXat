@@ -79,6 +79,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: bash scripts/ios/test-qr-images.sh
 
+  avatar-editor:
+    name: Avatar camera and crop transitions
+    runs-on: macos-26-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: bash scripts/ios/test-avatar-editor.sh
+        env:
+          AVATAR_TEST_OUTPUT: ${{ runner.temp }}/avatar-editor-proof
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: XauXat-avatar-editor-${{ github.sha }}
+          path: ${{ runner.temp }}/avatar-editor-proof
+          if-no-files-found: error
+          retention-days: 7
+
   native-core:
     name: XauXat native core (arm64)
     runs-on: macos-26

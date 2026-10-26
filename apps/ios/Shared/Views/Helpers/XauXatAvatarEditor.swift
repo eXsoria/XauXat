@@ -1,6 +1,78 @@
 import SwiftUI
 import UIKit
 
+// Keep the selected image until the system picker has finished dismissing.
+// A changed presentation binding alone does not mean its transition is over.
+struct XauXatAvatarPicker: ViewModifier {
+    @Binding var showCamera: Bool
+    @Binding var showLibrary: Bool
+    @Binding var image: UIImage?
+    let onConfirm: (UIImage) -> Void
+
+    @State private var waitingForPickerDismissal = false
+    @State private var editorImage: EditorImage?
+
+    private struct EditorImage: Identifiable {
+        let id = UUID()
+        let image: UIImage
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: showCamera) { presented in
+                if presented { waitingForPickerDismissal = true }
+            }
+            .onChange(of: showLibrary) { presented in
+                if presented { waitingForPickerDismissal = true }
+            }
+            .onChange(of: image) { selected in
+                guard selected != nil else { return }
+                if showLibrary { showLibrary = false }
+                if !waitingForPickerDismissal && !showCamera && !showLibrary {
+                    presentEditor()
+                }
+            }
+            .fullScreenCover(isPresented: $showCamera, onDismiss: pickerDidDismiss) {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    CameraImagePicker(image: $image)
+                }
+            }
+            .sheet(isPresented: $showLibrary, onDismiss: pickerDidDismiss) {
+                LibraryImagePicker(image: $image) { didSelectImage in
+                    if !didSelectImage {
+                        await MainActor.run { showLibrary = false }
+                    }
+                }
+            }
+            .fullScreenCover(item: $editorImage) { selected in
+                XauXatAvatarEditor(
+                    image: selected.image,
+                    onCancel: clearSelection,
+                    onConfirm: { cropped in
+                        clearSelection()
+                        onConfirm(cropped)
+                    }
+                )
+            }
+    }
+
+    private func pickerDidDismiss() {
+        waitingForPickerDismissal = false
+        presentEditor()
+    }
+
+    private func presentEditor() {
+        guard let image else { return }
+        editorImage = EditorImage(image: image)
+    }
+
+    private func clearSelection() {
+        image = nil
+        editorImage = nil
+    }
+}
+
 struct XauXatAvatarEditor: View {
     let image: UIImage
     let onCancel: () -> Void
@@ -14,13 +86,41 @@ struct XauXatAvatarEditor: View {
     private let cropSize: CGFloat = 300
 
     var body: some View {
-        NavigationView {
+        VStack(spacing: 0) {
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .accessibilityIdentifier("avatar.cancel")
+                    .frame(minHeight: 44)
+
+                Spacer(minLength: 8)
+
+                Text("Edit photo")
+                    .font(.headline)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+
+                Spacer(minLength: 8)
+
+                Button {
+                    if let result = renderCrop() { onConfirm(result) }
+                } label: {
+                    Text("Use Photo")
+                        .fontWeight(.semibold)
+                }
+                .accessibilityIdentifier("avatar.confirm")
+                .frame(minHeight: 44)
+            }
+            .foregroundColor(Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(Color.black)
+
             GeometryReader { geometry in
                 let baseScale = minimumScale
 
                 ZStack {
                     Color.black
-                        .ignoresSafeArea()
 
                     Image(uiImage: image)
                         .resizable()
@@ -41,50 +141,12 @@ struct XauXatAvatarEditor: View {
                     width: geometry.size.width,
                     height: geometry.size.height
                 )
+                .clipped()
+                .accessibilityIdentifier("avatar.crop")
             }
-            .navigationTitle("Edit photo")
-            .navigationBarTitleDisplayMode(.inline)
-            .tint(
-                Color(
-                    red: 222 / 255,
-                    green: 206 / 255,
-                    blue: 175 / 255
-                )
-            )
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(action: onCancel) {
-                        Text("Cancel")
-                            .foregroundColor(
-                                Color(
-                                    red: 222 / 255,
-                                    green: 206 / 255,
-                                    blue: 175 / 255
-                                )
-                            )
-                    }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        if let result = renderCrop() {
-                            onConfirm(result)
-                        }
-                    } label: {
-                        Text("Use Photo")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(
-                                Color(
-                                    red: 222 / 255,
-                                    green: 206 / 255,
-                                    blue: 175 / 255
-                                )
-                            )
-                    }
-                }
-            }
-            .navigationViewStyle(.stack)
         }
+        .background(Color.black.ignoresSafeArea())
+        .preferredColorScheme(.dark)
     }
 
     private var minimumScale: CGFloat {
