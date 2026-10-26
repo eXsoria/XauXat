@@ -108,8 +108,8 @@ struct AvatarHarnessApp: App {
     var body: some Scene {
         WindowGroup {
             Harness()
-                .environment(\.sizeCategory, ProcessInfo.processInfo.arguments.contains("large-text")
-                    ? .accessibilityExtraExtraExtraLarge : .large)
+                .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("large-text")
+                    ? .accessibility5 : .large)
         }
     }
 }

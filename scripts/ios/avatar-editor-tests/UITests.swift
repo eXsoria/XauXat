@@ -90,6 +90,8 @@ final class AvatarEditorTests: XCTestCase {
         app.launchArguments.append("large-text")
         app.launch()
         openCamera()
+        XCTAssertGreaterThan(app.buttons["avatar.cancel"].frame.height, 55,
+                             "The presented editor must actually use accessibility text")
         snapshot("accessibility-text-editor")
         app.buttons["avatar.cancel"].tap()
         XCTAssertTrue(app.staticTexts["Saved 0"].waitForExistence(timeout: 5))
