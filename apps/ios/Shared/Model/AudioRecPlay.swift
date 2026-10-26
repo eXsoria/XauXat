@@ -273,7 +273,7 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
                 let detail = error as NSError
                 preparationError = "\(detail.domain) (\(detail.code)): \(detail.localizedDescription)"
                 if let underlying = detail.userInfo[NSUnderlyingErrorKey] as? NSError {
-                    preparationError! += " — \(underlying.domain) (\(underlying.code)): \(underlying.localizedDescription)"
+                    preparationError! += " - \(underlying.domain) (\(underlying.code)): \(underlying.localizedDescription)"
                 }
                 throw error
             }

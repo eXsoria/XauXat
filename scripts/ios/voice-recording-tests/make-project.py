@@ -22,12 +22,12 @@ def declaration(source, marker):
         end += 1
     return source[start:end]
 
-sources = [(compose / name).read_text() for name in ("VoiceRecordingInteraction.swift", "VoiceRecordingControls.swift")]
-audio = (root / "apps/ios/Shared/Model/AudioRecPlay.swift").read_text()
+sources = [(compose / name).read_text(encoding="utf-8") for name in ("VoiceRecordingInteraction.swift", "VoiceRecordingControls.swift")]
+audio = (root / "apps/ios/Shared/Model/AudioRecPlay.swift").read_text(encoding="utf-8")
 sources += ["import AVFoundation\nimport OSLog\n", declaration(audio, "@MainActor\nclass AudioRecorder:"), declaration(audio, "class AudioPlayer:")]
-preview = (compose / "ComposeVoiceView.swift").read_text()
+preview = (compose / "ComposeVoiceView.swift").read_text(encoding="utf-8")
 sources += [preview[:preview.index("private struct XauXatVoiceMaskPickerView")].replace("import SimpleXChat", "")]
-send = (compose / "SendMessageView.swift").read_text()
+send = (compose / "SendMessageView.swift").read_text(encoding="utf-8")
 send = send[:send.index("    private func deleteTextButton()")].replace("import SimpleXChat", "")
 send = "\n".join(line for line in send.splitlines() if "@UserDefault" not in line)
 adapters = r'''
@@ -51,11 +51,11 @@ adapters = r'''
     private func updateFont(_ text: String) {}
 }
 '''
-sources += [(fixtures / "ComposerAdapters.swift").read_text(), send + adapters]
-controller = (compose / "ComposeView.swift").read_text()
+sources += [(fixtures / "ComposerAdapters.swift").read_text(encoding="utf-8"), send + adapters]
+controller = (compose / "ComposeView.swift").read_text(encoding="utf-8")
 methods = ["beginVoiceMessageRecording", "moveVoiceMessageRecording", "releaseVoiceMessageRecording", "cancelVoiceMessageTouch", "discardVoiceMessageRecording", "startVoiceMessageRecording", "bindVoiceRecorder", "finishVoiceMessageRecording", "resumeVoiceMessageRecording", "updateComposeVMRFinished", "cancelCurrentVoiceRecording", "cancelVoiceMessageRecording", "saveCurrentDraft"]
 sources += ["extension HarnessView {\n" + "\n".join(declaration(controller, "private func " + name + "(").replace("private func", "func", 1) for name in methods) + "\n}"]
-(out / "Editor.swift").write_text("\n".join(sources))
+(out / "Editor.swift").write_text("\n".join(sources), encoding="utf-8")
 
 project = out / "VoiceHarness.xcodeproj"
 project.mkdir(exist_ok=True)
@@ -93,7 +93,7 @@ import re
 ids = {line.split(" =", 1)[0]: f"{index:024X}" for index, line in enumerate(objects, 1)}
 pbx = "// !$*UTF8*$!\n{archiveVersion=1; classes={}; objectVersion=56; objects={\n" + "\n".join(objects) + "\n}; rootObject=P;}\n"
 pbx = re.sub(r"\b(" + "|".join(sorted(ids, key=len, reverse=True)) + r")\b", lambda match: ids[match[0]], pbx)
-(project / "project.pbxproj").write_text(pbx)
+(project / "project.pbxproj").write_text(pbx, encoding="utf-8")
 schemes = project / "xcshareddata/xcschemes"
 schemes.mkdir(parents=True, exist_ok=True)
 
