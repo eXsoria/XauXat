@@ -23,9 +23,10 @@ final class VoiceRecordingTests: XCTestCase {
     }
     func testHoldReleasePreviewResumeAndSend() {
         app.launch()
-        mic.press(forDuration: 1)
+        mic.press(forDuration: 2)
         preview()
         snapshot("released-recording-preview")
+        let firstFileDuration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
         app.buttons["voice.play"].tap()
         XCTAssertEqual(app.buttons["voice.play"].label, "Pause playback")
         let first = app.staticTexts["voice.duration"].label
@@ -35,6 +36,8 @@ final class VoiceRecordingTests: XCTestCase {
         mic.tap()
         preview()
         XCTAssertNotEqual(first, app.staticTexts["voice.duration"].label, "Resume must extend the same recording")
+        let resumedFileDuration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
+        XCTAssertGreaterThan(resumedFileDuration, firstFileDuration + 0.5, "Resume must append audio to the same AAC file")
         app.buttons["voice.send"].tap()
         XCTAssertTrue(app.staticTexts["Sent 1"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Playable 0.00"].exists, "Finalized AAC must be playable")
