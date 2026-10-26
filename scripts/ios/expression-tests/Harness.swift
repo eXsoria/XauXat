@@ -125,7 +125,8 @@ func privacyChecks() async throws -> Int {
     let image = UIImage(data: pixels)!.cgImage!
     CGImageDestinationAddImage(destination, image, [
         kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 38.72, kCGImagePropertyGPSLatitudeRef: "N", kCGImagePropertyGPSLongitude: 9.14, kCGImagePropertyGPSLongitudeRef: "W"],
-        kCGImagePropertyExifDictionary: [kCGImagePropertyExifUserComment: "PRIVATE_IMAGE_TAG"]
+        kCGImagePropertyExifDictionary: [kCGImagePropertyExifUserComment: "PRIVATE_IMAGE_TAG", kCGImagePropertyExifDateTimeOriginal: "2026:10:26 16:00:00"],
+        kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFArtist: "PRIVATE_AUTHOR"]
     ] as CFDictionary)
     guard CGImageDestinationFinalize(destination),
           let taggedSource = CGImageSourceCreateWithData(tagged, nil),
@@ -133,11 +134,25 @@ func privacyChecks() async throws -> Int {
         throw NSError(domain: "tagged fixture encoding", code: 1)
     }
     let originalExif = taggedProps[kCGImagePropertyExifDictionary] as? [CFString: Any]
-    try check(taggedProps[kCGImagePropertyGPSDictionary] != nil && originalExif?[kCGImagePropertyExifUserComment] as? String == "PRIVATE_IMAGE_TAG", "tagged fixture has private GPS and EXIF")
+    let originalTIFF = taggedProps[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+    try check(taggedProps[kCGImagePropertyGPSDictionary] != nil
+              && originalExif?[kCGImagePropertyExifUserComment] as? String == "PRIVATE_IMAGE_TAG"
+              && originalExif?[kCGImagePropertyExifDateTimeOriginal] as? String == "2026:10:26 16:00:00"
+              && originalTIFF?[kCGImagePropertyTIFFArtist] as? String == "PRIVATE_AUTHOR", "tagged fixture has private GPS, EXIF and author")
     let clean = try XauXatExpressionLibrary.normalizeSticker(tagged as Data)
     let source = CGImageSourceCreateWithData(clean as CFData, nil)!
     let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)! as NSDictionary
-    try check(props[kCGImagePropertyGPSDictionary] == nil && props[kCGImagePropertyExifDictionary] == nil, "GPS and EXIF stripped")
+    let cleanGPS = props[kCGImagePropertyGPSDictionary] as? NSDictionary
+    let cleanExif = props[kCGImagePropertyExifDictionary] as? NSDictionary
+    let cleanTIFF = props[kCGImagePropertyTIFFDictionary] as? NSDictionary
+    // ImageIO can synthesize technical EXIF fields. The source's location,
+    // personal comment, capture date and author must never survive re-encoding.
+    print("EXPRESSION_SANITIZED_METADATA: \(props)")
+    try check(cleanGPS?[kCGImagePropertyGPSLatitude] == nil
+              && cleanGPS?[kCGImagePropertyGPSLongitude] == nil
+              && cleanExif?[kCGImagePropertyExifUserComment] == nil
+              && cleanExif?[kCGImagePropertyExifDateTimeOriginal] == nil
+              && cleanTIFF?[kCGImagePropertyTIFFArtist] == nil, "private image metadata stripped")
     let imported = root.appendingPathComponent("PRIVATE_TITLE.png")
     try (tagged as Data).write(to: imported)
     try await lib.importFile(imported, kind: .sticker)
