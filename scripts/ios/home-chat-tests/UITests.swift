@@ -49,7 +49,16 @@ final class HomeChatTests: XCTestCase {
         requestDeletion()
         XCTAssertTrue(app.staticTexts["This contact and its conversation will be permanently deleted."].exists)
         proof("deleted-contact-confirmation")
-        app.buttons["Cancel"].tap()
+        if app.buttons["Cancel"].exists {
+            app.buttons["Cancel"].tap()
+        } else {
+            // iOS can present confirmationDialog as a popover: its system
+            // dismissal region replaces the explicit Cancel button.
+            let dismissRegion = app.otherElements["PopoverDismissRegion"]
+            XCTAssertTrue(dismissRegion.waitForExistence(timeout: 3))
+            dismissRegion.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9)).tap()
+        }
+        XCTAssertFalse(app.buttons["Delete chat"].exists)
         XCTAssertTrue(row.exists)
         XCTAssertEqual(result.label, "No deletion")
         requestDeletion()
