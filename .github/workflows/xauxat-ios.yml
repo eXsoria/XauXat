@@ -118,6 +118,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: python3 scripts/ios/verify-notification-configuration.py
       - run: python3 scripts/ios/test-notification-configuration.py
+      - run: python3 scripts/ios/test-testflight-status.py
       - run: ./scripts/ios/verify-notification-privacy-policy.sh
       - run: ./scripts/ios/verify-nse-tor-policy.sh
       - run: ./scripts/ios/validate-notification-matrix.sh --allow-pending docs/xauxat/ios-notification-test-matrix.json

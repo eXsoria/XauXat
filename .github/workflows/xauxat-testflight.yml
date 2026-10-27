@@ -140,6 +140,10 @@ jobs:
           echo "APP_STORE_CONNECT_KEY_ID=$APP_STORE_CONNECT_KEY_ID" >> "$GITHUB_ENV"
           echo "APP_STORE_CONNECT_ISSUER_ID=$APP_STORE_CONNECT_ISSUER_ID" >> "$GITHUB_ENV"
 
+      - name: Verify the requested build number is unused in App Store Connect
+        if: inputs.upload
+        run: python3 scripts/ios/testflight-status.py preflight --build "$XAUXAT_BUILD_NUMBER" --output "$RUNNER_TEMP/testflight-preflight.json"
+
       - name: Archive, verify and optionally upload
         env:
           UPLOAD_REQUESTED: ${{ inputs.upload }}
@@ -157,6 +161,20 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      - name: Wait for Apple processing and enable the existing internal group
+        if: inputs.upload
+        timeout-minutes: 25
+        run: python3 scripts/ios/testflight-status.py publish --build "$XAUXAT_BUILD_NUMBER" --notes docs/xauxat/TESTFLIGHT_NOTES.txt --output "$RUNNER_TEMP/testflight-ready.json"
+
+      - name: Save App Store verification receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always() && inputs.upload
+        with:
+          name: XauXat-TestFlight-receipt-${{ inputs.build_number }}-${{ github.sha }}
+          path: ${{ runner.temp }}/testflight-*.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Remove signing material
         if: always()
