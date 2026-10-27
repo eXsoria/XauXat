@@ -97,6 +97,9 @@ struct HarnessView: View {
     @EnvironmentObject var chatModel: ChatModel
     @State var chat = Chat()
     @State var composeState = ComposeState()
+    @State var expressionLibrary: XauXatExpressionLibrary?
+    @State var showExpressions = false
+    @State var expressionSending = false
     @State var voiceInteraction = VoiceRecordingInteraction()
     @State var audioRecorder: AudioRecorder?
     @State var voiceMessageRecordingTime: TimeInterval?
@@ -127,6 +130,18 @@ struct HarnessView: View {
             }
             .font(.system(size: 12))
             Spacer()
+            Button("Open expressions") {
+                let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                expressionLibrary = try? XauXatExpressionLibrary(directory: folder, key: Data(repeating: 42, count: 32))
+                showExpressions = true
+            }
+            .accessibilityIdentifier("voice.expressions")
+            .disabled(voiceInteraction.active || !composeState.noPreview)
+            if showExpressions, let library = expressionLibrary {
+                XauXatExpressionsView(library: library, allowStickers: true, allowSounds: true,
+                                      allowPlayback: !voiceInteraction.active, close: closeExpressions) { _, _ in }
+                    .frame(height: 320)
+            }
             if composeState.voiceMessageRecordingState == .finished, let name = composeState.voiceMessageRecordingFileName {
                 ComposeVoiceView(recordingFileName: name, recordingTime: $voiceMessageRecordingTime, recordingState: $composeState.voiceMessageRecordingState, maskingState: $composeState.voiceMaskingState, recordingLevels: voiceRecordingLevels, resumeRecording: audioRecorder?.canResume == true ? resumeVoiceMessageRecording : nil, applyVoiceMask: { _, _ in }, cancelVoiceMessage: { _ in discardVoiceMessageRecording() }, cancelEnabled: true, stopPlayback: $stopPlayback)
             }

@@ -25,6 +25,19 @@ final class VoiceRecordingTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Playable 0.00"].exists, "A paused recording must already be playable")
         XCTAssertTrue(app.staticTexts["Sent 0"].exists, "Releasing must never send")
     }
+    func testStartingMicrophoneClosesPlayingSoundboard() {
+        openRecorder()
+        app.buttons["voice.expressions"].tap()
+        app.buttons["Soundboard"].tap()
+        XCTAssertTrue(app.buttons["Preview Ta-da"].waitForExistence(timeout: 5))
+        app.buttons["Preview Ta-da"].tap()
+        mic.press(forDuration: 2)
+        preview()
+        XCTAssertFalse(app.buttons["Preview Ta-da"].exists, "Recording must close the soundboard")
+        let duration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
+        XCTAssertGreaterThan(duration, 1, "Closing a playing tray cannot stop the microphone session")
+    }
+
     func testHoldReleasePreviewResumeAndSend() {
         openRecorder()
         mic.press(forDuration: 2)

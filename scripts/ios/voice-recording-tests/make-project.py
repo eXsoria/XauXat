@@ -25,6 +25,7 @@ def declaration(source, marker):
 sources = [(compose / name).read_text(encoding="utf-8").replace("import SimpleXChat", "") for name in ("VoiceRecordingInteraction.swift", "VoiceRecordingControls.swift")]
 chat_types = (root / "apps/ios/SimpleXChat/ChatTypes.swift").read_text(encoding="utf-8")
 sources += [declaration(chat_types, "public func durationText(")]
+sources += [(compose / name).read_text(encoding="utf-8") for name in ("XauXatExpressionLibrary.swift", "XauXatExpressionsView.swift")]
 audio = (root / "apps/ios/Shared/Model/AudioRecPlay.swift").read_text(encoding="utf-8")
 sources += ["import AVFoundation\nimport OSLog\n", declaration(audio, "@MainActor\nclass AudioRecorder:"), declaration(audio, "class AudioPlayer:")]
 preview = (compose / "ComposeVoiceView.swift").read_text(encoding="utf-8")
@@ -55,7 +56,7 @@ adapters = r'''
 '''
 sources += [(fixtures / "ComposerAdapters.swift").read_text(encoding="utf-8"), send + adapters]
 controller = (compose / "ComposeView.swift").read_text(encoding="utf-8")
-methods = ["beginVoiceMessageRecording", "moveVoiceMessageRecording", "releaseVoiceMessageRecording", "cancelVoiceMessageTouch", "discardVoiceMessageRecording", "startVoiceMessageRecording", "bindVoiceRecorder", "finishVoiceMessageRecording", "resumeVoiceMessageRecording", "updateComposeVMRFinished", "cancelCurrentVoiceRecording", "cancelVoiceMessageRecording", "saveCurrentDraft"]
+methods = ["closeExpressions", "beginVoiceMessageRecording", "moveVoiceMessageRecording", "releaseVoiceMessageRecording", "cancelVoiceMessageTouch", "discardVoiceMessageRecording", "startVoiceMessageRecording", "bindVoiceRecorder", "finishVoiceMessageRecording", "resumeVoiceMessageRecording", "updateComposeVMRFinished", "cancelCurrentVoiceRecording", "cancelVoiceMessageRecording", "saveCurrentDraft"]
 sources += ["extension HarnessView {\n" + "\n".join(declaration(controller, "private func " + name + "(").replace("private func", "func", 1) for name in methods) + "\n}"]
 (out / "Editor.swift").write_text("\n".join(sources), encoding="utf-8")
 

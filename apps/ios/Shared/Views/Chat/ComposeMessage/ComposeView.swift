@@ -752,7 +752,7 @@ struct ComposeView: View {
                     library: library,
                     allowStickers: expressionsAllowStickers,
                     allowSounds: expressionsAllowSounds,
-                    allowPlayback: chatModel.activeCall == nil,
+                    allowPlayback: chatModel.activeCall == nil && !voiceInteraction.active,
                     sending: expressionSending || composeState.inProgress,
                     close: closeExpressions,
                     select: stageExpression
@@ -1429,7 +1429,7 @@ struct ComposeView: View {
                     .font(.title3).frame(width: 32, height: 32)
             }
             .accessibilityLabel(showExpressions ? "Close stickers and sounds" : "Stickers & sounds")
-            .disabled(expressionSending || composeState.attachmentDisabled || codeLockCode != nil || !chat.chatInfo.sendMsgEnabled)
+            .disabled(expressionSending || voiceInteraction.active || composeState.attachmentDisabled || codeLockCode != nil || !chat.chatInfo.sendMsgEnabled)
             .tint(theme.colors.primary)
         }
         if canConfigureCodeLockedText {
@@ -1485,7 +1485,7 @@ struct ComposeView: View {
     }
 
     @MainActor private func openExpressions() {
-        guard !expressionSending, !composeState.attachmentDisabled, codeLockCode == nil,
+        guard !expressionSending, !voiceInteraction.active, !composeState.attachmentDisabled, codeLockCode == nil,
               chat.chatInfo.sendMsgEnabled, let user = chatModel.currentUser else { return }
         do {
             expressionLibrary = try XauXatExpressionLibrary.forProfile(user.userId)
@@ -1521,7 +1521,7 @@ struct ComposeView: View {
     }
 
     @MainActor private func stageExpression(_ item: XauXatExpression, _ bytes: Data) {
-        guard !expressionSending, !composeState.attachmentDisabled, codeLockCode == nil,
+        guard !expressionSending, !voiceInteraction.active, !composeState.attachmentDisabled, codeLockCode == nil,
               chat.chatInfo.sendMsgEnabled, let userID = chatModel.currentUser?.userId,
               let library = expressionLibrary else { return }
         let chatID = chat.id
@@ -2490,10 +2490,11 @@ struct ComposeView: View {
 
     // Spec: spec/client/compose.md#startVoiceMessageRecording
     private func beginVoiceMessageRecording(locked: Bool) {
-        guard voiceRecordingViewVisible, chat.chatInfo.sendMsgEnabled,
+        guard voiceRecordingViewVisible, scenePhase == .active, !expressionSending, chat.chatInfo.sendMsgEnabled,
               chat.chatInfo.featureEnabled(.voice), !composeState.inProgress,
               composeState.noPreview,
               let requestID = voiceInteraction.begin(locked: locked) else { return }
+        closeExpressions()
         voiceMessageRecordingTime = 0
         voiceRecordingLevels = []
         Task { await startVoiceMessageRecording(requestID: requestID) }
@@ -2538,7 +2539,7 @@ struct ComposeView: View {
         bindVoiceRecorder(recorder)
         audioRecorder = recorder
         let recStartError = await recorder.start(fileName: fileName, shouldStart: {
-            voiceInteraction.requestID == requestID && voiceInteraction.active && voiceRecordingViewVisible && chat.chatInfo.sendMsgEnabled && chat.chatInfo.featureEnabled(.voice) && chatModel.stopPreviousRecPlay == getAppFilePath(fileName)
+            voiceInteraction.requestID == requestID && voiceInteraction.active && voiceRecordingViewVisible && scenePhase == .active && chat.chatInfo.sendMsgEnabled && chat.chatInfo.featureEnabled(.voice) && chatModel.stopPreviousRecPlay == getAppFilePath(fileName)
         })
         guard voiceInteraction.requestID == requestID else {
             recorder.stop()
@@ -2647,14 +2648,14 @@ struct ComposeView: View {
     }
 
     private func resumeVoiceMessageRecording() {
-        guard let recorder = audioRecorder,
+        guard voiceRecordingViewVisible, scenePhase == .active, let recorder = audioRecorder,
               composeState.voiceMessageRecordingState == .finished,
               composeState.voiceMaskingState == .available else { return }
         stopPlayback.toggle()
         chatModel.stopPreviousRecPlay = composeState.voiceMessageRecordingFileName.map(getAppFilePath)
         // Stop preview playback before restoring the recording audio session.
         DispatchQueue.main.async {
-            guard audioRecorder === recorder, composeState.voiceMessageRecordingState == .finished else { return }
+            guard voiceRecordingViewVisible, scenePhase == .active, audioRecorder === recorder, composeState.voiceMessageRecordingState == .finished else { return }
             if recorder.resume() {
                 voiceInteraction.resume()
                 composeState = composeState.copy(voiceMessageRecordingState: .recording)

@@ -249,7 +249,12 @@ struct XauXatExpressionsView: View {
         previewTask = nil
         player?.stop()
         player = nil
-        if playing != nil { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+        // The microphone or a call may have taken ownership before SwiftUI
+        // delivers this tray's disappearance. Never deactivate their session.
+        let session = AVAudioSession.sharedInstance()
+        if playing != nil && session.category == .playback {
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        }
         playing = nil
     }
 }
