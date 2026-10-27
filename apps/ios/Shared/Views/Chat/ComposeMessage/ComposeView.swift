@@ -548,6 +548,10 @@ struct ComposeView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var showChooseSource = false
+    @State private var expressionLibrary: XauXatExpressionLibrary?
+    @State private var showExpressions = false
+    @State private var expressionSending = false
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var showMediaPicker = false
     @State private var showTakePhoto = false
     @State var chosenMedia: [UploadContent] = []
@@ -655,7 +659,7 @@ struct ComposeView: View {
                 let simplexLinkProhibited = im.secondaryIMFilter == nil && hasSimplexLink && !chat.groupFeatureEnabled(.simplexLinks)
                 let fileProhibited = im.secondaryIMFilter == nil && composeState.attachmentPreview && !chat.groupFeatureEnabled(.files)
                 let voiceProhibited = composeState.voicePreview && !chat.chatInfo.featureEnabled(.voice)
-                let disableSendButton = simplexLinkProhibited || fileProhibited || voiceProhibited
+                let disableSendButton = simplexLinkProhibited || fileProhibited || voiceProhibited || expressionSending
                 if simplexLinkProhibited {
             msgNotAllowedView("Connection links not allowed", icon: "link")
                     Divider()
@@ -742,6 +746,20 @@ struct ComposeView: View {
                     }
                 }
             }
+            if showExpressions, let library = expressionLibrary {
+                Divider()
+                XauXatExpressionsView(
+                    library: library,
+                    allowStickers: expressionsAllowStickers,
+                    allowSounds: expressionsAllowSounds,
+                    allowPlayback: chatModel.activeCall == nil,
+                    sending: expressionSending || composeState.inProgress,
+                    close: closeExpressions,
+                    select: stageExpression
+                )
+                .frame(height: verticalSizeClass == .compact ? 230 : 320)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .background {
             Color.clear
@@ -787,6 +805,7 @@ struct ComposeView: View {
         }
         .onChange(of: chat.chatInfo.sendMsgEnabled) { sendEnabled in
             if !sendEnabled {
+                closeExpressions()
                 cancelCurrentVoiceRecording()
                 clearCurrentDraft()
                 clearState()
@@ -802,6 +821,7 @@ struct ComposeView: View {
             }
         }
         .onChange(of: composeState.contextItem) { contextItem in
+            if composeState.attachmentDisabled { closeExpressions() }
             if contextItem != .noContextItem {
                 codeLockCode = nil
                 codeLockMaxAttempts = nil
@@ -809,6 +829,9 @@ struct ComposeView: View {
             }
         }
         .confirmationDialog("Attach", isPresented: $showChooseSource, titleVisibility: .visible) {
+            Button("Stickers & sounds") {
+                openExpressions()
+            }
             Button("Take picture") {
                 showTakePhoto = true
             }
@@ -847,6 +870,12 @@ struct ComposeView: View {
                     }
                 }
             }
+        }
+        .onChange(of: chatModel.currentUser?.userId) { _ in
+            closeExpressions()
+        }
+        .onChange(of: keyboardVisible) { visible in
+            if visible { closeExpressions() }
         }
         .sheet(isPresented: $showCodeLockSetup) {
             XauXatCodeLockSetupView { code, maxAttempts, destroyOnExhaustion in
@@ -922,6 +951,7 @@ struct ComposeView: View {
             if voiceInteraction.active && !voiceInteraction.ready && voiceInteraction.phase != .finishing {
                 cancelCurrentVoiceRecording()
             }
+            closeExpressions()
             if codeLockCode != nil {
                 cancelCurrentVoiceRecording()
                 clearCurrentDraft()
@@ -1367,7 +1397,7 @@ struct ComposeView: View {
                 ? .indigo.opacity(colorScheme == .dark ? 1 : 0.7)
                 : theme.colors.primary
             )
-            .disabled(!chat.chatInfo.sendMsgEnabled)
+            .disabled(!chat.chatInfo.sendMsgEnabled || expressionSending)
 
             if let disabledText {
                 Text(disabledText)
@@ -1390,6 +1420,17 @@ struct ComposeView: View {
                 .padding(.trailing, 3)
                 .disabled(voiceInteraction.active || composeState.voicePreview)
                 .if(showCommands) { v in v.padding(.leading, 3) }
+        }
+        if expressionsAllowStickers || expressionsAllowSounds {
+            Button {
+                if showExpressions { closeExpressions() } else { openExpressions() }
+            } label: {
+                Image(systemName: showExpressions ? "chevron.down" : "face.smiling")
+                    .font(.title3).frame(width: 32, height: 32)
+            }
+            .accessibilityLabel(showExpressions ? "Close stickers and sounds" : "Stickers & sounds")
+            .disabled(expressionSending || composeState.attachmentDisabled || codeLockCode != nil || !chat.chatInfo.sendMsgEnabled)
+            .tint(theme.colors.primary)
         }
         if canConfigureCodeLockedText {
             codeLockButton()
@@ -1432,6 +1473,116 @@ struct ComposeView: View {
             }
         } else {
             b
+        }
+    }
+
+    private var expressionsAllowStickers: Bool {
+        im.secondaryIMFilter != nil || chat.chatInfo.featureEnabled(.files)
+    }
+
+    private var expressionsAllowSounds: Bool {
+        chat.chatInfo.featureEnabled(.voice)
+    }
+
+    @MainActor private func openExpressions() {
+        guard !expressionSending, !composeState.attachmentDisabled, codeLockCode == nil,
+              chat.chatInfo.sendMsgEnabled, let user = chatModel.currentUser else { return }
+        do {
+            expressionLibrary = try XauXatExpressionLibrary.forProfile(user.userId)
+            stopPlayback.toggle()
+            chatModel.stopPreviousRecPlay = nil
+            hideKeyboard()
+            keyboardVisible = false
+            withAnimation(.easeInOut(duration: 0.2)) { showExpressions = true }
+        } catch {
+            let scope = xauXatStorageScope()
+            AlertManager.shared.showAlert(Alert(
+                title: Text("Could not open local pack"),
+                message: Text("Try again, or reset this local pack to import your stickers and sounds again. Resetting removes only this profile's pack."),
+                primaryButton: .destructive(Text("Reset local pack")) {
+                    guard chatModel.currentUser?.userId == user.userId, xauXatStorageScope() == scope else { return }
+                    let directory = getAppFilesDirectory().appendingPathComponent("expressions-\(user.userId)", isDirectory: true)
+                    do {
+                        if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
+                        xauXatRemoveExpressionLibraryKey(userID: user.userId, scope: scope)
+                        openExpressions()
+                    } catch {
+                        AlertManager.shared.showAlertMsg(title: "Could not reset local pack")
+                    }
+                },
+                secondaryButton: .cancel()
+            ))
+        }
+    }
+
+    private func closeExpressions() {
+        showExpressions = false
+        expressionLibrary = nil
+    }
+
+    @MainActor private func stageExpression(_ item: XauXatExpression, _ bytes: Data) {
+        guard !expressionSending, !composeState.attachmentDisabled, codeLockCode == nil,
+              chat.chatInfo.sendMsgEnabled, let userID = chatModel.currentUser?.userId,
+              let library = expressionLibrary else { return }
+        let chatID = chat.id
+        let scope = xauXatStorageScope()
+        let conversationScope = draftChatId(chatID, chat.chatInfo.groupChatScope())
+        let context = composeState.contextItem
+        if item.kind == .sticker { expressionSending = true }
+        Task { @MainActor in
+            defer { expressionSending = false }
+            guard userID == chatModel.currentUser?.userId, chat.id == chatID,
+                  scope == xauXatStorageScope(), draftChatId(chat.id, chat.chatInfo.groupChatScope()) == conversationScope,
+                  chat.chatInfo.sendMsgEnabled, !composeState.attachmentDisabled else { return }
+            do {
+                switch item.kind {
+                case .sticker:
+                    guard expressionsAllowStickers, let image = UIImage(data: bytes),
+                          let preview = await resizeImageToStrSize(image, maxDataSize: 14000) else {
+                        throw XauXatExpressionError.unavailable
+                    }
+                    guard userID == chatModel.currentUser?.userId, chat.id == chatID,
+                          scope == xauXatStorageScope(), chat.chatInfo.sendMsgEnabled,
+                          draftChatId(chat.id, chat.chatInfo.groupChatScope()) == conversationScope,
+                          !composeState.attachmentDisabled, expressionsAllowStickers else { return }
+                    guard let png = resizeImageToDataSize(image, maxDataSize: MAX_IMAGE_SIZE, hasAlpha: true),
+                          let file = saveFile(png, "sticker_\(UUID().uuidString).png", encrypted: privacyEncryptLocalFilesGroupDefault.get()) else {
+                        throw XauXatExpressionError.unavailable
+                    }
+                    let info = chat.chatInfo
+                    let quoted: Int64?
+                    if case let .quotedItem(ci) = context { quoted = ci.id } else { quoted = nil }
+                    let message = ComposedMessage(fileSource: file, quotedItemId: quoted, msgContent: .image(text: "", image: preview))
+                    let sent = info.chatType == .local
+                        ? await apiCreateChatItems(noteFolderId: info.apiId, composedMessages: [message])
+                        : await apiSendMessages(type: info.chatType, id: info.apiId, scope: info.groupChatScope(), sendAsGroup: info.sendAsGroup,
+                                                live: false, ttl: nil, sign: false, composedMessages: [message])
+                    guard let sent, !sent.isEmpty else { removeFile(file.filePath); return }
+                    try? library.markUsed(item)
+                    guard userID == chatModel.currentUser?.userId, scope == xauXatStorageScope() else { return }
+                    for ci in sent { chatModel.addChatItem(info, ci) }
+                    if quoted != nil && composeState.contextItem == context { composeState.contextItem = .noContextItem }
+                case .sound:
+                    guard expressionsAllowSounds else { throw XauXatExpressionError.unavailable }
+                    // A draft owns a new disposable copy; cancel/send must never
+                    // remove or modify the reusable library asset.
+                    let name = "sound_\(UUID().uuidString).m4a"
+                    let url = getAppFilePath(name)
+                    try bytes.write(to: url, options: [.atomic, .completeFileProtection])
+                    _ = excludeFromSystemBackup(url)
+                    resetLinkPreview()
+                    voiceMessageRecordingTime = TimeInterval(item.duration)
+                    composeState = composeState.copy(
+                        preview: .voicePreview(recordingFileName: name, duration: item.duration),
+                        voiceMessageRecordingState: .finished,
+                        voiceMaskingState: .unavailable
+                    )
+                    try? library.markUsed(item)
+                    closeExpressions()
+                }
+            } catch {
+                AlertManager.shared.showAlertMsg(title: "Could not prepare media", message: LocalizedStringKey(XauXatExpressionError.unavailable.localizedDescription))
+            }
         }
     }
 
@@ -2016,7 +2167,13 @@ struct ComposeView: View {
                         sign: sign
                     )
                 } else {
-                    let file = voiceCryptoFile(recordingFileName)
+                    guard let file = voiceCryptoFile(recordingFileName) else {
+                        await MainActor.run {
+                            composeState.inProgress = false
+                            AlertManager.shared.showAlertMsg(title: "Could not prepare audio", message: "Nothing was sent. Please try again.")
+                        }
+                        return nil
+                    }
                     sent = await send(.voice(text: msgText, duration: duration), quoted: quoted, file: file, ttl: ttl, mentions: mentions, sign: sign)
                 }
             case let .filePreview(_, file):

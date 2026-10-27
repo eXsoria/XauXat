@@ -131,6 +131,7 @@ public func deleteDecoyStorage() {
         logger.error("Refusing to remove the active local profile")
         return
     }
+    removeExpressionLibraryKeys(.decoy)
     try? FileManager.default.removeItem(at: getAppDirectory(.decoy))
     _ = kcDecoyDatabasePassword.remove()
     _ = xauXatRemoveConversationLocks(.decoy)
@@ -191,12 +192,23 @@ public func deleteAppDatabaseAndFiles() {
 // Spec: spec/services/files.md#deleteAppFiles
 public func deleteAppFiles() {
     let fm = FileManager.default
+    removeExpressionLibraryKeys(xauXatStorageScope())
     do {
         try fm.removeItem(at: getAppFilesDirectory())
         try fm.createDirectory(at: getAppFilesDirectory(), withIntermediateDirectories: true)
         _ = protectPrivateAppDataFromSystemBackup()
     } catch {
         logger.error("FileUtils deleteAppFiles error: \(error.localizedDescription)")
+    }
+}
+
+private func removeExpressionLibraryKeys(_ scope: XauXatStorageScope) {
+    let directory = getAppDirectory(scope).appendingPathComponent("app_files", isDirectory: true)
+    guard let entries = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+    for entry in entries where entry.lastPathComponent.hasPrefix("expressions-") {
+        if let userID = Int64(entry.lastPathComponent.dropFirst("expressions-".count)) {
+            xauXatRemoveExpressionLibraryKey(userID: userID, scope: scope)
+        }
     }
 }
 

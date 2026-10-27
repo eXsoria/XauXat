@@ -136,6 +136,8 @@
 		5CE4407227ADB1D0007B033A /* Emoji.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CE4407127ADB1D0007B033A /* Emoji.swift */; };
 		5CE4407927ADB701007B033A /* EmojiItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CE4407827ADB701007B033A /* EmojiItemView.swift */; };
 		5CEACCE327DE9246000BD591 /* ComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CEACCE227DE9246000BD591 /* ComposeView.swift */; };
+		A68CF0010000000000000001 /* XauXatExpressionLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A68CF0010000000000000003 /* XauXatExpressionLibrary.swift */; };
+		A68CF0010000000000000002 /* XauXatExpressionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A68CF0010000000000000004 /* XauXatExpressionsView.swift */; };
 		5CEACCED27DEA495000BD591 /* MsgContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CEACCEC27DEA495000BD591 /* MsgContentView.swift */; };
 		5CEBD7482A5F115D00665FE2 /* SetDeliveryReceiptsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CEBD7472A5F115D00665FE2 /* SetDeliveryReceiptsView.swift */; };
 		5CF937202B24DE8C00E1D781 /* SharedFileSubscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF9371F2B24DE8C00E1D781 /* SharedFileSubscriber.swift */; };
@@ -537,6 +539,8 @@
 		5CE6C7B32AAB1515007F345C /* fi */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fi; path = fi.lproj/Localizable.strings; sourceTree = "<group>"; };
 		5CE6C7B42AAB1527007F345C /* uk */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = uk; path = uk.lproj/Localizable.strings; sourceTree = "<group>"; };
 		5CEACCE227DE9246000BD591 /* ComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeView.swift; sourceTree = "<group>"; };
+		A68CF0010000000000000003 /* XauXatExpressionLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatExpressionLibrary.swift; sourceTree = "<group>"; };
+		A68CF0010000000000000004 /* XauXatExpressionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatExpressionsView.swift; sourceTree = "<group>"; };
 		5CEACCEC27DEA495000BD591 /* MsgContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MsgContentView.swift; sourceTree = "<group>"; };
 		5CEBD7472A5F115D00665FE2 /* SetDeliveryReceiptsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDeliveryReceiptsView.swift; sourceTree = "<group>"; };
 		5CF9371F2B24DE8C00E1D781 /* SharedFileSubscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedFileSubscriber.swift; sourceTree = "<group>"; };
@@ -1180,6 +1184,8 @@
 			children = (
 				5C9FD96D27A5D6ED0075386C /* SendMessageView.swift */,
 				5CEACCE227DE9246000BD591 /* ComposeView.swift */,
+				A68CF0010000000000000003 /* XauXatExpressionLibrary.swift */,
+				A68CF0010000000000000004 /* XauXatExpressionsView.swift */,
 				E5AEC0AE2F91A73500270665 /* ComposeChatLinkView.swift */,
 				64AA1C6827EE10C800AC7277 /* ContextItemView.swift */,
 				649BCD9F280460FD00C3A862 /* ComposeImageView.swift */,
@@ -1680,6 +1686,8 @@
 				374086B10B2A475C9F019600 /* XauXatSupportView.swift in Sources */,
 				5CB924D727A8563F00ACCCDD /* SettingsView.swift in Sources */,
 				5CEACCE327DE9246000BD591 /* ComposeView.swift in Sources */,
+				A68CF0010000000000000001 /* XauXatExpressionLibrary.swift in Sources */,
+				A68CF0010000000000000002 /* XauXatExpressionsView.swift in Sources */,
 				E51CC1E62C62085600DB91FE /* OneHandUICard.swift in Sources */,
 				5C65DAF929D0CC20003CEE45 /* DeveloperView.swift in Sources */,
 				5C36027327F47AD5009F19D9 /* AppDelegate.swift in Sources */,

@@ -1182,6 +1182,25 @@ private func xauXatGroupAccessKey(code: String, salt: Data, iterations: Int) -> 
     return result == kCCSuccess ? SymmetricKey(data: key) : nil
 }
 
+private func expressionLibraryKeyName(_ userID: Int64, _ scope: XauXatStorageScope) -> String {
+    "expressionLibrary.\(scope == .primary ? "primary" : "localProfile").\(userID)"
+}
+
+public func xauXatExpressionLibraryKey(userID: Int64, create: Bool) -> Data? {
+    let item = KeyChainItem(forKey: expressionLibraryKeyName(userID, xauXatStorageScope()))
+    if let value = item.get() {
+        guard let data = Data(base64Encoded: value), data.count == 32 else { return nil }
+        return data
+    }
+    guard create else { return nil }
+    let data = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+    return item.set(data.base64EncodedString()) ? data : nil
+}
+
+public func xauXatRemoveExpressionLibraryKey(userID: Int64, scope: XauXatStorageScope) {
+    _ = KeyChainItem(forKey: expressionLibraryKeyName(userID, scope)).remove()
+}
+
 public struct KeyChainItem {
     var forKey: String
 
