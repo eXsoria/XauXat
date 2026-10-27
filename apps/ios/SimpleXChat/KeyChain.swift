@@ -342,7 +342,9 @@ private func writeContactInvitePolicyRecovery(_ data: Data, to url: URL) -> Bool
     do {
         var options: Data.WritingOptions = [.atomic]
         #if os(iOS)
-        options.insert(.completeFileProtection)
+        // Match the Keychain policy's AfterFirstUnlock availability so
+        // background processing still sees restrictions while the phone locks.
+        options.insert(.completeFileProtectionUntilFirstUserAuthentication)
         #endif
         try data.write(to: url, options: options)
         return excludeFromSystemBackup(url)

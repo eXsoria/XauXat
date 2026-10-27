@@ -328,6 +328,20 @@ func dismissAllSheets(animated: Bool, completion: (() -> Void)? = nil) { complet
             require(xauXatObserveContactInvitePolicy(connectionId: 7)?.state == .revoked,
                     "The original policy remains unchanged after either type of supersession")
         }
+        failSave = true
+        require(xauXatSaveContactInvitePolicy(existingPolicy), "Advanced permissions survive failed Keychain writes too")
+        require(xauXatObserveContactInvitePolicy(connectionId: 7)?.permissions == existingPolicy.permissions,
+                "Recovery retains the new link's own message and call restrictions")
+        let future = expiry.addingTimeInterval(1)
+        require(xauXatObserveContactInvitePolicy(connectionId: 7, at: future)?.state == .expired,
+                "Expiry remains enforceable while the recovery copy is authoritative")
+        require(xauXatRemoveContactInvitePolicies(.primary), "Database reset removes the recovery copy as well as Keychain state")
+        require(xauXatObserveContactInvitePolicy(connectionId: 7) == nil, "A recovery copy cannot survive database replacement")
+        scope = .decoy
+        require(xauXatObserveContactInvitePolicy(connectionId: 7)?.state == .revoked,
+                "Resetting recovered primary policies preserves the alternate profile")
+        scope = .primary
+        failSave = false
         print("Production invite policy regression checks passed: \(checks)")
     }
 }
