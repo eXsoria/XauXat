@@ -548,6 +548,10 @@ struct ComposeView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var showChooseSource = false
+    @State private var expressionLibrary: XauXatExpressionLibrary?
+    @State private var showExpressions = false
+    @State private var expressionSending = false
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var showMediaPicker = false
     @State private var showTakePhoto = false
     @State var chosenMedia: [UploadContent] = []
@@ -562,7 +566,12 @@ struct ComposeView: View {
 
     @State private var audioRecorder: AudioRecorder?
     @State private var voiceMessageRecordingTime: TimeInterval?
-    @State private var startingRecording: Bool = false
+    @State private var voiceInteraction = VoiceRecordingInteraction()
+    @State private var voiceRecordingLevels: [CGFloat] = []
+    @State private var voiceRecordingViewVisible = false
+    @State private var finishingVoiceFileName: String?
+    @State private var voiceRecordingOwner = UUID()
+    @Environment(\.scenePhase) private var scenePhase
     // for some reason voice message preview playback occasionally
     // fails to stop on ComposeVoiceView.playbackMode().onDisappear,
     // this is a workaround to fire an explicit event in certain cases
@@ -650,7 +659,7 @@ struct ComposeView: View {
                 let simplexLinkProhibited = im.secondaryIMFilter == nil && hasSimplexLink && !chat.groupFeatureEnabled(.simplexLinks)
                 let fileProhibited = im.secondaryIMFilter == nil && composeState.attachmentPreview && !chat.groupFeatureEnabled(.files)
                 let voiceProhibited = composeState.voicePreview && !chat.chatInfo.featureEnabled(.voice)
-                let disableSendButton = simplexLinkProhibited || fileProhibited || voiceProhibited
+                let disableSendButton = simplexLinkProhibited || fileProhibited || voiceProhibited || expressionSending
                 if simplexLinkProhibited {
             msgNotAllowedView("Connection links not allowed", icon: "link")
                     Divider()
@@ -737,6 +746,20 @@ struct ComposeView: View {
                     }
                 }
             }
+            if showExpressions, let library = expressionLibrary {
+                Divider()
+                XauXatExpressionsView(
+                    library: library,
+                    allowStickers: expressionsAllowStickers,
+                    allowSounds: expressionsAllowSounds,
+                    allowPlayback: chatModel.activeCall == nil && !voiceInteraction.active,
+                    sending: expressionSending || composeState.inProgress,
+                    close: closeExpressions,
+                    select: stageExpression
+                )
+                .frame(height: verticalSizeClass == .compact ? 230 : 320)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .background {
             Color.clear
@@ -782,6 +805,7 @@ struct ComposeView: View {
         }
         .onChange(of: chat.chatInfo.sendMsgEnabled) { sendEnabled in
             if !sendEnabled {
+                closeExpressions()
                 cancelCurrentVoiceRecording()
                 clearCurrentDraft()
                 clearState()
@@ -797,6 +821,7 @@ struct ComposeView: View {
             }
         }
         .onChange(of: composeState.contextItem) { contextItem in
+            if composeState.attachmentDisabled { closeExpressions() }
             if contextItem != .noContextItem {
                 codeLockCode = nil
                 codeLockMaxAttempts = nil
@@ -804,6 +829,9 @@ struct ComposeView: View {
             }
         }
         .confirmationDialog("Attach", isPresented: $showChooseSource, titleVisibility: .visible) {
+            Button("Stickers & sounds") {
+                openExpressions()
+            }
             Button("Take picture") {
                 showTakePhoto = true
             }
@@ -842,6 +870,12 @@ struct ComposeView: View {
                     }
                 }
             }
+        }
+        .onChange(of: chatModel.currentUser?.userId) { _ in
+            closeExpressions()
+        }
+        .onChange(of: keyboardVisible) { visible in
+            if visible { closeExpressions() }
         }
         .sheet(isPresented: $showCodeLockSetup) {
             XauXatCodeLockSetupView { code, maxAttempts, destroyOnExhaustion in
@@ -913,6 +947,11 @@ struct ComposeView: View {
             }
         }
         .onDisappear {
+            voiceRecordingViewVisible = false
+            if voiceInteraction.active && !voiceInteraction.ready && voiceInteraction.phase != .finishing {
+                cancelCurrentVoiceRecording()
+            }
+            closeExpressions()
             if codeLockCode != nil {
                 cancelCurrentVoiceRecording()
                 clearCurrentDraft()
@@ -939,30 +978,60 @@ struct ComposeView: View {
                 clearCurrentDraft()
                 clearState()
             }
+            if finishingVoiceFileName == nil {
+                audioRecorder?.stop()
+                audioRecorder = nil
+            }
             chatModel.removeLiveDummy(animated: false)
             codeLockCode = nil
             codeLockMaxAttempts = nil
             codeLockDestroyOnExhaustion = false
         }
-        .onChange(of: chatModel.stopPreviousRecPlay) { _ in
-            if !startingRecording {
-                if composeState.voiceMessageRecordingState == .recording {
-                    finishVoiceMessageRecording()
-                }
-            } else {
-                startingRecording = false
+        .onChange(of: chatModel.stopPreviousRecPlay) { source in
+            if composeState.voiceMessageRecordingState == .recording,
+               source != composeState.voiceMessageRecordingFileName.map(getAppFilePath) {
+                finishVoiceMessageRecording()
             }
         }
         .onChange(of: chat.chatInfo.featureEnabled(.voice)) { vmAllowed in
-            if !vmAllowed && composeState.voicePreview,
-               let fileName = composeState.voiceMessageRecordingFileName {
-                cancelVoiceMessageRecording(fileName)
-                clearState()
+            if !vmAllowed {
+                cancelCurrentVoiceRecording()
+                if composeState.voicePreview { clearState() }
+            }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .background {
+                if voiceInteraction.active && !voiceInteraction.ready && voiceInteraction.phase != .finishing {
+                    cancelCurrentVoiceRecording()
+                } else if composeState.voiceMessageRecordingState == .recording {
+                    finishVoiceMessageRecording()
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notification in
+            if let type = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+               type == AVAudioSession.InterruptionType.began.rawValue {
+                if voiceInteraction.active && !voiceInteraction.ready && voiceInteraction.phase != .finishing {
+                    cancelCurrentVoiceRecording()
+                } else if composeState.voiceMessageRecordingState == .recording {
+                    finishVoiceMessageRecording()
+                }
             }
         }
         .onAppear {
-            if case let .voicePreview(_, duration) = composeState.preview {
+            voiceRecordingViewVisible = true
+            if case let .voicePreview(fileName, duration) = composeState.preview {
                 voiceMessageRecordingTime = TimeInterval(duration)
+                if composeState.voiceMessageRecordingState == .recording {
+                    if let pending = AudioRecorder.pending(fileName) {
+                        bindVoiceRecorder(pending)
+                        audioRecorder = pending
+                        voiceMessageRecordingTime = pending.duration
+                        finishVoiceMessageRecording()
+                    } else {
+                        updateComposeVMRFinished()
+                    }
+                }
             }
         }
         .alert("Send report to moderators?", isPresented: $showReportSendConfirmation) {
@@ -1309,11 +1378,14 @@ struct ComposeView: View {
                 voiceMessageAllowed: codeLockCode == nil && chat.chatInfo.featureEnabled(.voice),
                 disableSendButton: disableSendButton,
                 showEnableVoiceMessagesAlert: chat.chatInfo.showEnableVoiceMessagesAlert,
-                startVoiceMessageRecording: {
-                    Task {
-                        await startVoiceMessageRecording()
-                    }
-                },
+                voiceInteraction: voiceInteraction,
+                voiceRecordingTime: voiceMessageRecordingTime ?? 0,
+                voiceRecordingLevels: voiceRecordingLevels,
+                startVoiceMessageRecording: beginVoiceMessageRecording,
+                moveVoiceMessageRecording: moveVoiceMessageRecording,
+                releaseVoiceMessageRecording: releaseVoiceMessageRecording,
+                cancelVoiceMessageTouch: cancelVoiceMessageTouch,
+                discardVoiceMessageRecording: discardVoiceMessageRecording,
                 finishVoiceMessageRecording: finishVoiceMessageRecording,
                 allowVoiceMessagesToContact: allowVoiceMessagesToContact,
                 timedMessageAllowed: chat.chatInfo.featureEnabled(.timedMessages),
@@ -1325,7 +1397,7 @@ struct ComposeView: View {
                 ? .indigo.opacity(colorScheme == .dark ? 1 : 0.7)
                 : theme.colors.primary
             )
-            .disabled(!chat.chatInfo.sendMsgEnabled)
+            .disabled(!chat.chatInfo.sendMsgEnabled || expressionSending)
 
             if let disabledText {
                 Text(disabledText)
@@ -1346,7 +1418,19 @@ struct ComposeView: View {
         if showAttachment {
             attachmentButton()
                 .padding(.trailing, 3)
+                .disabled(voiceInteraction.active || composeState.voicePreview)
                 .if(showCommands) { v in v.padding(.leading, 3) }
+        }
+        if expressionsAllowStickers || expressionsAllowSounds {
+            Button {
+                if showExpressions { closeExpressions() } else { openExpressions() }
+            } label: {
+                Image(systemName: showExpressions ? "chevron.down" : "face.smiling")
+                    .font(.title3).frame(width: 32, height: 32)
+            }
+            .accessibilityLabel(showExpressions ? "Close stickers and sounds" : "Stickers & sounds")
+            .disabled(expressionSending || voiceInteraction.active || composeState.attachmentDisabled || codeLockCode != nil || !chat.chatInfo.sendMsgEnabled)
+            .tint(theme.colors.primary)
         }
         if canConfigureCodeLockedText {
             codeLockButton()
@@ -1389,6 +1473,116 @@ struct ComposeView: View {
             }
         } else {
             b
+        }
+    }
+
+    private var expressionsAllowStickers: Bool {
+        im.secondaryIMFilter != nil || chat.chatInfo.featureEnabled(.files)
+    }
+
+    private var expressionsAllowSounds: Bool {
+        chat.chatInfo.featureEnabled(.voice)
+    }
+
+    @MainActor private func openExpressions() {
+        guard !expressionSending, !voiceInteraction.active, !composeState.attachmentDisabled, codeLockCode == nil,
+              chat.chatInfo.sendMsgEnabled, let user = chatModel.currentUser else { return }
+        do {
+            expressionLibrary = try XauXatExpressionLibrary.forProfile(user.userId)
+            stopPlayback.toggle()
+            chatModel.stopPreviousRecPlay = nil
+            hideKeyboard()
+            keyboardVisible = false
+            withAnimation(.easeInOut(duration: 0.2)) { showExpressions = true }
+        } catch {
+            let scope = xauXatStorageScope()
+            AlertManager.shared.showAlert(Alert(
+                title: Text("Could not open local pack"),
+                message: Text("Try again, or reset this local pack to import your stickers and sounds again. Resetting removes only this profile's pack."),
+                primaryButton: .destructive(Text("Reset local pack")) {
+                    guard chatModel.currentUser?.userId == user.userId, xauXatStorageScope() == scope else { return }
+                    let directory = getAppFilesDirectory().appendingPathComponent("expressions-\(user.userId)", isDirectory: true)
+                    do {
+                        if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
+                        xauXatRemoveExpressionLibraryKey(userID: user.userId, scope: scope)
+                        openExpressions()
+                    } catch {
+                        AlertManager.shared.showAlertMsg(title: "Could not reset local pack")
+                    }
+                },
+                secondaryButton: .cancel()
+            ))
+        }
+    }
+
+    private func closeExpressions() {
+        showExpressions = false
+        expressionLibrary = nil
+    }
+
+    @MainActor private func stageExpression(_ item: XauXatExpression, _ bytes: Data) {
+        guard !expressionSending, !voiceInteraction.active, !composeState.attachmentDisabled, codeLockCode == nil,
+              chat.chatInfo.sendMsgEnabled, let userID = chatModel.currentUser?.userId,
+              let library = expressionLibrary else { return }
+        let chatID = chat.id
+        let scope = xauXatStorageScope()
+        let conversationScope = draftChatId(chatID, chat.chatInfo.groupChatScope())
+        let context = composeState.contextItem
+        if item.kind == .sticker { expressionSending = true }
+        Task { @MainActor in
+            defer { expressionSending = false }
+            guard userID == chatModel.currentUser?.userId, chat.id == chatID,
+                  scope == xauXatStorageScope(), draftChatId(chat.id, chat.chatInfo.groupChatScope()) == conversationScope,
+                  chat.chatInfo.sendMsgEnabled, !composeState.attachmentDisabled else { return }
+            do {
+                switch item.kind {
+                case .sticker:
+                    guard expressionsAllowStickers, let image = UIImage(data: bytes),
+                          let preview = await resizeImageToStrSize(image, maxDataSize: 14000) else {
+                        throw XauXatExpressionError.unavailable
+                    }
+                    guard userID == chatModel.currentUser?.userId, chat.id == chatID,
+                          scope == xauXatStorageScope(), chat.chatInfo.sendMsgEnabled,
+                          draftChatId(chat.id, chat.chatInfo.groupChatScope()) == conversationScope,
+                          !composeState.attachmentDisabled, expressionsAllowStickers else { return }
+                    guard let png = resizeImageToDataSize(image, maxDataSize: MAX_IMAGE_SIZE, hasAlpha: true),
+                          let file = saveFile(png, "sticker_\(UUID().uuidString).png", encrypted: privacyEncryptLocalFilesGroupDefault.get()) else {
+                        throw XauXatExpressionError.unavailable
+                    }
+                    let info = chat.chatInfo
+                    let quoted: Int64?
+                    if case let .quotedItem(ci) = context { quoted = ci.id } else { quoted = nil }
+                    let message = ComposedMessage(fileSource: file, quotedItemId: quoted, msgContent: .image(text: "", image: preview))
+                    let sent = info.chatType == .local
+                        ? await apiCreateChatItems(noteFolderId: info.apiId, composedMessages: [message])
+                        : await apiSendMessages(type: info.chatType, id: info.apiId, scope: info.groupChatScope(), sendAsGroup: info.sendAsGroup,
+                                                live: false, ttl: nil, sign: false, composedMessages: [message])
+                    guard let sent, !sent.isEmpty else { removeFile(file.filePath); return }
+                    try? library.markUsed(item)
+                    guard userID == chatModel.currentUser?.userId, scope == xauXatStorageScope() else { return }
+                    for ci in sent { chatModel.addChatItem(info, ci) }
+                    if quoted != nil && composeState.contextItem == context { composeState.contextItem = .noContextItem }
+                case .sound:
+                    guard expressionsAllowSounds else { throw XauXatExpressionError.unavailable }
+                    // A draft owns a new disposable copy; cancel/send must never
+                    // remove or modify the reusable library asset.
+                    let name = "sound_\(UUID().uuidString).m4a"
+                    let url = getAppFilePath(name)
+                    try bytes.write(to: url, options: [.atomic, .completeFileProtection])
+                    _ = excludeFromSystemBackup(url)
+                    resetLinkPreview()
+                    voiceMessageRecordingTime = TimeInterval(item.duration)
+                    composeState = composeState.copy(
+                        preview: .voicePreview(recordingFileName: name, duration: item.duration),
+                        voiceMessageRecordingState: .finished,
+                        voiceMaskingState: .unavailable
+                    )
+                    try? library.markUsed(item)
+                    closeExpressions()
+                }
+            } catch {
+                AlertManager.shared.showAlertMsg(title: "Could not prepare media", message: LocalizedStringKey(XauXatExpressionError.unavailable.localizedDescription))
+            }
         }
     }
 
@@ -1704,20 +1898,24 @@ struct ComposeView: View {
                 cancelEnabled: !composeState.editing && !composeState.inProgress)
             Divider()
         case let .voicePreview(recordingFileName, _):
-            ComposeVoiceView(
-                recordingFileName: recordingFileName,
-                recordingTime: $voiceMessageRecordingTime,
-                recordingState: $composeState.voiceMessageRecordingState,
-                maskingState: $composeState.voiceMaskingState,
-                applyVoiceMask: applyVoiceMask,
-                cancelVoiceMessage: {
-                    cancelVoiceMessageRecording($0)
-                    clearState()
-                },
-                cancelEnabled: !composeState.editing && !composeState.inProgress && composeState.voiceMaskingState != .processing,
-                stopPlayback: $stopPlayback
-            )
-            Divider()
+            if composeState.voiceMessageRecordingState == .finished {
+                ComposeVoiceView(
+                    recordingFileName: recordingFileName,
+                    recordingTime: $voiceMessageRecordingTime,
+                    recordingState: $composeState.voiceMessageRecordingState,
+                    maskingState: $composeState.voiceMaskingState,
+                    recordingLevels: voiceRecordingLevels,
+                    resumeRecording: audioRecorder?.canResume == true && composeState.voiceMaskingState == .available && !composeState.inProgress ? resumeVoiceMessageRecording : nil,
+                    applyVoiceMask: applyVoiceMask,
+                    cancelVoiceMessage: {
+                        cancelVoiceMessageRecording($0)
+                        clearState()
+                    },
+                    cancelEnabled: !composeState.editing && !composeState.inProgress && composeState.voiceMaskingState != .processing,
+                    stopPlayback: $stopPlayback
+                )
+                Divider()
+            }
         case let .filePreview(fileName, _):
             ComposeFileView(
                 fileName: fileName,
@@ -1940,6 +2138,8 @@ struct ComposeView: View {
 
             case let .voicePreview(recordingFileName, duration):
                 stopPlayback.toggle()
+                audioRecorder?.stop()
+                audioRecorder = nil
                 if let code = codeLockCode {
                     guard let file = await saveXauXatCodeLockedAudio(
                         recordingFileName: recordingFileName,
@@ -1967,7 +2167,13 @@ struct ComposeView: View {
                         sign: sign
                     )
                 } else {
-                    let file = voiceCryptoFile(recordingFileName)
+                    guard let file = voiceCryptoFile(recordingFileName) else {
+                        await MainActor.run {
+                            composeState.inProgress = false
+                            AlertManager.shared.showAlertMsg(title: "Could not prepare audio", message: "Nothing was sent. Please try again.")
+                        }
+                        return nil
+                    }
                     sent = await send(.voice(text: msgText, duration: duration), quoted: quoted, file: file, ttl: ttl, mentions: mentions, sign: sign)
                 }
             case let .filePreview(_, file):
@@ -2283,21 +2489,69 @@ struct ComposeView: View {
     }
 
     // Spec: spec/client/compose.md#startVoiceMessageRecording
-    private func startVoiceMessageRecording() async {
-        startingRecording = true
-        let fileName = generateNewFileName("voice", "m4a")
+    private func beginVoiceMessageRecording(locked: Bool) {
+        guard voiceRecordingViewVisible, scenePhase == .active, !expressionSending, chat.chatInfo.sendMsgEnabled,
+              chat.chatInfo.featureEnabled(.voice), !composeState.inProgress,
+              composeState.noPreview,
+              let requestID = voiceInteraction.begin(locked: locked) else { return }
+        closeExpressions()
+        voiceMessageRecordingTime = 0
+        voiceRecordingLevels = []
+        Task { await startVoiceMessageRecording(requestID: requestID) }
+    }
+
+    private func moveVoiceMessageRecording(x: Double, y: Double) {
+        switch voiceInteraction.move(x: x, y: y) {
+        case .cancel:
+            discardVoiceMessageRecording()
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .lock:
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        default: break
+        }
+    }
+
+    private func releaseVoiceMessageRecording() {
+        switch voiceInteraction.release() {
+        case .finish: finishVoiceMessageRecording()
+        case .cancel: discardVoiceMessageRecording()
+        default: break
+        }
+    }
+
+    private func cancelVoiceMessageTouch() {
+        // A system-cancelled touch never keeps an unconfirmed microphone open.
+        if voiceInteraction.active { finishVoiceMessageRecording() }
+    }
+
+    private func discardVoiceMessageRecording() {
+        cancelCurrentVoiceRecording()
+        composeState = composeState.copy(preview: .noPreview, voiceMessageRecordingState: .noRecording, voiceMaskingState: .unavailable)
+        voiceMessageRecordingTime = nil
+        voiceRecordingLevels = []
+    }
+
+    private func startVoiceMessageRecording(requestID: UUID) async {
+        guard voiceInteraction.requestID == requestID else { return }
+        let fileName = generateNewFileName("voice-\(requestID.uuidString)", "m4a")
         chatModel.stopPreviousRecPlay = getAppFilePath(fileName)
-        audioRecorder = AudioRecorder(
-            onTimer: { voiceMessageRecordingTime = $0 },
-            onFinishRecording: {
-                updateComposeVMRFinished()
-                if let fileSize = fileSize(getAppFilePath(fileName)) {
-                    logger.debug("onFinishRecording recording file size = \(fileSize)")
-                }
-            }
-        )
-        if let recStartError = await audioRecorder?.start(fileName: fileName) {
+        let recorder = AudioRecorder(onTimer: { _ in }, onFinishRecording: {})
+        bindVoiceRecorder(recorder)
+        audioRecorder = recorder
+        let recStartError = await recorder.start(fileName: fileName, shouldStart: {
+            voiceInteraction.requestID == requestID && voiceInteraction.active && voiceRecordingViewVisible && scenePhase == .active && chat.chatInfo.sendMsgEnabled && chat.chatInfo.featureEnabled(.voice) && chatModel.stopPreviousRecPlay == getAppFilePath(fileName)
+        })
+        guard voiceInteraction.requestID == requestID else {
+            recorder.stop()
+            removeFile(fileName)
+            return
+        }
+        if let recStartError {
+            voiceInteraction.reset()
+            audioRecorder = nil
+            removeFile(fileName)
             switch recStartError {
+            case .cancelled: break
             case .permission:
                 AlertManager.shared.showAlert(Alert(
                     title: Text("No permission to record voice message"),
@@ -2316,6 +2570,8 @@ struct ComposeView: View {
                 )
             }
         } else {
+            guard voiceInteraction.started(requestID) else { return }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             composeState = composeState.copy(
                 preview: .voicePreview(recordingFileName: fileName, duration: 0),
                 voiceMessageRecordingState: .recording,
@@ -2324,14 +2580,89 @@ struct ComposeView: View {
         }
     }
 
+    private func bindVoiceRecorder(_ recorder: AudioRecorder) {
+        recorder.owner = voiceRecordingOwner
+        recorder.onTimer = { voiceMessageRecordingTime = $0 }
+        recorder.onFinishRecording = finishVoiceMessageRecording
+        recorder.onFinishing = finishVoiceMessageRecording
+        recorder.onLevel = { level in
+            voiceRecordingLevels.append(level)
+            if voiceRecordingLevels.count > 40 { voiceRecordingLevels.removeFirst() }
+        }
+    }
+
     // Spec: spec/client/compose.md#finishVoiceMessageRecording
     private func finishVoiceMessageRecording() {
-        audioRecorder?.stop()
-        audioRecorder = nil
-        updateComposeVMRFinished()
-        if let fileName = composeState.voiceMessageRecordingFileName,
-           let fileSize = fileSize(getAppFilePath(fileName)) {
-            logger.debug("finishVoiceMessageRecording recording file size = \(fileSize)")
+        guard finishingVoiceFileName == nil else { return }
+        guard voiceInteraction.ready || composeState.voiceMessageRecordingState == .recording else {
+            if voiceInteraction.active { discardVoiceMessageRecording() }
+            return
+        }
+        guard let recorder = audioRecorder, let fileName = composeState.voiceMessageRecordingFileName else {
+            updateComposeVMRFinished()
+            return
+        }
+        guard recorder.owner == voiceRecordingOwner else { return }
+        finishingVoiceFileName = fileName
+        let finalization = recorder.pause()
+        voiceInteraction.prepareToFinish()
+        voiceMessageRecordingTime = recorder.duration
+        composeState = composeState.copy(preview: .voicePreview(recordingFileName: fileName, duration: max(1, Int(recorder.duration.rounded()))))
+        Task {
+            do {
+                try await finalization.value
+                guard audioRecorder === recorder, recorder.owner == voiceRecordingOwner, composeState.voiceMessageRecordingFileName == fileName, !recorder.cancelled else { return }
+                finishingVoiceFileName = nil
+                if recorder.duration < 0.3 {
+                    discardVoiceMessageRecording()
+                    return
+                }
+                voiceMessageRecordingTime = recorder.duration
+                voiceInteraction.finish()
+                updateComposeVMRFinished()
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                if !voiceRecordingViewVisible {
+                    if saveLastDraft,
+                       chatModel.draftChatId == draftChatId(chat.id, chat.chatInfo.groupChatScope()),
+                       chatModel.draft?.voiceMessageRecordingFileName == fileName {
+                        saveCurrentDraft()
+                    }
+                    recorder.stop()
+                    audioRecorder = nil
+                } else if !recorder.canResume {
+                    recorder.stop()
+                    audioRecorder = nil
+                }
+            } catch {
+                guard audioRecorder === recorder, recorder.owner == voiceRecordingOwner, composeState.voiceMessageRecordingFileName == fileName, !recorder.cancelled else { return }
+                finishingVoiceFileName = nil
+                voiceInteraction.finishFailed()
+                AlertManager.shared.showAlert(Alert(
+                    title: Text("Unable to prepare voice message"),
+                    message: Text("Your audio has been kept. Try again to prepare it for playback and sending."),
+                    primaryButton: .default(Text("Try again")) { finishVoiceMessageRecording() },
+                    secondaryButton: .destructive(Text("Delete recording")) { discardVoiceMessageRecording() }
+                ))
+            }
+        }
+    }
+
+    private func resumeVoiceMessageRecording() {
+        guard voiceRecordingViewVisible, scenePhase == .active, let recorder = audioRecorder,
+              composeState.voiceMessageRecordingState == .finished,
+              composeState.voiceMaskingState == .available else { return }
+        stopPlayback.toggle()
+        chatModel.stopPreviousRecPlay = composeState.voiceMessageRecordingFileName.map(getAppFilePath)
+        // Stop preview playback before restoring the recording audio session.
+        DispatchQueue.main.async {
+            guard voiceRecordingViewVisible, scenePhase == .active, audioRecorder === recorder, composeState.voiceMessageRecordingState == .finished else { return }
+            if recorder.resume() {
+                voiceInteraction.resume()
+                composeState = composeState.copy(voiceMessageRecordingState: .recording)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } else {
+                AlertManager.shared.showAlertMsg(title: "Unable to resume recording", message: "Your recording is still available to listen to or send.")
+            }
         }
     }
 
@@ -2340,6 +2671,8 @@ struct ComposeView: View {
               let fileName = composeState.voiceMessageRecordingFileName else { return }
 
         stopPlayback.toggle()
+        audioRecorder?.stop()
+        audioRecorder = nil
         composeState = composeState.copy(voiceMaskingState: .processing)
         let recordingURL = getAppFilePath(fileName)
 
@@ -2376,7 +2709,7 @@ struct ComposeView: View {
         var preview = composeState.preview
         if let recordingFileName = composeState.voiceMessageRecordingFileName,
            let recordingTime = voiceMessageRecordingTime {
-            preview = .voicePreview(recordingFileName: recordingFileName, duration: Int(recordingTime.rounded()))
+            preview = .voicePreview(recordingFileName: recordingFileName, duration: max(1, Int(recordingTime.rounded())))
         }
         composeState = composeState.copy(
             preview: preview,
@@ -2385,6 +2718,16 @@ struct ComposeView: View {
     }
 
     private func cancelCurrentVoiceRecording() {
+        if let recorder = audioRecorder, recorder.owner != voiceRecordingOwner {
+            audioRecorder = nil
+            voiceInteraction.reset()
+            finishingVoiceFileName = nil
+            return
+        }
+        finishingVoiceFileName = nil
+        voiceInteraction.reset()
+        audioRecorder?.stop()
+        audioRecorder = nil
         if let fileName = composeState.voiceMessageRecordingFileName {
             cancelVoiceMessageRecording(fileName)
         }
@@ -2392,13 +2735,19 @@ struct ComposeView: View {
 
     // Spec: spec/client/compose.md#cancelVoiceMessageRecording
     private func cancelVoiceMessageRecording(_ fileName: String) {
+        finishingVoiceFileName = nil
+        voiceInteraction.reset()
         stopPlayback.toggle()
         audioRecorder?.stop()
+        audioRecorder = nil
         removeFile(fileName)
     }
 
     // Spec: spec/client/compose.md#clearState
     private func clearState(live: Bool = false) {
+        finishingVoiceFileName = nil
+        voiceInteraction.reset()
+        audioRecorder?.stop()
         if live {
             composeState.inProgress = false
         } else {
@@ -2413,7 +2762,7 @@ struct ComposeView: View {
         codeLockDestroyOnExhaustion = false
         audioRecorder = nil
         voiceMessageRecordingTime = nil
-        startingRecording = false
+        voiceRecordingLevels = []
     }
 
     // Spec: spec/client/compose.md#saveCurrentDraft

@@ -1,0 +1,11 @@
+This build includes contact lifecycle fixes, private stickers/sounds, and hold-to-record voice messages.
+
+What to test:
+- Accept a fresh invitation after removing old contacts. Background and reopen the app; the new contact should remain.
+- Swipe an inactive/deleted contact and confirm local removal. Active chat deletion should retain the contact.
+- Open stickers and sounds beside the composer. Send a sticker while preserving typed text, import local media, use Favorites and Recents, and stage a sound before explicitly sending it.
+- Hold the microphone then release to preview. Slide left to cancel or up to lock. Pause, listen, resume, delete and send.
+- Start recording while a sound preview is playing. The tray should close and the microphone should record normally.
+- Switch conversations/profiles, background the app, and test larger accessibility text.
+
+Automated checks cover production policy persistence and cleanup, encrypted media library, real AAC recording/playback, composer controls, iPhone Release and simulator launch. Physical iPhone microphone/haptics and two-device encrypted delivery remain acceptance checks.

@@ -627,7 +627,11 @@ func setUserPrivacy_(_ cmd: ChatCommand) async throws -> User {
 }
 
 func apiDeleteUser(_ userId: Int64, _ delSMPQueues: Bool, viewPwd: String?) async throws {
+    let expressions = getAppFilesDirectory().appendingPathComponent("expressions-\(userId)", isDirectory: true)
+    let scope = xauXatStorageScope()
     try await sendCommandOkResp(.apiDeleteUser(userId: userId, delSMPQueues: delSMPQueues, viewPwd: viewPwd))
+    try? FileManager.default.removeItem(at: expressions)
+    xauXatRemoveExpressionLibraryKey(userID: userId, scope: scope)
 }
 
 func apiStartChat(ctrl: chat_ctrl? = nil) throws -> Bool {
@@ -1618,7 +1622,10 @@ func apiConnectPlan(connLink: String, resolveMode: PlanResolveMode = .unknown, l
 }
 
 func apiConnect(incognito: Bool, connLink: CreatedConnLink) async -> (ConnReqType, PendingContactConnection)? {
-    guard let userId = ChatModel.shared.currentUser?.userId else {
+    let context = await MainActor.run {
+        ChatModel.shared.currentUser.map { ($0.userId, xauXatStorageScope()) }
+    }
+    guard let (userId, storageScope) = context else {
         logger.error("apiConnect: no current user")
         return nil
     }
@@ -1626,8 +1633,10 @@ func apiConnect(incognito: Bool, connLink: CreatedConnLink) async -> (ConnReqTyp
     let m = ChatModel.shared
     switch r {
     case let .result(.sentConfirmation(_, connection)):
+        guard await saveFreshXauXatContactInvitePolicy(connectionId: connection.pccConnId, userId: userId, storageScope: storageScope) else { return nil }
         return (.invitation, connection)
     case let .result(.sentInvitation(_, connection)):
+        guard await saveFreshXauXatContactInvitePolicy(connectionId: connection.pccConnId, userId: userId, storageScope: storageScope) else { return nil }
         return (.contact, connection)
     case let .result(.contactAlreadyExists(_, contact)):
         if let c = m.getContactChat(contact.contactId) {
@@ -1639,6 +1648,23 @@ func apiConnect(incognito: Bool, connLink: CreatedConnLink) async -> (ConnReqTyp
     }
     if let r { await apiConnectResponseAlert(r) }
     return nil
+}
+
+private func saveFreshXauXatContactInvitePolicy(connectionId: Int64, userId: Int64, storageScope: XauXatStorageScope) async -> Bool {
+    // SQLite can reuse a deleted connection's numeric ID. A newly accepted
+    // native connection must not inherit its old revocation, expiry or limits.
+    // Direct scanners apply the new link's advanced policy after registration.
+    return await MainActor.run {
+        guard ChatModel.shared.currentUser?.userId == userId, xauXatStorageScope() == storageScope else { return false }
+        guard xauXatSaveContactInvitePolicy(XauXatContactInvitePolicy(
+            connectionId: connectionId, createdAt: .now
+        )) else {
+            logger.error("Unable to save the new connection's invite policy")
+            AlertManager.shared.showAlertMsg(title: "Error connecting", message: "Could not prepare this connection. Please try again.")
+            return false
+        }
+        return true
+    }
 }
 
 private func apiConnectResponseAlert<R>(_ r: APIResult<R>) async {
@@ -1791,8 +1817,24 @@ func apiChangePreparedGroupUser(groupId: Int64, newUserId: Int64) async throws -
 }
 
 func apiConnectPreparedContact(contactId: Int64, incognito: Bool, msg: MsgContent?) async -> Contact? {
+    let context = await MainActor.run {
+        ChatModel.shared.currentUser.map { ($0.userId, xauXatStorageScope()) }
+    }
+    guard let (userId, storageScope) = context else { return nil }
     let r: APIResult<ChatResponse1>? = await chatApiSendCmdWithRetry(.apiConnectPreparedContact(contactId: contactId, incognito: incognito, msg: msg))
-    if case let .result(.startedConnectionToContact(_, contact)) = r { return contact }
+    if case let .result(.startedConnectionToContact(_, contact)) = r {
+        guard await MainActor.run(body: {
+            ChatModel.shared.currentUser?.userId == userId && xauXatStorageScope() == storageScope
+        }) else { return nil }
+        // The core emits startedConnectionToContact only after joining a new
+        // or prepared connection. Already-connected contacts return a different
+        // response. A retry after a failed join needs the same initialization,
+        // even when the UI has already received that prepared connection.
+        if let connectionId = contact.activeConn?.connId {
+            guard await saveFreshXauXatContactInvitePolicy(connectionId: connectionId, userId: userId, storageScope: storageScope) else { return nil }
+        }
+        return contact
+    }
     if let r { await apiConnectResponseAlert(r) }
     return nil
 }

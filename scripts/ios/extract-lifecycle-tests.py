@@ -47,8 +47,12 @@ keychain = (root / "apps/ios/SimpleXChat/KeyChain.swift").read_text(encoding="ut
 start = keychain.index("public enum XauXatContactInviteState:")
 policy = "import Foundation\n" + keychain[start:keychain.index("private var kcContactInvitePolicies:", start)]
 policy += "\nprivate var kcContactInvitePolicies: KeyChainItem { xauXatStorageScope() == .decoy ? kcDecoyContactInvitePolicies : kcPrimaryContactInvitePolicies }\n"
-for name in ["xauXatRemoveContactInvitePolicies", "readXauXatContactInvitePolicies", "writeXauXatContactInvitePolicies", "xauXatSaveContactInvitePolicy", "xauXatObserveContactInvitePolicy", "xauXatSetContactInviteState", "xauXatContactInvitePolicies"]:
+for name in ["contactInvitePolicyRecoveryURL", "writeContactInvitePolicyRecovery", "xauXatRemoveContactInvitePolicies", "readXauXatContactInvitePolicies", "writeXauXatContactInvitePolicies", "xauXatSaveContactInvitePolicy", "xauXatObserveContactInvitePolicy", "xauXatSetContactInviteState", "xauXatContactInvitePolicies"]:
     policy += "\n" + function("apps/ios/SimpleXChat/KeyChain.swift", name)
+for name in ["connectViaLink", "saveXauXatIncomingInvitePolicy"]:
+    policy += "\n" + function("apps/ios/Shared/Views/NewChat/NewChatView.swift", name)
+for name in ["apiConnect", "apiConnectPreparedContact", "saveFreshXauXatContactInvitePolicy", "expirePendingXauXatContactInvites"]:
+    policy += "\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", name)
 Path(sys.argv[2]).with_name("InvitePolicy.swift").write_text(policy, encoding="utf-8")
 
 initialization = function("apps/ios/SimpleXChat/API.swift", "chatMigrateInit")

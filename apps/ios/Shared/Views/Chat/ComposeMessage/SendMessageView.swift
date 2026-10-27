@@ -29,13 +29,19 @@ struct SendMessageView: View {
     var voiceMessageAllowed: Bool = true
     var disableSendButton = false
     var showEnableVoiceMessagesAlert: ChatInfo.ShowEnableVoiceMessagesAlert = .other
-    var startVoiceMessageRecording: (() -> Void)? = nil
+    var voiceInteraction = VoiceRecordingInteraction()
+    var voiceRecordingTime: TimeInterval = 0
+    var voiceRecordingLevels: [CGFloat] = []
+    var startVoiceMessageRecording: ((Bool) -> Void)? = nil
+    var moveVoiceMessageRecording: ((Double, Double) -> Void)? = nil
+    var releaseVoiceMessageRecording: (() -> Void)? = nil
+    var cancelVoiceMessageTouch: (() -> Void)? = nil
+    var discardVoiceMessageRecording: (() -> Void)? = nil
     var finishVoiceMessageRecording: (() -> Void)? = nil
     var allowVoiceMessagesToContact: (() -> Void)? = nil
     var timedMessageAllowed: Bool = false
     var showSign: Bool = false
     var onMediaAdded: ([UploadContent]) -> Void
-    @State private var holdingVMR = false
     @Namespace var namespace
     @Binding var keyboardVisible: Bool
     @Binding var keyboardHiddenDate: Date
@@ -54,10 +60,18 @@ struct SendMessageView: View {
     var body: some View {
         let composeShape = RoundedRectangle(cornerSize: CGSize(width: 20, height: 20))
         let trailingContentInset: CGFloat = composeState.progressByTimeout ? progressTrailingContentInset : 32
+        let recordingActionInset: CGFloat = sendLiveMessage != nil && updateLiveMessage != nil && composeState.contextItem == .noContextItem ? 96 : 52
         ZStack(alignment: .leading) {
-            if case .voicePreview = composeState.preview {
+            if voiceInteraction.active {
+                VoiceRecordingStatus(interaction: voiceInteraction, time: voiceRecordingTime, levels: voiceRecordingLevels, color: sendButtonColor, deleteRecording: discardVoiceMessageRecording)
+                    .padding(.leading, 12)
+                    .padding(.trailing, recordingActionInset)
+                    .frame(minHeight: 44)
+            } else if case .voicePreview = composeState.preview {
                 Text("Voice message…")
-                    .font(teFont.italic())
+                    .font(.callout.italic())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .multilineTextAlignment(.leading)
                     .foregroundColor(theme.colors.secondary)
                     .padding(.horizontal, 10)
@@ -80,6 +94,7 @@ struct SendMessageView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .frame(minHeight: 44)
         .overlay(alignment: .topTrailing, content: {
             if !composeState.progressByTimeout && teHeight > 100 && !composeState.inProgress {
                 deleteTextButton()
@@ -102,8 +117,7 @@ struct SendMessageView: View {
             }
         }
         .padding(.vertical, 1)
-        .background(theme.colors.background)
-        .clipShape(composeShape)
+        .background(theme.colors.background, in: composeShape)
         .overlay(composeShape.strokeBorder(.secondary, lineWidth: 0.5).opacity(0.7))
         .onChange(of: composeState.message, perform: { text in updateFont(text) })
         .padding(.vertical, 8)
@@ -123,15 +137,20 @@ struct SendMessageView: View {
             && !composeState.forwarding
             && composeState.liveMessage == nil
             && ((composeState.noPreview && vmrs == .noRecording)
-                || (vmrs == .recording && holdingVMR)) {
+                || voiceInteraction.active) {
             HStack {
                 if voiceMessageAllowed {
-                    RecordVoiceMessageButton(
-                        startVoiceMessageRecording: startVoiceMessageRecording,
-                        finishVoiceMessageRecording: finishVoiceMessageRecording,
-                        holdingVMR: $holdingVMR,
-                        disabled: composeState.inProgress
+                    VoiceRecordingButton(
+                        interaction: voiceInteraction,
+                        color: sendButtonColor,
+                        disabled: composeState.inProgress || !isEnabled,
+                        begin: { startVoiceMessageRecording?($0) },
+                        move: { moveVoiceMessageRecording?($0, $1) },
+                        release: { releaseVoiceMessageRecording?() },
+                        cancelTouch: { cancelVoiceMessageTouch?() },
+                        pause: { finishVoiceMessageRecording?() }
                     )
+                    .padding(.trailing, 2)
                 } else {
                     voiceMessageNotAllowedButton()
                 }
@@ -139,9 +158,12 @@ struct SendMessageView: View {
                    let update = updateLiveMessage,
                    case .noContextItem = composeState.contextItem {
                     startLiveMessageButton(send: send, update: update)
+                        .opacity(voiceInteraction.active ? 0 : 1)
+                        .disabled(voiceInteraction.active)
+                        .accessibilityHidden(voiceInteraction.active)
                 }
             }
-        } else if vmrs == .recording && !holdingVMR {
+        } else if vmrs == .recording {
             finishVoiceMessageRecordingButton()
         } else if composeState.liveMessage != nil && composeState.liveMessage?.sentMsg == nil && composeState.message.isEmpty {
             cancelLiveMessageButton {
@@ -260,41 +282,6 @@ struct SendMessageView: View {
 //                    Label("Sign message", systemImage: "checkmark.seal")
 //                }
 //            }
-        }
-    }
-
-    private struct RecordVoiceMessageButton: View {
-        @Environment(\.isEnabled) var isEnabled
-        @EnvironmentObject var theme: AppTheme
-        var startVoiceMessageRecording: (() -> Void)?
-        var finishVoiceMessageRecording: (() -> Void)?
-        @Binding var holdingVMR: Bool
-        var disabled: Bool
-        @State private var pressed: TimeInterval? = nil
-
-        var body: some View {
-            Image(systemName: isEnabled ? "mic.fill" : "mic")
-            .resizable()
-            .scaledToFit()
-            .frame(width: 20, height: 20)
-            .foregroundColor(isEnabled ? theme.colors.primary : theme.colors.secondary)
-            .opacity(holdingVMR ? 0.7 : 1)
-            .disabled(disabled)
-            .frame(width: 31, height: 31)
-            .padding([.bottom, .trailing], 4)
-            ._onButtonGesture { down in
-                if down {
-                    holdingVMR = true
-                    pressed = ProcessInfo.processInfo.systemUptime
-                    startVoiceMessageRecording?()
-                } else {
-                    if let pressed, ProcessInfo.processInfo.systemUptime - pressed >= 1 {
-                        finishVoiceMessageRecording?()
-                    }
-                    holdingVMR = false
-                    pressed = nil
-                }
-            } perform: {}
         }
     }
 

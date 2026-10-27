@@ -127,12 +127,13 @@ struct FramedItemView: View {
             switch (chatItem.content.msgContent) {
             case let .image(text, _):
                 CIImageView(chatItem: chatItem, senderProfile: ciSenderProfile(chatItem, chat.chatInfo), scrollToItem: scrollToItem, preview: preview, maxWidth: maxWidth, imgWidth: imgWidth, showFullScreenImage: $showFullscreenGallery)
+                    .padding(.bottom, xauXatIsSticker(chatItem) ? 26 : 0)
                     .overlay(DetermineWidth())
                 if text == "" && !chatItem.meta.isLive {
                     Color.clear
                         .frame(width: 0, height: 0)
                         .onAppear {
-                            useWhiteMetaColor = true
+                            useWhiteMetaColor = !xauXatIsSticker(chatItem)
                         }
                         .onDisappear {
                             useWhiteMetaColor = false

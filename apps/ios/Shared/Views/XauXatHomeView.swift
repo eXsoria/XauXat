@@ -1262,6 +1262,7 @@ private struct XauXatChatDestination: View {
     @State private var showMoreActions = false
     @State private var showDeleteConfirmation = false
     @State private var showDeleteContactConfirmation = false
+    @State private var deleteError: SomeAlert?
     @State private var showPlus = false
     @State private var locked = false
 
@@ -1274,7 +1275,9 @@ private struct XauXatChatDestination: View {
 
     var body: some View {
         switch chat.chatInfo {
-        case let .direct(contact) where contact.active && !contact.isContactCard:
+        // Native List swipeActions do not work in this screen's ScrollView.
+        // Keep inactive contacts on the same removable row as active contacts.
+        case let .direct(contact) where !contact.isContactCard:
             destination
         case .group, .local:
             destination
@@ -1297,17 +1300,16 @@ private struct XauXatChatDestination: View {
                 ) {
                     Button("Delete chat", role: .destructive) {
                         closeSwipe()
-                        Task {
-                            _ = await deleteContactChat(
-                                chat,
-                                chatDeleteMode: .messages
-                            )
-                        }
+                        deleteConversation()
                     }
 
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("The conversation will be deleted. The contact will remain in Contacts.")
+                    if inactiveContact {
+                        Text("This contact and its conversation will be permanently deleted.")
+                    } else {
+                        Text("The conversation will be deleted. The contact will remain in Contacts.")
+                    }
                 }
                 .confirmationDialog(
                     "Delete contact?",
@@ -1316,18 +1318,14 @@ private struct XauXatChatDestination: View {
                 ) {
                     Button("Delete contact", role: .destructive) {
                         closeSwipe()
-                        Task {
-                            _ = await deleteContactChat(
-                                chat,
-                                chatDeleteMode: .full(notify: true)
-                            )
-                        }
+                        deleteConversation(deleteContact: true)
                     }
 
                     Button("Cancel", role: .cancel) {}
                 } message: {
                     Text("This contact and its conversation will be permanently deleted.")
                 }
+                .alert(item: $deleteError) { $0.alert }
                 .sheet(isPresented: $showMoreActions) {
                     XauXatChatMoreSheet(
                         chat: chat,
@@ -1372,6 +1370,28 @@ private struct XauXatChatDestination: View {
                 .onAppear {
                     locked = xauXatIsChatLocked(chat.id)
                 }
+        }
+    }
+
+    private var inactiveContact: Bool {
+        if case let .direct(contact) = chat.chatInfo { return !contact.active }
+        return false
+    }
+
+    private func deleteConversation(deleteContact: Bool = false) {
+        Task {
+            let mode: ChatDeleteMode = if inactiveContact {
+                .full(notify: false)
+            } else if deleteContact {
+                .full(notify: true)
+            } else {
+                .messages
+            }
+            if let error = await deleteContactChat(chat, chatDeleteMode: mode) {
+                await MainActor.run {
+                    deleteError = SomeAlert(alert: error, id: "deleteHomeConversation")
+                }
+            }
         }
     }
 
@@ -1422,6 +1442,7 @@ private struct XauXatChatDestination: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("xauxat.chat.\(chat.id)")
         .disabled(
             chatModel.chatRunning != true ||
             chatModel.deletedChats.contains(chat.id)

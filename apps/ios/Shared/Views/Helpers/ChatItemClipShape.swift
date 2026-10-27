@@ -18,15 +18,18 @@ struct ChatItemClipped: ViewModifier {
     @AppStorage(DEFAULT_CHAT_ITEM_TAIL) private var tailEnabled = true
     private let chatItem: (content: CIContent, chatDir: CIDirection)?
     private let tailVisible: Bool
+    private let sticker: Bool
 
     init() {
         self.chatItem = nil
         self.tailVisible = false
+        self.sticker = false
     }
 
     init(_ ci: ChatItem, tailVisible: Bool) {
         self.chatItem = (ci.content, ci.chatDir)
         self.tailVisible = tailVisible
+        self.sticker = xauXatIsSticker(ci) && ci.meta.itemDeleted == nil && ci.quotedItem == nil && ci.meta.itemForwarded == nil
     }
     
     private func shapeStyle() -> ChatItemShape.Style {
@@ -59,15 +62,19 @@ struct ChatItemClipped: ViewModifier {
         }
     }
 
-    func body(content: Content) -> some View {
+    @ViewBuilder func body(content: Content) -> some View {
         let clipShape = ChatItemShape(
             roundness: roundness,
             style: shapeStyle()
         )
-        content
-            .contentShape(.dragPreview, clipShape)
-            .contentShape(.contextMenuPreview, clipShape)
-            .clipShape(clipShape)
+        if sticker {
+            content.contentShape(Rectangle())
+        } else {
+            content
+                .contentShape(.dragPreview, clipShape)
+                .contentShape(.contextMenuPreview, clipShape)
+                .clipShape(clipShape)
+        }
     }
 }
 

@@ -2349,6 +2349,13 @@ struct ChatView: View {
                     copyButton(ci)
                 }
                 if !codeLocked, let fileSource = fileSource, fileExists, mediaExportAllowed {
+                    if xauXatIsSticker(ci), let userID = m.currentUser?.userId {
+                        let storageScope = xauXatStorageScope()
+                        Button {
+                            guard userID == m.currentUser?.userId, storageScope == xauXatStorageScope() else { return }
+                            xauXatFavoriteSticker(ci, userID: userID)
+                        } label: { Label("Add to Favorites", systemImage: "star") }
+                    }
                     if ci.content.msgContent?.isImage == true, let image = getLoadedXauXatImage(ci) {
                         if case .xauXatImage = ci.content.msgContent {
                             saveButton(image: image)
