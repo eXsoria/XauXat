@@ -57,6 +57,24 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  home-chat-actions:
+    name: Deleted contact removal
+    # No native-core dependency: run the real SwiftUI views on either CPU.
+    runs-on: macos-26-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: bash scripts/ios/test-home-chat-actions.sh
+        env:
+          HOME_CHAT_TEST_OUTPUT: ${{ runner.temp }}/home-chat-proof
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: XauXat-home-chats-${{ github.sha }}
+          path: ${{ runner.temp }}/home-chat-proof
+          if-no-files-found: error
+          retention-days: 7
+
   message-history:
     name: Message history recovery
     runs-on: ubuntu-24.04
