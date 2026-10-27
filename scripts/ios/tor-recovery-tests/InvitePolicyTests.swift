@@ -7,6 +7,13 @@ func xauXatStorageScope() -> XauXatStorageScope { scope }
 var values: [String: String] = [:]
 var failRemoval = false
 var failSave = false
+let policyTestDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+func getAppDirectory(_ storage: XauXatStorageScope) -> URL {
+    let directory = policyTestDirectory.appendingPathComponent(storage == .primary ? "primary" : "decoy")
+    try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+func excludeFromSystemBackup(_ url: URL) -> Bool { true }
 struct KeyChainItem {
     let forKey: String
     func get() -> String? { values[forKey] }
@@ -134,6 +141,7 @@ func dismissAllSheets(animated: Bool, completion: (() -> Void)? = nil) { complet
     }
 
     static func main() async {
+        defer { try? FileManager.default.removeItem(at: policyTestDirectory) }
         let now = Date(timeIntervalSince1970: 1_000)
         let old = XauXatContactInvitePolicy(connectionId: 7, createdAt: now, bundleId: "old-bundle", maxUses: 2)
         require(xauXatSaveContactInvitePolicy(old), "Store the old database's restricted invite")
@@ -229,13 +237,25 @@ func dismissAllSheets(animated: Bool, completion: (() -> Void)? = nil) { complet
         nextConnection = (.invitation, PendingContactConnection(pccConnId: 7))
         failSave = true
         let beforeError = AlertManager.shared.errors
-        let failedConnection = await apiConnect(incognito: false, connLink: CreatedConnLink())
-        require(failedConnection == nil && AlertManager.shared.errors == beforeError + 1,
-                "A failed policy write cannot report a successful new connection")
-        require(deletedPendingConnections.isEmpty, "A failed write must not implicitly delete any native connection or history")
-        require(xauXatObserveContactInvitePolicy(connectionId: 7)?.state == .revoked,
-                "Failed persistence does not rewrite the old policy in memory")
+        let recoveredConnection = await apiConnect(incognito: false, connLink: CreatedConnLink())
+        require(recoveredConnection != nil && AlertManager.shared.errors == beforeError,
+                "A failed Keychain write must durably recover the newly accepted connection policy")
+        require(deletedPendingConnections.isEmpty, "Recovery must not delete native connection history")
+        let staleKeychain = values
+        values = [:]
+        require(xauXatObserveContactInvitePolicy(connectionId: 7)?.state == .active,
+                "Reopening from disk without Keychain must retain the fresh policy")
+        values = staleKeychain
+        ChatModel.shared.chats = [Chat(id: linkedContact.id, chatInfo: .direct(linkedContact))]
+        await expirePendingXauXatContactInvites()
+        require(deletedDirectConnections.isEmpty && ChatModel.shared.chats.count == 1,
+                "Relaunch cleanup cannot delete a fresh contact after Keychain persistence fails")
+        require(xauXatObserveContactInvitePolicy(connectionId: 7)?.state == .used,
+                "Policy state changes continue to persist while Keychain is unavailable")
         failSave = false
+        _ = xauXatSetContactInviteState(connectionId: 7, state: .used)
+        require(!FileManager.default.fileExists(atPath: contactInvitePolicyRecoveryURL(.primary).path),
+                "The recovery copy is removed after current state reaches Keychain")
 
         ChatModel.shared.preparedContact = Contact(contactId: 99)
         nextPreparedContact = Contact(contactId: 99, activeConn: Connection(connId: 7))
@@ -266,10 +286,20 @@ func dismissAllSheets(animated: Bool, completion: (() -> Void)? = nil) { complet
         nextPreparedContact = Contact(contactId: 99, activeConn: Connection(connId: 7))
         deletedPendingConnections = []
         failSave = true
-        let failedPrepared = await apiConnectPreparedContact(contactId: 99, incognito: false, msg: nil)
-        require(failedPrepared == nil && deletedPendingConnections.isEmpty,
-                "A prepared-policy write failure must not delete the contact or its history")
+        scope = .decoy
+        let originalDecoyPolicy = xauXatObserveContactInvitePolicy(connectionId: 7)
+        scope = .primary
+        let recoveredPrepared = await apiConnectPreparedContact(contactId: 99, incognito: false, msg: nil)
+        require(recoveredPrepared != nil && deletedPendingConnections.isEmpty,
+                "A prepared join also survives failed Keychain persistence without deleting history")
+        require(xauXatObserveContactInvitePolicy(connectionId: 7)?.state == .active,
+                "Prepared-policy recovery supersedes the stale revocation on disk")
+        scope = .decoy
+        require(xauXatObserveContactInvitePolicy(connectionId: 7) == originalDecoyPolicy,
+                "A recovery policy cannot leak into the other storage scope")
+        scope = .primary
         failSave = false
+        _ = xauXatSetContactInviteState(connectionId: 7, state: .active)
 
         _ = xauXatSetContactInviteState(connectionId: 7, state: .revoked)
         scope = .decoy

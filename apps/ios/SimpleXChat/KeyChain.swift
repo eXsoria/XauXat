@@ -298,32 +298,73 @@ private var kcContactInvitePolicies: KeyChainItem {
     xauXatStorageScope() == .decoy ? kcDecoyContactInvitePolicies : kcPrimaryContactInvitePolicies
 }
 
+// A native join can succeed while Keychain writes are temporarily unavailable.
+// Keep an atomic, protected recovery copy so a reused connection ID cannot be
+// deleted by the previous invitation's tombstone after the next foreground.
+private func contactInvitePolicyRecoveryURL(_ scope: XauXatStorageScope) -> URL {
+    getAppDirectory(scope).appendingPathComponent("contact-invite-policies.recovery")
+}
+
 @discardableResult
 public func xauXatRemoveContactInvitePolicies(_ scope: XauXatStorageScope) -> Bool {
     xauXatContactInvitePoliciesLock.lock()
     defer { xauXatContactInvitePoliciesLock.unlock() }
-    return switch scope {
+    let removed = switch scope {
     case .primary: kcPrimaryContactInvitePolicies.remove()
     case .decoy: kcDecoyContactInvitePolicies.remove()
     }
+    guard removed else { return false }
+    let recovery = contactInvitePolicyRecoveryURL(scope)
+    do {
+        if FileManager.default.fileExists(atPath: recovery.path) {
+            try FileManager.default.removeItem(at: recovery)
+        }
+        return true
+    } catch { return false }
 }
 
 private func readXauXatContactInvitePolicies() -> [Int64: XauXatContactInvitePolicy] {
-    guard let value = kcContactInvitePolicies.get(),
-          let data = value.data(using: .utf8),
+    let recovery = contactInvitePolicyRecoveryURL(xauXatStorageScope())
+    let data: Data?
+    if FileManager.default.fileExists(atPath: recovery.path) {
+        data = try? Data(contentsOf: recovery)
+    } else {
+        data = kcContactInvitePolicies.get()?.data(using: .utf8)
+    }
+    guard let data,
           let policies = try? JSONDecoder().decode([String: XauXatContactInvitePolicy].self, from: data) else { return [:] }
     return Dictionary(uniqueKeysWithValues: policies.compactMap { key, value in
         Int64(key).map { ($0, value) }
     })
 }
 
+private func writeContactInvitePolicyRecovery(_ data: Data, to url: URL) -> Bool {
+    do {
+        var options: Data.WritingOptions = [.atomic]
+        #if os(iOS)
+        options.insert(.completeFileProtection)
+        #endif
+        try data.write(to: url, options: options)
+        return excludeFromSystemBackup(url)
+    } catch { return false }
+}
+
 @discardableResult
 private func writeXauXatContactInvitePolicies(_ policies: [Int64: XauXatContactInvitePolicy]) -> Bool {
-    guard !policies.isEmpty else { return kcContactInvitePolicies.remove() }
     let encoded = Dictionary(uniqueKeysWithValues: policies.map { (String($0.key), $0.value) })
     guard let data = try? JSONEncoder().encode(encoded),
           let value = String(data: data, encoding: .utf8) else { return false }
-    return kcContactInvitePolicies.set(value)
+    let recovery = contactInvitePolicyRecoveryURL(xauXatStorageScope())
+    // When a recovery copy exists it is authoritative. Advance it first, so a
+    // failed removal after Keychain recovers can never resurrect older state.
+    let hadRecovery = FileManager.default.fileExists(atPath: recovery.path)
+    if hadRecovery && !writeContactInvitePolicyRecovery(data, to: recovery) { return false }
+    let saved = policies.isEmpty ? kcContactInvitePolicies.remove() : kcContactInvitePolicies.set(value)
+    if saved {
+        if hadRecovery { try? FileManager.default.removeItem(at: recovery) }
+        return true
+    }
+    return hadRecovery || writeContactInvitePolicyRecovery(data, to: recovery)
 }
 
 @discardableResult
