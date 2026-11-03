@@ -15,6 +15,8 @@ enum NotificationsMode { case off }
 enum OnboardingStage { case step1_SimpleXInfo, step2_CreateProfile, step4_NetworkCommitments, onboardingComplete }
 enum AppState { case active, suspended, stopped }
 enum AuthMode { case passcode }
+enum MigrationConfirmation { case yes }
+enum DBMigrationResult { case ok, error }
 struct Migration { var startChat = true }
 struct NetworkInfo { var online = true }
 struct Profile { let displayName: String; let fullName: String }
@@ -48,16 +50,24 @@ let privacyDeliveryReceiptsSet = Setting(true)
 let onboardingStageDefault = Setting(OnboardingStage.onboardingComplete)
 let v3DBMigrationDefault = Setting(Migration())
 let chatLastStartGroupDefault = Setting(Date.distantPast)
+let encryptionStartedDefault = Setting(false)
+let shouldImportAppSettingsDefault = Setting(false)
+let privacyEncryptLocalFilesGroupDefault = Setting(true)
 let DEFAULT_PRIVACY_SHOW_FILE_ENCRYPTION = "synthetic-file-encryption"
 let DEFAULT_PERFORM_LA = "synthetic-auth"
 let DEFAULT_LA_NOTICE_SHOWN = "synthetic-notice"
 let DEFAULT_XAUXAT_EMPTY_SETUP = "synthetic-empty-setup"
-struct Log { func debug(_ text: String) {} }
+struct Log {
+    func debug(_ text: String) {}
+    func error(_ text: String) {}
+}
 let logger = Log()
 func xauXatRecordStartup(_ event: String, capturedScene: String) {}
 final class ChatModel {
     static let shared = ChatModel()
     var migrationState: Int?
+    var chatDbEncrypted = false, chatDbStatus: DBMigrationResult?
+    var conditions = 0
     var chatInitialized = false, ctrlInitInProgress = false
     var v3DBMigration = Migration()
     var currentUser: Int?
@@ -91,20 +101,53 @@ var databaseExists = false, alternatePIN = false, torReady = false
 var localStarts: [Bool] = [], coreRunning = false, dataLoads = 0, coreStarts = 0
 var profileCreates = 0, storeOpen = true, reopenSucceeds = true, activationSucceeds = true
 var coreStartSucceeds = true
+var nativeUser: Int?, initializationFailure: String?
+var migrationResult = DBMigrationResult.ok
+var migrationCalls = 0, migrations = 0
 func hasDatabase() -> Bool { databaseExists }
 func xauXatRequiresUnlockBeforeInitialization() -> Bool { alternatePIN }
 func isXauXatTorReady() -> Bool { torReady }
 func initializeChat(start: Bool, confirmStart: Bool, refreshInvitations: Bool) throws {
     localStarts.append(start)
-    databaseExists = true
-    ChatModel.shared.chatInitialized = true
-    ChatModel.shared.onboardingStage = .step1_SimpleXInfo
+    try initializeChatProduction(start: start, confirmStart: confirmStart, refreshInvitations: refreshInvitations)
 }
+func chatMigrateInit(_ key: String?, confirmMigrations: MigrationConfirmation?) -> (Bool, DBMigrationResult) {
+    migrationCalls += 1
+    if !databaseExists { migrations += 1 }
+    databaseExists = true
+    return (true, migrationResult)
+}
+func protectPrivateAppDataFromSystemBackup() -> Bool { true }
+final class NetworkObserver {
+    static let shared = NetworkObserver()
+    func updateCoreNetworkInfo() {}
+}
+func getAppFilesDirectory() -> URL { URL(fileURLWithPath: "/synthetic/files") }
+func getTempFilesDirectory() -> URL { URL(fileURLWithPath: "/synthetic/tmp") }
+func getWallpaperDirectory() -> URL { URL(fileURLWithPath: "/synthetic/assets/wallpaper") }
+func failInitialization(_ stage: String) throws {
+    if initializationFailure == stage { throw RuntimeError("synthetic initialization failure") }
+}
+func apiSetAppFilePaths(filesFolder: String, tempFolder: String, assetsFolder: String) throws { try failInitialization("paths") }
+func apiSetEncryptLocalFiles(_ enabled: Bool) throws {}
+func apiGetActiveUser() throws -> Int? {
+    guard storeOpen else { throw RuntimeError("synthetic closed store") }
+    try failInitialization("user")
+    return nativeUser
+}
+func getServerOperatorsSync() throws -> Int { try failInitialization("operators"); return 0 }
+struct AppSettings {
+    static let current = AppSettings()
+    func prepareForExport() -> Self { self }
+    func importIntoApp() {}
+}
+func apiGetAppSettings(settings: AppSettings) throws -> AppSettings { settings }
+func showStartChatAfterRestartAlert(result: @escaping (Bool) -> Void) { result(false) }
 func getNetCfg() -> Int { 0 }
 func setNetworkConfig(_ config: Int) throws {}
 func apiCheckChatRunning() throws -> Bool { coreRunning }
 func listUsers() throws -> [Int] { [1] }
-func getUserChatData() throws { dataLoads += 1 }
+func getUserChatData() throws { try failInitialization("data"); dataLoads += 1 }
 func refreshCallInvitations() async throws {}
 func apiGetNtfToken() -> (String?, Int?, NotificationsMode, String?) { (nil, nil, .off, nil) }
 func xauXatMigrateNotificationModeIntentIfNeeded(_ mode: NotificationsMode) {}
@@ -163,9 +206,12 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
         localStarts = []; coreRunning = false; dataLoads = 0; coreStarts = 0
         profileCreates = 0; storeOpen = true; reopenSucceeds = true
         coreStartSucceeds = true; activationSucceeds = true
+        nativeUser = nil; initializationFailure = nil; migrationResult = .ok
+        migrationCalls = 0; migrations = 0
         kcAppPassword.value = nil; kcAppPassword.writes = 0; kcAppPassword.succeeds = true
         let m = ChatModel.shared
         m.chatInitialized = false; m.ctrlInitInProgress = false; m.migrationState = nil
+        m.chatDbStatus = nil
         m.onboardingStage = nil; m.currentUser = nil; m.networkInfo.online = true
         m.chatRunning = nil; m.contentViewAccessAuthenticated = false
         AppChatState.shared.value = .suspended
@@ -175,6 +221,7 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
         AppSheetState.shared.scenePhaseActive = true
     }
     static func main() async throws {
+        try failedInitializationCanRetryInTheSameProcess()
         reset()
         let first = StartupHarness()
         first.scenePhase = .inactive // The App value captured before UIKit became active.
@@ -285,5 +332,36 @@ func responseError(_ error: Error) -> String { error.localizedDescription }
         await until { !retry.isCompleting }
         expect(profileCreates == 1 && coreStarts == 2 && retry.completions == 1, "Retry starts the same profile without creating a duplicate")
         print("\(checks) production startup/setup readiness checks passed.")
+    }
+
+    static func failedInitializationCanRetryInTheSameProcess() throws {
+        for stage in ["paths", "user", "operators", "data", "start"] {
+            reset()
+            databaseExists = true; nativeUser = 1; torReady = true
+            if stage == "start" { coreStartSucceeds = false }
+            else { initializationFailure = stage }
+            initChatAndMigrate(refreshInvitations: false)
+            expect(!ChatModel.shared.chatInitialized && !ChatModel.shared.ctrlInitInProgress,
+                   "A failed native initialization must not keep the completed flag that suppresses later startup attempts")
+            initializationFailure = nil; coreStartSucceeds = true
+            storeOpen = false // iOS suspended the same cached controller.
+            initChatAndMigrate(refreshInvitations: false)
+            expect(localStarts == [true, true] && ChatModel.shared.chatInitialized,
+                   "Retry must complete the existing startup without restarting the app process")
+            expect(ChatModel.shared.chatRunning == true && ChatModel.shared.onboardingStage == .onboardingComplete,
+                   "A successful retry must prepare a usable screen after verified Tor")
+            expect(migrationCalls == 2 && migrations == 0 && profileCreates == 0,
+                   "Retry uses the existing native database/controller and must not recreate profiles")
+        }
+        reset()
+        databaseExists = true; nativeUser = 1; torReady = true
+        storeOpen = false; reopenSucceeds = false
+        initChatAndMigrate(refreshInvitations: false)
+        expect(!ChatModel.shared.chatInitialized && coreStarts == 0,
+               "Failed store reopening must remain retryable and cannot start networking")
+        reopenSucceeds = true
+        initChatAndMigrate(refreshInvitations: false)
+        expect(ChatModel.shared.chatInitialized && ChatModel.shared.chatRunning == true,
+               "A later successful store reopen must recover in the same app process")
     }
 }

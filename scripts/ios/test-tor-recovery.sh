@@ -47,3 +47,7 @@ swiftc -swift-version 5 -parse-as-library \
 swiftc -swift-version 5 -parse-as-library \
   "$temp/InvitePolicy.swift" "$tests/InvitePolicyTests.swift" -o "$temp/invite-policy-tests"
 "$temp/invite-policy-tests"
+
+# A verified Tor route must not leave failed profile/data initialization marked
+# complete. Cover retry with the same cached native controller after suspension.
+bash "$root/scripts/ios/test-startup-readiness.sh"

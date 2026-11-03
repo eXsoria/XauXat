@@ -122,6 +122,16 @@ was the cause of a particular physical iPhone incident. A terminated C-Tor runti
 still requires a fresh app process; diagnose that separately using
 `runtime_finished` and `last_failure=runtime_stopped` from the session journal.
 
+Cold opening also includes native initialization after Tor is verified. A failure
+reading the active profile, loading data or starting chat must withdraw the early
+`chatInitialized` flag; otherwise foreground/manual initialization sees it as
+complete and silently skips retry, while the opening view can still display its
+Tor loading messages. A cached migration result does not prove that the stores
+remain open after suspension. Initialization reopens the same controller's stores
+before profile/data reads and remains retryable if that fails. No new profile or
+Tor runtime is created by this retry. The startup suite executes the production
+initializer and its real retry wrapper with failures before and after that flag.
+
 Every NWPathMonitor callback invalidates freshness, even if its coarse network
 type remains Wi-Fi. Availability changes are forwarded to the core immediately;
 global recovery waits for one second of path stability (two seconds on cellular

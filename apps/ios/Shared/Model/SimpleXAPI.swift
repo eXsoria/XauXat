@@ -2884,9 +2884,21 @@ func initializeChat(start: Bool, confirmStart: Bool = false, dbKey: String? = ni
     logger.debug("initializeChat")
     let m = ChatModel.shared
     m.ctrlInitInProgress = true
-    defer { m.ctrlInitInProgress = false }
+    var initializationCompleted = false
+    defer {
+        m.ctrlInitInProgress = false
+        // The native controller can already exist when profile/data loading
+        // or startChat fails. Do not let the early readiness flag suppress
+        // the next foreground/manual initialization attempt in this process.
+        if !initializationCompleted { m.chatInitialized = false }
+    }
     (m.chatDbEncrypted, m.chatDbStatus) = chatMigrateInit(dbKey, confirmMigrations: confirmMigrations)
     if  m.chatDbStatus != .ok { return }
+    // chatMigrateInit caches its controller/result. A suspended failed startup
+    // must reopen that controller's stores before retrying profile/data reads.
+    guard isChatStoreOpen() || chatReopenStore() else {
+        throw RuntimeError("XauXat could not reopen its local chat storage. Please retry.")
+    }
     _ = protectPrivateAppDataFromSystemBackup()
     NetworkObserver.shared.updateCoreNetworkInfo()
     // If we migrated successfully means previous re-encryption process on database level finished successfully too
@@ -2923,6 +2935,7 @@ func initializeChat(start: Bool, confirmStart: Bool = false, dbKey: String? = ni
     } else {
         try chatInitialized(start: start, refreshInvitations: refreshInvitations)
     }
+    initializationCompleted = true
 }
 
 func showStartChatAfterRestartAlert(result: @escaping (_ start: Bool) -> Void) {
