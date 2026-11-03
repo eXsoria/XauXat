@@ -108,6 +108,20 @@ configuration changes. The adapter compares the actual core configuration and
 reports that reconnect to the coordinator; neither recovery nor foreground adds
 a second reconnect command immediately after applying it.
 
+A successful Tor check and store activation are not the end of global recovery.
+If the native reconnect command fails, or the store becomes suspended before its
+final postcondition, the coordinator retains a session-retry demand even with no
+outbound messages or selected chat. The retry uses the existing bounded backoff
+and may reuse a recently verified Tor route; success clears it. Cancellation,
+stale profile/store/network generations and blocked sessions cannot schedule it.
+A selected-relay failure does not implicitly become a global retry.
+
+The regression suite reproduces the former incoming-only stall with a verified
+Tor route followed by a failed native reconnect. It does not establish that this
+was the cause of a particular physical iPhone incident. A terminated C-Tor runtime
+still requires a fresh app process; diagnose that separately using
+`runtime_finished` and `last_failure=runtime_stopped` from the session journal.
+
 Every NWPathMonitor callback invalidates freshness, even if its coarse network
 type remains Wi-Fi. Availability changes are forwarded to the core immediately;
 global recovery waits for one second of path stability (two seconds on cellular

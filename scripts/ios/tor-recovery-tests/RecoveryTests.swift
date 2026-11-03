@@ -24,7 +24,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
     var applyFailure = false
     var configurationReconnected = false
     var relayFailure: Recovery.Relay?
-    var onReconnect: ((Recovery.Scope) async -> Void)?
+    var onReconnect: ((Recovery.Scope) async throws -> Void)?
     var sleep: (TimeInterval) async throws -> Void = {
         try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000))
     }
@@ -52,7 +52,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
         },
         reconnect: { scope in
             self.commands.append(scope)
-            await self.onReconnect?(scope)
+            try await self.onReconnect?(scope)
             if let relay = self.relayFailure, scope == .relays([relay]) { throw Failure.synthetic }
         },
         sessionState: { self.sessionState },
@@ -97,6 +97,10 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await failedRouteCannotResumeChat()
         try await failedResumeCannotReconnect()
         try await sessionFailuresRetryWithoutPendingMessages()
+        try await globalReconnectFailuresRetryWithoutPendingMessages()
+        try await suspendedSessionAfterReconnectRetriesWithoutPendingMessages()
+        try await obsoleteGlobalReconnectFailuresDoNotScheduleRetries()
+        try await selectedReconnectFailureDoesNotWidenToGlobalRetry()
         try await sessionRetriesBackOffAndRespectGates()
         try await routeRecoveryCanContinueAsSessionRecovery()
         try await staleResumeFailureCannotScheduleAnotherProfile()
@@ -278,6 +282,76 @@ typealias Recovery = XauXatConnectionRecoveryManager
             require(f.sessionState == .running && f.manager.diagnosticText.contains("session_retry=false"), "Successful session repair must clear its retry demand")
             f.manager.pause()
         }
+    }
+
+    static func globalReconnectFailuresRetryWithoutPendingMessages() async throws {
+        for reason in [Recovery.Reason.manual, .foreground, .networkChange, .routeRetry] {
+            let f = RecoveryFixture()
+            var delays: [TimeInterval] = []
+            f.sleep = { delay in
+                delays.append(delay)
+                try await Task.sleep(nanoseconds: 2_000_000)
+            }
+            f.onReconnect = { _ in
+                if f.commands.count < 3 { throw RecoveryFixture.Failure.synthetic }
+            }
+            await failed(Task { try await f.manager.reconnect(.all, reason: reason) }, "A failed native reconnect must reach its caller")
+            try await until { f.commands.count == 3 }
+            try await Task.sleep(nanoseconds: 15_000_000)
+            require(f.commands == [.all, .all, .all], "An incoming-only session must retry failed global reconnects without relaunch")
+            require(delays == [2, 5], "Native reconnect failures must keep bounded session backoff")
+            let firstForce = reason == .manual || reason == .networkChange || reason == .routeRetry
+            require(f.forces == [firstForce, false, false], "A native reconnect failure must reuse the recently verified Tor route")
+            require(f.manager.diagnosticText.contains("session_retry=false") && f.manager.diagnosticText.contains("command_accepted"), "Successful native recovery must clear its demand and stop retrying")
+            f.manager.pause()
+        }
+    }
+
+    static func suspendedSessionAfterReconnectRetriesWithoutPendingMessages() async throws {
+        let f = RecoveryFixture()
+        var delays: [TimeInterval] = []
+        f.sleep = { delay in
+            delays.append(delay)
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        // A delayed native suspend can close the store after activation and
+        // while the global reconnect command is still being acknowledged.
+        f.onReconnect = { _ in if f.commands.count == 1 { f.sessionState = .suspended } }
+        await failed(Task { try await f.manager.reconnect(.all, reason: .foreground) }, "A reconnect cannot report success for a suspended store")
+        try await until { f.commands.count == 2 }
+        require(f.resumeCount == 1 && f.sessionState == .running, "Retry must reopen the existing session before reconnecting")
+        require(delays == [2] && f.manager.diagnosticText.contains("session_retry=false"), "A failed final session postcondition must retain incoming-only retry demand")
+        f.manager.pause()
+    }
+
+    static func obsoleteGlobalReconnectFailuresDoNotScheduleRetries() async throws {
+        for change in 0..<8 {
+            let f = RecoveryFixture()
+            f.onReconnect = { _ in
+                switch change {
+                case 0: throw CancellationError()
+                case 1: f.context.userId = 2
+                case 2: f.context.alternateStore = true
+                case 3: f.context.active = false; f.manager.pause()
+                case 4: f.sessionState = .unlockRequired
+                case 5: f.context.online = false
+                case 6: f.sessionState = .stopped
+                default: f.sessionState = .uninitialized
+                }
+                throw RecoveryFixture.Failure.synthetic
+            }
+            await failed(Task { try await f.manager.reconnect() }, "An obsolete/blocked reconnect must fail")
+            require(!f.manager.diagnosticText.contains("sessionRetry scheduled"), "Cancellation, another profile/store, background and lock must not schedule session work")
+            f.manager.pause()
+        }
+    }
+
+    static func selectedReconnectFailureDoesNotWidenToGlobalRetry() async throws {
+        let f = RecoveryFixture()
+        f.relayFailure = f.first
+        await failed(Task { try await f.manager.reconnect(.relays([f.first])) }, "A selected-relay failure must reach its caller")
+        require(f.commands == [.relays([f.first])] && !f.manager.diagnosticText.contains("sessionRetry scheduled"), "A failed selective reconnect must not create an implicit global repair")
+        f.manager.pause()
     }
 
     static func sessionRetriesBackOffAndRespectGates() async throws {

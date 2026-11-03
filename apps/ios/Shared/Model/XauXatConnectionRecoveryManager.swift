@@ -250,6 +250,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     }
 
     private func perform(_ requested: Scope, reason: Reason, force: Bool, context: Context, epoch operationEpoch: Int) async throws {
+        var reconnectingAll = false
         do {
             try requireCurrent(context, operationEpoch, reason: reason)
             if case let .relays(relays) = requested {
@@ -344,6 +345,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 record(reason, "chat_resumed")
             }
             state = .reconnectingRelays
+            reconnectingAll = configurationReconnected || scope == .all
             if configurationReconnected {
                 scope = .all
                 record(reason, "configuration_reconnected_all")
@@ -386,7 +388,14 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             state = .monitoring
             record(reason, "command_accepted")
         } catch {
-            if epoch == operationEpoch, dependencies.context() == context { state = .delayed }
+            if epoch == operationEpoch, dependencies.context() == context {
+                state = .delayed
+                // Tor/configuration/activation may all succeed before the
+                // native global reconnect or its final store check fails.
+                // Preserve incoming-only recovery demand in that case too.
+                // Selected-relay errors must not implicitly widen the repair.
+                if reconnectingAll, !(error is CancellationError) { sessionUnavailable() }
+            }
             throw error
         }
     }
