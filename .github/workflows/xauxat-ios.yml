@@ -154,10 +154,10 @@ jobs:
 
   native-core-runner:
     name: Select native core runner
-    runs-on: macos-26-intel
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
-      runner: ${{ steps.native-core-cache.outputs.cache-hit == 'true' && 'macos-26-intel' || 'macos-26' }}
+      runner: ${{ steps.native-core-cache.outputs.cache-hit == 'true' && 'ubuntu-24.04' || 'macos-26' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -173,7 +173,7 @@ jobs:
   native-core:
     name: XauXat native core (arm64)
     needs: native-core-runner
-    # Transporting a source-keyed arm64 archive does not require an ARM host.
+    # Transporting this source-keyed ZIP does not require a macOS host.
     # A cold cache still selects Apple Silicon for the original Nix build.
     runs-on: ${{ needs.native-core-runner.outputs.runner }}
     # A cold Apple Silicon runner may need to bootstrap GHC before it can build
@@ -242,7 +242,9 @@ jobs:
     name: Latest iOS Release device (arm64)
     runs-on: macos-26-intel
     timeout-minutes: 60
-    needs: [native-core, qr-images]
+    # QR remains required for workflow success and signed distribution; it need
+    # not delay compilation or hold another macOS runner while this build waits.
+    needs: native-core
 
     steps:
       - name: Check out fork and submodules
@@ -324,7 +326,7 @@ jobs:
     name: Latest iOS Simulator (arm64 launch)
     runs-on: macos-26
     timeout-minutes: 75
-    needs: [native-core, qr-images]
+    needs: native-core
 
     steps:
       - name: Check out fork and submodules
