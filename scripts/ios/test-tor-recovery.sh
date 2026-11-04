@@ -45,6 +45,12 @@ swiftc -swift-version 5 -parse-as-library \
   "$temp/Activation.swift" "$tests/ActivationTests.swift" -o "$temp/activation-tests"
 "$temp/activation-tests"
 swiftc -swift-version 5 -parse-as-library \
+  "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
+  "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" \
+  "$temp/PostAuth.swift" "$temp/PostAuthAdapters.swift" "$tests/PostAuthTests.swift" \
+  -o "$temp/post-auth-tests"
+"$temp/post-auth-tests"
+swiftc -swift-version 5 -parse-as-library \
   "$temp/InvitePolicy.swift" "$tests/InvitePolicyTests.swift" -o "$temp/invite-policy-tests"
 "$temp/invite-policy-tests"
 

@@ -144,6 +144,21 @@ has a generation, so a snapshot or accepted global reconnect that started before
 a newer failure cannot clear that newer signal. Connection IDs and native error
 text are not copied into the diagnostic journal.
 
+Accepting a global reconnect, applying a replacement listener/configuration or
+resuming the core does not by itself satisfy subscription recovery. That same
+event demand remains until a healthy native summary confirms convergence; this
+also covers a suspended incoming-only session with no further failure event.
+
+Foreground recovery may stop at the Decoy PIN/store-selection gate. Successful
+PIN/Face ID authorization and the existing authorization grace explicitly resume
+recovery for an already initialized session, including the same selected store.
+The post-auth hook captures the selected user/store, rechecks authorization and
+foreground before its task runs, then delegates Tor/configuration/store activation
+and reconnect to the coordinator. Stopped or uninitialized sessions are not
+auto-started; deferred cold initialization retains its existing path. Integration
+tests execute the real authentication success callback, coordinator, activation
+and storage functions across pre-/post-await invalidations.
+
 Every NWPathMonitor callback invalidates freshness, even if its coarse network
 type remains Wi-Fi. Availability changes are forwarded to the core immediately;
 global recovery waits for one second of path stability (two seconds on cellular

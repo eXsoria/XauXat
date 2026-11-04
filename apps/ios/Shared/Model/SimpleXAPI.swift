@@ -119,6 +119,23 @@ func xauXatRecoverySessionState() -> XauXatConnectionRecoveryManager.SessionStat
     return AppChatState.shared.value == .active && isChatStoreOpen() ? .running : .suspended
 }
 
+/// The foreground callback may have stopped at the PIN/store-selection gate.
+/// Continue only after authorization, retaining that exact selected identity.
+@MainActor @discardableResult
+func recoverXauXatSessionAfterAuthentication() -> Task<Void, Never>? {
+    let model = ChatModel.shared
+    guard model.contentViewAccessAuthenticated, xauXatAppIsForeground(),
+          let userId = model.currentUser?.userId,
+          xauXatRecoverySessionState().canRecover else { return nil }
+    let scope = xauXatStorageScope()
+    return Task {
+        guard xauXatAppIsForeground(), model.contentViewAccessAuthenticated,
+              model.currentUser?.userId == userId, xauXatStorageScope() == scope else { return }
+        do { try await XauXatConnectionRecoveryManager.shared.reconnect(.all, reason: .foreground) }
+        catch { logger.error("XauXat post-authentication session recovery could not complete") }
+    }
+}
+
 @MainActor
 extension XauXatConnectionRecoveryManager {
     static let shared = XauXatConnectionRecoveryManager(dependencies: Dependencies(

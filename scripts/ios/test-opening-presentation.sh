@@ -91,6 +91,9 @@ final class Model {
 }
 var activeModel: Model?
 var initializations = 0
+func recoverXauXatSessionAfterAuthentication() {
+    precondition(activeModel?.contentViewAccessAuthenticated == true)
+}
 func initChatAndMigrate() {
     precondition(activeModel?.contentViewAccessAuthenticated == true)
     initializations += 1

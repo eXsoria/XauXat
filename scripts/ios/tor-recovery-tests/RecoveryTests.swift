@@ -117,6 +117,7 @@ final class ChatModel {
         try await subscriptionEventsRecoverWithoutAnOpenChat()
         try await healthyAndUnrelatedSubscriptionEventsDoNotResetTor()
         try await subscriptionEventsSurviveTemporaryInactivity()
+        try await globalAcknowledgementsRetainFailedSubscriptions()
         try await subscriptionEventsRespectProfileStoreAndLifecycle()
         try await subscriptionEventDuringSummaryIsNotLost()
         try await subscriptionEventDuringGlobalReconnectIsNotLost()
@@ -490,6 +491,36 @@ final class ChatModel {
             held!.resume()
             try await Task.sleep(nanoseconds: 15_000_000)
             require(f.forces.isEmpty && f.summaryCount == 0 && f.commands.isEmpty, "Delayed event recovery must respect identity, store, lifecycle and authentication gates")
+            f.manager.pause()
+        }
+    }
+
+    static func globalAcknowledgementsRetainFailedSubscriptions() async throws {
+        for kind in 0..<3 {
+            let f = RecoveryFixture()
+            Recovery.eventTarget = f.manager
+            f.context.active = false
+            f.sessionState = kind == 1 ? .running : .suspended
+            f.route = .init(port: 19050, replaced: kind == 1)
+            f.configurationReconnected = kind == 2
+            f.failed = [f.first]
+            f.resume = { f.configurationReconnected = false }
+            f.onReconnect = { scope in
+                // Accepting global work does not prove any relay has connected.
+                if scope == .all { f.route = .init(port: 19050, replaced: false) }
+                // A later selective attempt succeeds; only its healthy native
+                // summary may satisfy the outstanding subscription demand.
+                if scope == .relays([f.first]) { f.failed = [] }
+            }
+            f.sleep = { delay in f.clock += delay; try await Task.sleep(nanoseconds: 2_000_000) }
+            await receiveSubscriptionStatus(.pending, connections: ["private-connection"])
+            f.context.active = true
+            f.manager.resume()
+            try await until { f.commands.contains(.relays([f.first])) && f.manager.state == .idle }
+            let expected: [Recovery.Scope] = kind == 2 ? [.relays([f.first])] : [.all, .relays([f.first])]
+            require(f.commands == expected, "Resume, listener replacement and config acknowledgements must not discard still-failed subscriptions")
+            require(f.summaryCount >= 2 && f.failed.isEmpty, "The same demand must survive global acceptance until an actual healthy summary")
+            require(f.manager.diagnosticText.contains("subscription_scan=false"), "Healthy convergence must stop the event-driven retry loop")
             f.manager.pause()
         }
     }

@@ -135,6 +135,7 @@ struct ContentView: View {
             } else if showSetPasscode {
                 SetAppPasscodeView {
                     chatModel.contentViewAccessAuthenticated = true
+                    recoverXauXatSessionAfterAuthentication()
                     prefPerformLA = true
                     showSetPasscode = false
                     privacyLocalAuthModeDefault.set(.passcode)
@@ -410,6 +411,7 @@ struct ContentView: View {
             chatModel.contentViewAccessAuthenticated = contentAccessAuthenticationExtended
         } else if contentAccessAuthenticationExtended {
             chatModel.contentViewAccessAuthenticated = true
+            recoverXauXatSessionAfterAuthentication()
         } else if contentAuthenticationReady && !automaticAuthenticationAttempted &&
                     !(CallController.useCallKit() && chatModel.showCallView && chatModel.activeCall != nil) {
             authenticateContentViewAccess()
@@ -435,6 +437,7 @@ struct ContentView: View {
                 case .success:
                     waitingForOrPassedAuth = true
                     chatModel.contentViewAccessAuthenticated = true
+                    recoverXauXatSessionAfterAuthentication()
                     canConnectViewCall = true
                     lastSuccessfulUnlock = ProcessInfo.processInfo.systemUptime
                     if xauXatRequiresUnlockBeforeInitialization() && !chatModel.chatInitialized {
@@ -494,6 +497,7 @@ struct ContentView: View {
             switch laResult {
             case .success:
                 chatModel.contentViewAccessAuthenticated = true
+                recoverXauXatSessionAfterAuthentication()
                 prefPerformLA = true
                 alertManager.showAlert(laTurnedOnAlert())
             case .failed:

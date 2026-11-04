@@ -23,6 +23,9 @@ final class AppChatState {
 func setAppState(_ state: AppState) { AppChatState.shared.value = state }
 final class ChatModel {
     static let shared = ChatModel()
+    struct User { let userId: Int64 }
+    var currentUser: User? = User(userId: 1)
+    var chatInitialized = true
     var chatRunning: Bool? = true
     var ctrlInitInProgress = false
     var contentViewAccessAuthenticated = true

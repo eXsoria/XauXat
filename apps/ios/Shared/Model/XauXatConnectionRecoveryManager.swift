@@ -387,7 +387,9 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             if scope == .all {
                 routeRetry = nil
                 sessionRetry = nil
-                if subscriptionScan?.id == subscriptionScanId { subscriptionScan = nil }
+                // A global command/configuration acknowledgement is not proof
+                // that subscriptions recovered. Only a healthy native summary
+                // can satisfy the event demand, even for this same generation.
                 lastGlobal = (operationEpoch, context, dependencies.now())
                 firstObserved.removeAll()
             }
