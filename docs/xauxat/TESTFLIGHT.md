@@ -81,6 +81,24 @@ The script:
 Outputs are written to `.xauxat-release/`, which is gitignored. A previous
 output is never overwritten.
 
+### Required-reason API manifests
+
+Each first-party executable declares its actual API usage in its own
+`PrivacyInfo.xcprivacy` resource:
+
+| Bundle | Categories and approved reasons |
+| --- | --- |
+| App (`Shared/PrivacyInfo.xcprivacy`) | System boot time: `35F9.1` for local elapsed-time checks and timers; UserDefaults: `CA92.1` and `1C8F.1` for own and App Group settings |
+| `SimpleXChat.framework` | UserDefaults: `CA92.1`, `1C8F.1`; file timestamps: `C617.1` for database backup metadata in app containers |
+| Notification service and share extensions | UserDefaults: `1C8F.1` for shared App Group preferences |
+
+The physical microphone timestamps and readiness time stay local to the
+recording interaction. The Tor journal uses elapsed durations between app
+events. These uses follow Apple's
+[required-reason API definitions](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api).
+`verify-first-party-privacy.py` checks each built bundle against its reviewed
+manifest in device/simulator CI and again in the exported IPA before upload.
+
 Release builds include `nft.exsoria.pt:8443` and its public pinned CA fingerprint
 by default. Remove any stale empty `XAUXAT_NTF_SERVER_B64` override from
 `apps/ios/Local.xcconfig` before archiving. Never copy the server's APNs `.p8`

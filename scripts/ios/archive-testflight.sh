@@ -250,6 +250,8 @@ test -n "$exported_app"
 bash "$script_dir/verify-device-architectures.sh" "$exported_app"
 verify_signed_entitlements "$exported_app" production
 
+python3 "$script_dir/verify-first-party-privacy.py" "$exported_app"
+
 swiftygif_privacy_manifest=$(find "$exported_app/Frameworks" -path '*SwiftyGif*.framework/*/PrivacyInfo.xcprivacy' -type f -print -quit)
 if [[ -z "$swiftygif_privacy_manifest" ]]; then
   echo "The exported app is missing SwiftyGif's required PrivacyInfo.xcprivacy manifest." >&2

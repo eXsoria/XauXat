@@ -310,6 +310,7 @@ jobs:
           xcrun vtool -show-build "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'platform IOS'
           otool -L "$app_path/SimpleX" | grep -q '@rpath/Tor.framework/Tor'
           ./scripts/ios/verify-xauxat-identifiers.sh "$app_path" production
+          python3 scripts/ios/verify-first-party-privacy.py "$app_path"
           swiftygif_privacy_manifest=$(find "$app_path/Frameworks" -path '*SwiftyGif*.framework/*/PrivacyInfo.xcprivacy' -type f -print -quit)
           test -n "$swiftygif_privacy_manifest"
           plutil -lint "$swiftygif_privacy_manifest"
@@ -412,6 +413,7 @@ jobs:
           test -d "$app_path"
           test "$(plutil -extract CFBundleDisplayName raw "$app_path/Info.plist")" = "XauXat"
           ./scripts/ios/verify-xauxat-identifiers.sh "$app_path" development
+          python3 scripts/ios/verify-first-party-privacy.py "$app_path"
           file "$app_binary" | grep -q 'arm64'
           file "$tor_binary" | grep -q 'arm64'
           xcrun vtool -show-build "$app_binary" | grep -q 'platform IOSSIMULATOR'
