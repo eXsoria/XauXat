@@ -7,6 +7,13 @@ mkdir -p "$out"
 udid=""
 cleanup() {
   if [[ -n "$udid" ]]; then
+    if [[ "${VOICE_TEST_TRACE:-0}" == "1" ]]; then
+      container=$(xcrun simctl get_app_container "$udid" pt.exsoria.voice-harness data) || container=""
+      if [[ -n "$container" && -d "$container/Documents" ]]; then
+        mkdir -p "$out/trace"
+        find "$container/Documents" -maxdepth 1 -name 'voice-ci-*.jsonl' -exec cp {} "$out/trace/" \;
+      fi
+    fi
     xcrun simctl shutdown "$udid" || true
     xcrun simctl delete "$udid" || true
   fi
@@ -30,11 +37,20 @@ xcrun simctl boot "$udid"
 xcrun simctl bootstatus "$udid" -b
 xcrun simctl install "$udid" "$temp/build/Build/Products/Debug-iphonesimulator/VoiceHarness.app"
 xcrun simctl privacy "$udid" grant microphone pt.exsoria.voice-harness
+# Diagnostic runs isolate the two unresolved cases. They never qualify the
+# release suite, and do not retry or change gestures/recording deadlines.
+test_filters=()
+if [[ "${VOICE_TEST_TRACE:-0}" == "1" ]]; then
+  test_filters=(
+    -only-testing:VoiceHarnessUITests/VoiceRecordingTests/testHoldReleasePreviewResumeAndSend
+    -only-testing:VoiceHarnessUITests/VoiceRecordingTests/testPermissionGrantedAfterFingerReleasedDoesNotStartRecording
+  )
+fi
 set +e
 xcodebuild -project "$temp/project/VoiceHarness.xcodeproj" -scheme VoiceHarness \
   -destination "platform=iOS Simulator,id=$udid" -parallel-testing-enabled NO \
   -derivedDataPath "$temp/build" -resultBundlePath "$out/VoiceRecording.xcresult" \
-  test-without-building CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$out/tests.log"
+  test-without-building ${test_filters[@]+"${test_filters[@]}"} CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$out/tests.log"
 result=${PIPESTATUS[0]}
 set -e
 if [[ -d "$out/VoiceRecording.xcresult" ]]; then
