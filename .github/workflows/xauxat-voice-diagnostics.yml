@@ -1,0 +1,26 @@
+name: XauXat voice diagnostics
+on:
+  push:
+    branches: [xauxat/voice-ci-diagnostics]
+permissions:
+  contents: read
+concurrency:
+  group: xauxat-voice-diagnostics
+  cancel-in-progress: true
+jobs:
+  voice:
+    runs-on: macos-26-intel
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: bash scripts/ios/test-voice-recording.sh
+        env:
+          VOICE_TEST_TRACE: '1'
+          VOICE_TEST_OUTPUT: ${{ runner.temp }}/voice-diagnostics
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: XauXat-voice-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/voice-diagnostics
+          if-no-files-found: error
+          retention-days: 7

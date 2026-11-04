@@ -2,6 +2,7 @@
 Only chat services and the test conversation are adapters.
 """
 from pathlib import Path
+import os
 import shutil
 import sys
 
@@ -58,7 +59,14 @@ sources += [(fixtures / "ComposerAdapters.swift").read_text(encoding="utf-8"), s
 controller = (compose / "ComposeView.swift").read_text(encoding="utf-8")
 methods = ["closeExpressions", "beginVoiceMessageRecording", "moveVoiceMessageRecording", "releaseVoiceMessageRecording", "cancelVoiceMessageTouch", "discardVoiceMessageRecording", "startVoiceMessageRecording", "bindVoiceRecorder", "finishVoiceMessageRecording", "resumeVoiceMessageRecording", "updateComposeVMRFinished", "cancelCurrentVoiceRecording", "cancelVoiceMessageRecording", "saveCurrentDraft"]
 sources += ["extension HarnessView {\n" + "\n".join(declaration(controller, "private func " + name + "(").replace("private func", "func", 1) for name in methods) + "\n}"]
-(out / "Editor.swift").write_text("\n".join(sources), encoding="utf-8")
+editor = "\n".join(sources)
+if os.environ.get("VOICE_TEST_TRACE") == "1":
+    from trace_project import instrument
+    editor, harness, tests = instrument(editor, (out / "Harness.swift").read_text(encoding="utf-8"),
+        (out / "UITests.swift").read_text(encoding="utf-8"), (fixtures / "Trace.swift").read_text(encoding="utf-8"))
+    (out / "Harness.swift").write_text(harness, encoding="utf-8")
+    (out / "UITests.swift").write_text(tests, encoding="utf-8")
+(out / "Editor.swift").write_text(editor, encoding="utf-8")
 
 project = out / "VoiceHarness.xcodeproj"
 project.mkdir(exist_ok=True)

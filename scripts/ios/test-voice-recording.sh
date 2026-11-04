@@ -7,6 +7,13 @@ mkdir -p "$out"
 udid=""
 cleanup() {
   if [[ -n "$udid" ]]; then
+    if [[ "${VOICE_TEST_TRACE:-0}" == "1" ]]; then
+      container=$(xcrun simctl get_app_container "$udid" pt.exsoria.voice-harness data) || container=""
+      if [[ -n "$container" && -d "$container/Documents" ]]; then
+        mkdir -p "$out/trace"
+        find "$container/Documents" -maxdepth 1 -name 'voice-ci-*.jsonl' -exec cp {} "$out/trace/" \;
+      fi
+    fi
     xcrun simctl shutdown "$udid" || true
     xcrun simctl delete "$udid" || true
   fi
