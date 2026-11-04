@@ -1,11 +1,12 @@
-This build includes contact lifecycle fixes, private stickers/sounds, and hold-to-record voice messages.
+This build focuses on private-connection startup and recovery on real iPhones.
 
 What to test:
-- Accept a fresh invitation after removing old contacts. Background and reopen the app; the new contact should remain.
-- Swipe an inactive/deleted contact and confirm local removal. Active chat deletion should retain the contact.
-- Open stickers and sounds beside the composer. Send a sticker while preserving typed text, import local media, use Favorites and Recents, and stage a sound before explicitly sending it.
-- Hold the microphone then release to preview. Slide left to cancel or up to lock. Pause, listen, resume, delete and send.
-- Start recording while a sound preview is playing. The tray should close and the microphone should record normally.
-- Switch conversations/profiles, background the app, and test larger accessibility text.
+- Open XauXat repeatedly on Wi-Fi and on mobile data. Confirm the existing profile and chats open after Tor becomes ready.
+- Send and receive text, photos and voice messages in both directions between two devices.
+- Stay on the chat list with no conversation selected and no outgoing messages. Confirm incoming delivery continues after a temporary connection failure.
+- Leave the app, lock the phone, then return without force-closing XauXat. Confirm the same session resumes and both sending and receiving recover.
+- Switch Wi-Fi/mobile data and briefly enable airplane mode, then restore connectivity. Check recovery while the app is open and after returning to it.
+- Repeat with app authentication and protected profiles. After backgrounding, enter the correct PIN for the same profile and confirm both receiving and sending resume. Recovery should respect the selected profile and unlock state.
+- If opening stalls, try Refresh Tor connection and record its exact error. If Settings is accessible, use Private connection > Copy connection diagnostics before force-closing the app; the session journal resets when the process exits.
 
-Automated checks cover production policy persistence and cleanup, encrypted media library, real AAC recording/playback, composer controls, iPhone Release and simulator launch. Physical iPhone microphone/haptics and two-device encrypted delivery remain acceptance checks.
+Automated validation covers startup retries with the existing database, foreground/session recovery, native subscription events without an open conversation, network/profile/store/authentication gates, and real Tor control-socket behavior. Physical iPhone acceptance is still required to confirm the reported intermittent incident.

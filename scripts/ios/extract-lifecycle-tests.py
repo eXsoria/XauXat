@@ -43,6 +43,26 @@ text += "\n@MainActor\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", "x
 text += "\n@MainActor\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", "xauXatRequireInviteSession")
 Path(sys.argv[2]).write_text(text, encoding="utf-8")
 
+# Post-unlock integration uses the real success callback, coordinator, native
+# activation and store functions. The UI result adapter itself contains no policy.
+unlock = text + "\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "xauXatAppIsForeground")
+unlock += "\n@MainActor @discardableResult\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", "recoverXauXatSessionAfterAuthentication")
+success = function("apps/ios/Shared/ContentView.swift", "authenticateContentViewAccess").split("case .success:", 1)[1].split("case .failed:", 1)[0]
+unlock += "\n@MainActor final class AuthSuccessHarness {\nlet chatModel = ChatModel.shared\n"
+unlock += "var waitingForOrPassedAuth = false, canConnectViewCall = false\nvar lastSuccessfulUnlock: TimeInterval?\n"
+unlock += "func complete() {\n" + success + "\n}\n}\n"
+Path(sys.argv[2]).with_name("PostAuth.swift").write_text(unlock, encoding="utf-8")
+adapters = (root / "scripts/ios/tor-recovery-tests/ActivationTests.swift").read_text(encoding="utf-8").split("@main @MainActor struct ActivationTests", 1)[0]
+Path(sys.argv[2]).with_name("PostAuthAdapters.swift").write_text(adapters, encoding="utf-8")
+
+# Execute the real received-event branch with controlled UI/native adapters.
+# A subscription failure must also wake recovery when no chat is selected.
+subscription = api.split("case let .subscriptionStatus(status, connections):", 1)[1].split("case let .chatInfoUpdated", 1)[0]
+Path(sys.argv[2]).with_name("SubscriptionEvents.swift").write_text(
+    "import Foundation\nfunc receiveSubscriptionStatus(_ status: SubscriptionStatus, connections: [String]) async {\n"
+    "let m = ChatModel.shared\n" + subscription + "\n}\n", encoding="utf-8"
+)
+
 keychain = (root / "apps/ios/SimpleXChat/KeyChain.swift").read_text(encoding="utf-8")
 start = keychain.index("public enum XauXatContactInviteState:")
 policy = "import Foundation\n" + keychain[start:keychain.index("private var kcContactInvitePolicies:", start)]

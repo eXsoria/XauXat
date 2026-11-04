@@ -108,6 +108,57 @@ configuration changes. The adapter compares the actual core configuration and
 reports that reconnect to the coordinator; neither recovery nor foreground adds
 a second reconnect command immediately after applying it.
 
+A successful Tor check and store activation are not the end of global recovery.
+If the native reconnect command fails, or the store becomes suspended before its
+final postcondition, the coordinator retains a session-retry demand even with no
+outbound messages or selected chat. The retry uses the existing bounded backoff
+and may reuse a recently verified Tor route; success clears it. Cancellation,
+stale profile/store/network generations and blocked sessions cannot schedule it.
+A selected-relay failure does not implicitly become a global retry.
+
+The regression suite reproduces the former incoming-only stall with a verified
+Tor route followed by a failed native reconnect. It does not establish that this
+was the cause of a particular physical iPhone incident. A terminated C-Tor runtime
+still requires a fresh app process; diagnose that separately using
+`runtime_finished` and `last_failure=runtime_stopped` from the session journal.
+
+Cold opening also includes native initialization after Tor is verified. A failure
+reading the active profile, loading data or starting chat must withdraw the early
+`chatInitialized` flag; otherwise foreground/manual initialization sees it as
+complete and silently skips retry, while the opening view can still display its
+Tor loading messages. A cached migration result does not prove that the stores
+remain open after suspension. Initialization reopens the same controller's stores
+before profile/data reads and remains retryable if that fails. No new profile or
+Tor runtime is created by this retry. The startup suite executes the production
+initializer and its real retry wrapper with failures before and after that flag.
+
+Native pending/removed/no-subscription events also wake recovery when no chat is
+selected. This event demand is independent of the selected chat's UI flag and is
+scoped to the current profile, local store and network generation. It requests
+only a current-profile native summary: a healthy snapshot stops the demand
+without probing or resetting Tor; failed relays retain selective recovery and
+their existing connection grace/cooldowns. Temporary scene inactivity retains
+the signal until foreground resumes. Background, stopped/uninitialized sessions,
+authentication and profile/store switches still gate native commands. Each event
+has a generation, so a snapshot or accepted global reconnect that started before
+a newer failure cannot clear that newer signal. Connection IDs and native error
+text are not copied into the diagnostic journal.
+
+Accepting a global reconnect, applying a replacement listener/configuration or
+resuming the core does not by itself satisfy subscription recovery. That same
+event demand remains until a healthy native summary confirms convergence; this
+also covers a suspended incoming-only session with no further failure event.
+
+Foreground recovery may stop at the Decoy PIN/store-selection gate. Successful
+PIN/Face ID authorization and the existing authorization grace explicitly resume
+recovery for an already initialized session, including the same selected store.
+The post-auth hook captures the selected user/store, rechecks authorization and
+foreground before its task runs, then delegates Tor/configuration/store activation
+and reconnect to the coordinator. Stopped or uninitialized sessions are not
+auto-started; deferred cold initialization retains its existing path. Integration
+tests execute the real authentication success callback, coordinator, activation
+and storage functions across pre-/post-await invalidations.
+
 Every NWPathMonitor callback invalidates freshness, even if its coarse network
 type remains Wi-Fi. Availability changes are forwarded to the core immediately;
 global recovery waits for one second of path stability (two seconds on cellular

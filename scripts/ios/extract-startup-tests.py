@@ -22,6 +22,8 @@ assert "UIApplication.didBecomeActiveNotification" in app, "UIKit activation mus
 text = "import Foundation\n"
 text += declaration("apps/ios/Shared/Model/SuspendChat.swift", "func xauXatAppIsForeground()") + "\n"
 text += declaration("apps/ios/Shared/Model/SimpleXAPI.swift", "func startChat(")
+text += "\n" + declaration("apps/ios/Shared/Model/SimpleXAPI.swift", "func initializeChat(").replace("func initializeChat(", "func initializeChatProduction(", 1)
+text += "\n" + declaration("apps/ios/Shared/Model/SimpleXAPI.swift", "private func chatInitialized(")
 text += "\n" + declaration("apps/ios/Shared/Model/SuspendChat.swift", "func initChatAndMigrate(")
 text += "\n@MainActor final class StartupHarness {\n"
 text += "let chatModel = ChatModel.shared\nvar scenePhase: Phase = .active\n"

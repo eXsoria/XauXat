@@ -2,6 +2,17 @@ import Foundation
 
 typealias Recovery = XauXatConnectionRecoveryManager
 
+enum SubscriptionStatus: Equatable { case active, pending, removed(subError: String), noSub }
+final class ChatModel {
+    static let shared = ChatModel()
+    var chatAgentConnId: String?
+    var chatSubStatus: SubscriptionStatus?
+}
+@MainActor extension XauXatConnectionRecoveryManager {
+    static var eventTarget: XauXatConnectionRecoveryManager?
+    static var shared: XauXatConnectionRecoveryManager { eventTarget! }
+}
+
 @MainActor final class RecoveryFixture {
     var context = Recovery.Context(userId: 1, online: true, active: true)
     let first = Recovery.Relay(userId: 1, server: "smp://private-relay-a.example")
@@ -24,7 +35,8 @@ typealias Recovery = XauXatConnectionRecoveryManager
     var applyFailure = false
     var configurationReconnected = false
     var relayFailure: Recovery.Relay?
-    var onReconnect: ((Recovery.Scope) async -> Void)?
+    var onReconnect: ((Recovery.Scope) async throws -> Void)?
+    var summary: (() async throws -> [Recovery.Relay: TimeInterval])?
     var sleep: (TimeInterval) async throws -> Void = {
         try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000))
     }
@@ -43,6 +55,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
         },
         failedRelays: {
             self.summaryCount += 1
+            if let summary = self.summary { return try await summary() }
             if let health = self.health {
                 return health.filter { $0.value.needsRecovery }.mapValues {
                     $0.recoveryGrace(connectingBudget: self.connectingGrace)
@@ -52,7 +65,7 @@ typealias Recovery = XauXatConnectionRecoveryManager
         },
         reconnect: { scope in
             self.commands.append(scope)
-            await self.onReconnect?(scope)
+            try await self.onReconnect?(scope)
             if let relay = self.relayFailure, scope == .relays([relay]) { throw Failure.synthetic }
         },
         sessionState: { self.sessionState },
@@ -97,6 +110,17 @@ typealias Recovery = XauXatConnectionRecoveryManager
         try await failedRouteCannotResumeChat()
         try await failedResumeCannotReconnect()
         try await sessionFailuresRetryWithoutPendingMessages()
+        try await globalReconnectFailuresRetryWithoutPendingMessages()
+        try await suspendedSessionAfterReconnectRetriesWithoutPendingMessages()
+        try await obsoleteGlobalReconnectFailuresDoNotScheduleRetries()
+        try await selectedReconnectFailureDoesNotWidenToGlobalRetry()
+        try await subscriptionEventsRecoverWithoutAnOpenChat()
+        try await healthyAndUnrelatedSubscriptionEventsDoNotResetTor()
+        try await subscriptionEventsSurviveTemporaryInactivity()
+        try await globalAcknowledgementsRetainFailedSubscriptions()
+        try await subscriptionEventsRespectProfileStoreAndLifecycle()
+        try await subscriptionEventDuringSummaryIsNotLost()
+        try await subscriptionEventDuringGlobalReconnectIsNotLost()
         try await sessionRetriesBackOffAndRespectGates()
         try await routeRecoveryCanContinueAsSessionRecovery()
         try await staleResumeFailureCannotScheduleAnotherProfile()
@@ -280,6 +304,76 @@ typealias Recovery = XauXatConnectionRecoveryManager
         }
     }
 
+    static func globalReconnectFailuresRetryWithoutPendingMessages() async throws {
+        for reason in [Recovery.Reason.manual, .foreground, .networkChange, .routeRetry] {
+            let f = RecoveryFixture()
+            var delays: [TimeInterval] = []
+            f.sleep = { delay in
+                delays.append(delay)
+                try await Task.sleep(nanoseconds: 2_000_000)
+            }
+            f.onReconnect = { _ in
+                if f.commands.count < 3 { throw RecoveryFixture.Failure.synthetic }
+            }
+            await failed(Task { try await f.manager.reconnect(.all, reason: reason) }, "A failed native reconnect must reach its caller")
+            try await until { f.commands.count == 3 }
+            try await Task.sleep(nanoseconds: 15_000_000)
+            require(f.commands == [.all, .all, .all], "An incoming-only session must retry failed global reconnects without relaunch")
+            require(delays == [2, 5], "Native reconnect failures must keep bounded session backoff")
+            let firstForce = reason == .manual || reason == .networkChange || reason == .routeRetry
+            require(f.forces == [firstForce, false, false], "A native reconnect failure must reuse the recently verified Tor route")
+            require(f.manager.diagnosticText.contains("session_retry=false") && f.manager.diagnosticText.contains("command_accepted"), "Successful native recovery must clear its demand and stop retrying")
+            f.manager.pause()
+        }
+    }
+
+    static func suspendedSessionAfterReconnectRetriesWithoutPendingMessages() async throws {
+        let f = RecoveryFixture()
+        var delays: [TimeInterval] = []
+        f.sleep = { delay in
+            delays.append(delay)
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        // A delayed native suspend can close the store after activation and
+        // while the global reconnect command is still being acknowledged.
+        f.onReconnect = { _ in if f.commands.count == 1 { f.sessionState = .suspended } }
+        await failed(Task { try await f.manager.reconnect(.all, reason: .foreground) }, "A reconnect cannot report success for a suspended store")
+        try await until { f.commands.count == 2 }
+        require(f.resumeCount == 1 && f.sessionState == .running, "Retry must reopen the existing session before reconnecting")
+        require(delays == [2] && f.manager.diagnosticText.contains("session_retry=false"), "A failed final session postcondition must retain incoming-only retry demand")
+        f.manager.pause()
+    }
+
+    static func obsoleteGlobalReconnectFailuresDoNotScheduleRetries() async throws {
+        for change in 0..<8 {
+            let f = RecoveryFixture()
+            f.onReconnect = { _ in
+                switch change {
+                case 0: throw CancellationError()
+                case 1: f.context.userId = 2
+                case 2: f.context.alternateStore = true
+                case 3: f.context.active = false; f.manager.pause()
+                case 4: f.sessionState = .unlockRequired
+                case 5: f.context.online = false
+                case 6: f.sessionState = .stopped
+                default: f.sessionState = .uninitialized
+                }
+                throw RecoveryFixture.Failure.synthetic
+            }
+            await failed(Task { try await f.manager.reconnect() }, "An obsolete/blocked reconnect must fail")
+            require(!f.manager.diagnosticText.contains("sessionRetry scheduled"), "Cancellation, another profile/store, background and lock must not schedule session work")
+            f.manager.pause()
+        }
+    }
+
+    static func selectedReconnectFailureDoesNotWidenToGlobalRetry() async throws {
+        let f = RecoveryFixture()
+        f.relayFailure = f.first
+        await failed(Task { try await f.manager.reconnect(.relays([f.first])) }, "A selected-relay failure must reach its caller")
+        require(f.commands == [.relays([f.first])] && !f.manager.diagnosticText.contains("sessionRetry scheduled"), "A failed selective reconnect must not create an implicit global repair")
+        f.manager.pause()
+    }
+
     static func sessionRetriesBackOffAndRespectGates() async throws {
         let f = RecoveryFixture()
         f.sessionState = .suspended
@@ -314,6 +408,155 @@ typealias Recovery = XauXatConnectionRecoveryManager
             require(g.forces.isEmpty && g.commands.isEmpty, "Session retries cannot cross lifecycle/profile/network/store gates")
             g.manager.pause()
         }
+    }
+
+    static func subscriptionEventsRecoverWithoutAnOpenChat() async throws {
+        for status in [SubscriptionStatus.pending, .removed(subError: "PRIVATE_ERROR"), .noSub] {
+            let f = RecoveryFixture()
+            Recovery.eventTarget = f.manager
+            ChatModel.shared.chatAgentConnId = nil
+            f.failed = [f.first]
+            f.onReconnect = { _ in f.failed = [] }
+            f.sleep = { delay in f.clock += delay; try await Task.sleep(nanoseconds: 2_000_000) }
+            await receiveSubscriptionStatus(status, connections: ["private-connection"])
+            // Closing a selected chat must not clear the event's independent demand.
+            f.manager.setSubscriptionPending(false)
+            try await until { f.commands.count == 1 && f.summaryCount >= 2 }
+            try await until { f.manager.state == .idle }
+            require(f.commands == [.relays([f.first])], "A subscription failure on Home must recover only failed current-profile relays")
+            require(f.forces == [false], "Subscription events must not force resets of a healthy Tor runtime")
+            require(!f.manager.diagnosticText.contains("PRIVATE_ERROR") && !f.manager.diagnosticText.contains("private-connection"), "Incoming event journals must omit native errors and connection IDs")
+            f.manager.pause()
+        }
+    }
+
+    static func healthyAndUnrelatedSubscriptionEventsDoNotResetTor() async throws {
+        let f = RecoveryFixture()
+        Recovery.eventTarget = f.manager
+        ChatModel.shared.chatAgentConnId = "selected"
+        ChatModel.shared.chatSubStatus = nil
+        f.sleep = { _ in try await Task.sleep(nanoseconds: 2_000_000) }
+        await receiveSubscriptionStatus(.active, connections: ["selected"])
+        await receiveSubscriptionStatus(.pending, connections: [])
+        try await Task.sleep(nanoseconds: 15_000_000)
+        require(f.summaryCount == 0 && f.forces.isEmpty && f.commands.isEmpty, "Healthy/empty events must not start a recovery scan")
+        require(ChatModel.shared.chatSubStatus == .active, "The selected-chat subscription UI must still receive its actual event")
+        await receiveSubscriptionStatus(.removed(subError: "redacted"), connections: ["another-profile-connection"])
+        try await until { f.summaryCount == 1 && f.manager.state == .idle }
+        require(f.forces.isEmpty && f.commands.isEmpty, "An event outside the active profile must stop at a healthy current-profile summary")
+        f.manager.pause()
+    }
+
+    static func subscriptionEventsSurviveTemporaryInactivity() async throws {
+        for suspended in [false, true] {
+            let f = RecoveryFixture()
+            Recovery.eventTarget = f.manager
+            f.context.active = false
+            f.sessionState = suspended ? .suspended : .running
+            if suspended { f.manager.pause() }
+            f.failed = [f.first]
+            f.onReconnect = { _ in f.failed = [] }
+            f.sleep = { delay in f.clock += delay; try await Task.sleep(nanoseconds: 2_000_000) }
+            await receiveSubscriptionStatus(.noSub, connections: ["private-connection"])
+            try await Task.sleep(nanoseconds: 15_000_000)
+            require(f.forces.isEmpty && f.commands.isEmpty, "An inactive scene must not run native recovery")
+            f.context.active = true
+            f.manager.resume()
+            try await until { f.commands.count == 1 && f.manager.state == .idle }
+            let expected: Recovery.Scope = suspended ? .all : .relays([f.first])
+            require(f.commands == [expected] && f.resumeCount == (suspended ? 1 : 0) && f.sessionState == .running,
+                    "Foreground must recover both an inactive live session and the same process after suspension")
+            f.manager.pause()
+        }
+    }
+
+    static func subscriptionEventsRespectProfileStoreAndLifecycle() async throws {
+        for change in 0..<7 {
+            let f = RecoveryFixture()
+            Recovery.eventTarget = f.manager
+            f.failed = [f.first]
+            var held: CheckedContinuation<Void, Error>?
+            f.sleep = { _ in try await withCheckedThrowingContinuation { held = $0 } }
+            await receiveSubscriptionStatus(.pending, connections: ["private-connection"])
+            try await until { held != nil }
+            switch change {
+            case 0: f.context.userId = 2
+            case 1: f.context.alternateStore = true
+            case 2: f.context.active = false; f.manager.pause()
+            case 3: f.context.online = false; f.manager.networkChanged(online: false)
+            case 4: f.sessionState = .unlockRequired
+            case 5: f.sessionState = .stopped
+            default: f.sessionState = .uninitialized
+            }
+            held!.resume()
+            try await Task.sleep(nanoseconds: 15_000_000)
+            require(f.forces.isEmpty && f.summaryCount == 0 && f.commands.isEmpty, "Delayed event recovery must respect identity, store, lifecycle and authentication gates")
+            f.manager.pause()
+        }
+    }
+
+    static func globalAcknowledgementsRetainFailedSubscriptions() async throws {
+        for kind in 0..<3 {
+            let f = RecoveryFixture()
+            Recovery.eventTarget = f.manager
+            f.context.active = false
+            f.sessionState = kind == 1 ? .running : .suspended
+            f.route = .init(port: 19050, replaced: kind == 1)
+            f.configurationReconnected = kind == 2
+            f.failed = [f.first]
+            f.resume = { f.configurationReconnected = false }
+            f.onReconnect = { scope in
+                // Accepting global work does not prove any relay has connected.
+                if scope == .all { f.route = .init(port: 19050, replaced: false) }
+                // A later selective attempt succeeds; only its healthy native
+                // summary may satisfy the outstanding subscription demand.
+                if scope == .relays([f.first]) { f.failed = [] }
+            }
+            f.sleep = { delay in f.clock += delay; try await Task.sleep(nanoseconds: 2_000_000) }
+            await receiveSubscriptionStatus(.pending, connections: ["private-connection"])
+            f.context.active = true
+            f.manager.resume()
+            try await until { f.commands.contains(.relays([f.first])) && f.manager.state == .idle }
+            let expected: [Recovery.Scope] = kind == 2 ? [.relays([f.first])] : [.all, .relays([f.first])]
+            require(f.commands == expected, "Resume, listener replacement and config acknowledgements must not discard still-failed subscriptions")
+            require(f.summaryCount >= 2 && f.failed.isEmpty, "The same demand must survive global acceptance until an actual healthy summary")
+            require(f.manager.diagnosticText.contains("subscription_scan=false"), "Healthy convergence must stop the event-driven retry loop")
+            f.manager.pause()
+        }
+    }
+
+    static func subscriptionEventDuringSummaryIsNotLost() async throws {
+        let f = RecoveryFixture()
+        Recovery.eventTarget = f.manager
+        var held: CheckedContinuation<Void, Never>?
+        f.sleep = { delay in f.clock += delay; try await Task.sleep(nanoseconds: 2_000_000) }
+        f.summary = {
+            if f.summaryCount == 1 { await withCheckedContinuation { held = $0 }; return [:] }
+            return f.summaryCount == 2 ? [f.first: 0] : [:]
+        }
+        await receiveSubscriptionStatus(.pending, connections: ["first-private-connection"])
+        try await until { held != nil }
+        await receiveSubscriptionStatus(.removed(subError: "private-error"), connections: ["second-private-connection"])
+        held!.resume()
+        try await until { f.commands == [.relays([f.first])] && f.manager.state == .idle }
+        require(f.summaryCount == 3, "A snapshot started before a new subscription event cannot clear that event's recovery demand")
+        f.manager.pause()
+    }
+
+    static func subscriptionEventDuringGlobalReconnectIsNotLost() async throws {
+        let f = RecoveryFixture()
+        Recovery.eventTarget = f.manager
+        f.sleep = { delay in f.clock += delay; try await Task.sleep(nanoseconds: 2_000_000) }
+        f.onReconnect = { _ in
+            if f.commands.count == 1 {
+                f.failed = [f.first]
+                await receiveSubscriptionStatus(.pending, connections: ["private-connection"])
+            } else { f.failed = [] }
+        }
+        try await f.manager.reconnect(.all, reason: .foreground)
+        try await until { f.commands.count == 2 && f.manager.state == .idle }
+        require(f.commands == [.all, .relays([f.first])], "An accepted global command cannot acknowledge a later subscription failure")
+        f.manager.pause()
     }
 
     static func staleResumeFailureCannotScheduleAnotherProfile() async throws {

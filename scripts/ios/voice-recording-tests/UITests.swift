@@ -19,7 +19,16 @@ final class VoiceRecordingTests: XCTestCase {
         add(proof)
     }
     private func preview() {
-        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 20), app.staticTexts["voice.error"].label)
+        let phase = app.staticTexts["voice.phase"]
+        let send = app.buttons["voice.send"]
+        let recordingError = app.staticTexts["voice.error"]
+        // Joining resumed AAC segments can take longer on a loaded simulator.
+        // Require the actual completed preview, retaining every audio assertion.
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            phase.exists && phase.label == "Phase preview" && send.exists && send.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 60), .completed,
+                       "Preview did not finish: \(phase.label); \(recordingError.label)")
         XCTAssertTrue(app.buttons["voice.resume"].isHittable)
         XCTAssertTrue(app.buttons["voice.delete"].isHittable)
         XCTAssertFalse(app.staticTexts["Playable 0.00"].exists, "A paused recording must already be playable")
@@ -40,10 +49,17 @@ final class VoiceRecordingTests: XCTestCase {
 
     func testHoldReleasePreviewResumeAndSend() {
         openRecorder()
-        mic.press(forDuration: 2)
+        let record = mic
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            record.exists && record.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 10), .completed)
+        // Allow cold simulator audio preparation while retaining hold/release.
+        record.press(forDuration: 5)
         preview()
         snapshot("released-recording-preview")
         let firstFileDuration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
+        XCTAssertGreaterThan(firstFileDuration, 0.5, "The first hold must capture playable audio before testing resume")
         app.buttons["voice.play"].tap()
         let first = app.staticTexts["voice.duration"].label
         app.buttons["voice.resume"].tap()

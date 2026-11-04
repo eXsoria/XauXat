@@ -42,7 +42,7 @@ concurrency:
 jobs:
   voice-recording:
     name: Voice recording gestures and AAC preview
-    runs-on: macos-26
+    runs-on: macos-26-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -59,7 +59,7 @@ jobs:
 
   expressions:
     name: Private stickers and soundboard
-    runs-on: macos-26
+    runs-on: macos-26-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -135,8 +135,9 @@ jobs:
 
   avatar-editor:
     name: Avatar camera and crop transitions
-    # Run the interactive simulator on the same architecture as the app.
-    runs-on: macos-26
+    # Portable UI harness; retain its explicit arm64 camera typecheck and the
+    # full-app arm64 simulator launch below.
+    runs-on: macos-26-intel
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -151,9 +152,30 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  native-core-runner:
+    name: Select native core runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      runner: ${{ steps.native-core-cache.outputs.cache-hit == 'true' && 'ubuntu-24.04' || 'macos-26' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: recursive
+      - name: Look up exact arm64 native archive
+        id: native-core-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: .xauxat-cache/native-core
+          key: xauxat-ios-native-core-${{ hashFiles('src/**', 'simplex-chat.cabal', 'cabal.project', 'flake.nix', 'flake.lock', 'scripts/nix/**') }}
+          lookup-only: true
+
   native-core:
     name: XauXat native core (arm64)
-    runs-on: macos-26
+    needs: native-core-runner
+    # Transporting this source-keyed ZIP does not require a macOS host.
+    # A cold cache still selects Apple Silicon for the original Nix build.
+    runs-on: ${{ needs.native-core-runner.outputs.runner }}
     # A cold Apple Silicon runner may need to bootstrap GHC before it can build
     # the forked core. The resulting archive is cached, so this longer window is
     # primarily needed for the first build of a new native-core source hash.
@@ -171,6 +193,10 @@ jobs:
         with:
           path: .xauxat-cache/native-core
           key: xauxat-ios-native-core-${{ hashFiles('src/**', 'simplex-chat.cabal', 'cabal.project', 'flake.nix', 'flake.lock', 'scripts/nix/**') }}
+
+      - name: Require Apple Silicon for a cache miss
+        if: steps.native-core-cache.outputs.cache-hit != 'true'
+        run: test "$(uname -m)" = "arm64"
 
       - name: Install Nix
         if: steps.native-core-cache.outputs.cache-hit != 'true'
@@ -201,6 +227,9 @@ jobs:
           cp result-ios-core/pkg-ios-aarch64-swift-json.zip .xauxat-cache/native-core/
           unzip -tq .xauxat-cache/native-core/pkg-ios-aarch64-swift-json.zip
 
+      - name: Validate native archive
+        run: unzip -tq .xauxat-cache/native-core/pkg-ios-aarch64-swift-json.zip
+
       - name: Upload native core archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -213,7 +242,9 @@ jobs:
     name: Latest iOS Release device (arm64)
     runs-on: macos-26-intel
     timeout-minutes: 60
-    needs: [native-core, qr-images]
+    # QR remains required for workflow success and signed distribution; it need
+    # not delay compilation or hold another macOS runner while this build waits.
+    needs: native-core
 
     steps:
       - name: Check out fork and submodules
@@ -295,7 +326,7 @@ jobs:
     name: Latest iOS Simulator (arm64 launch)
     runs-on: macos-26
     timeout-minutes: 75
-    needs: [native-core, qr-images]
+    needs: native-core
 
     steps:
       - name: Check out fork and submodules
