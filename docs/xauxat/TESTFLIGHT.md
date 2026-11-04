@@ -88,7 +88,7 @@ Each first-party executable declares its actual API usage in its own
 
 | Bundle | Categories and approved reasons |
 | --- | --- |
-| App (`Shared/PrivacyInfo.xcprivacy`) | System boot time: `35F9.1` for local elapsed-time checks and timers; UserDefaults: `CA92.1` and `1C8F.1` for own and App Group settings |
+| App (`Shared/PrivacyInfo.xcprivacy`) | System boot time: `35F9.1` for local elapsed-time checks and timers; UserDefaults: `CA92.1` and `1C8F.1` for own and App Group settings; file metadata: `C617.1` for exported migration archives in the app container |
 | `SimpleXChat.framework` | UserDefaults: `CA92.1`, `1C8F.1`; file timestamps: `C617.1` for database backup metadata in app containers |
 | Notification service and share extensions | UserDefaults: `1C8F.1` for shared App Group preferences |
 
