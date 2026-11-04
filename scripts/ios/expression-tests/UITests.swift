@@ -38,8 +38,20 @@ final class ExpressionUITests: XCTestCase {
         let app = launch()
         proof(app, "sticker-tray")
         let sticker = app.buttons["Send sticker 👍"]
-        sticker.press(forDuration: 1.2)
-        app.buttons["Add to Favorites"].tap()
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in sticker.isHittable }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 10), .completed)
+        sticker.press(forDuration: 2.0)
+        let addFavorite = app.buttons["Add to Favorites"]
+        XCTAssertTrue(addFavorite.waitForExistence(timeout: 10))
+        let menuHittable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            addFavorite.exists && addFavorite.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [menuHittable], timeout: 10), .completed)
+        proof(app, "sticker-favorite-menu")
+        addFavorite.tap()
+        let selection = app.staticTexts["selection"]
+        XCTAssertTrue(selection.waitForExistence(timeout: 10))
+        XCTAssertEqual(selection.label, "Nothing sent", "Adding a favorite must not send a sticker")
         app.buttons["Favorites"].tap()
         XCTAssertTrue(sticker.waitForExistence(timeout: 3))
         sticker.tap()
