@@ -21,8 +21,9 @@ private var chatStoreOpen = false
 
 public func isChatStoreOpen() -> Bool {
     chatStoreStateLock.lock()
-    defer { chatStoreStateLock.unlock() }
-    return chatStoreOpen
+    let open = chatStoreOpen
+    chatStoreStateLock.unlock()
+    return open && chatControllerMatchesCurrentStorage() && !xauXatStoragePromotionPending()
 }
 
 private func setChatStoreOpen(_ open: Bool) {

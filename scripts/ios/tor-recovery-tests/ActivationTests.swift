@@ -54,6 +54,10 @@ final class Key {
 let kcDecoyPassword = Key()
 var controllerAvailable = true
 func hasChatCtrl() -> Bool { controllerAvailable }
+var controllerStorageMatches = true
+var storagePromotionPending = false
+func chatControllerMatchesCurrentStorage() -> Bool { controllerStorageMatches }
+func xauXatStoragePromotionPending() -> Bool { storagePromotionPending }
 var activations = 0
 var torReady = true
 func isXauXatTorReady() -> Bool { torReady }
@@ -89,6 +93,8 @@ let logger = Logger()
     }
     static func reset() {
         controllerAvailable = true
+        controllerStorageMatches = true
+        storagePromotionPending = false
         ChatModel.ok = true
         torReady = true
         reopenSucceeds = true
@@ -152,6 +158,18 @@ let logger = Logger()
         startChatAndActivate { completions += 1 }
         require(!isChatStoreOpen() && activations == 0 && ChatReceiver.shared.starts == 0, "Failed reopen cannot submit a native activation or start the receiver")
         require(AppChatState.shared.value == .suspended && completions == 1, "Failed reopen must remain suspended and finish the waiter")
+
+        for pendingPromotion in [false, true] {
+            reset()
+            setAppState(.active)
+            controllerStorageMatches = pendingPromotion
+            storagePromotionPending = pendingPromotion
+            require(!isChatStoreOpen(), "Obsolete or transitioning stores cannot report a running session")
+            completions = 0
+            startChatAndActivate { completions += 1 }
+            require(activations == 0 && ChatReceiver.shared.starts == 0 && completions == 1,
+                    "An erased identity or pending promotion cannot be reactivated by recovery")
+        }
 
         reset()
         commandSucceeds = false
