@@ -3242,8 +3242,15 @@ func processReceivedMsg(_ res: ChatEvent) async {
             }
         }
     case let .subscriptionStatus(status, connections):
-        if let chatAgentConnId = m.chatAgentConnId, connections.contains(chatAgentConnId) {
-            await MainActor.run {
+        await MainActor.run {
+            if !connections.isEmpty {
+                switch status {
+                case .active: break
+                case .pending, .removed, .noSub:
+                    XauXatConnectionRecoveryManager.shared.subscriptionsNeedRecovery()
+                }
+            }
+            if let chatAgentConnId = m.chatAgentConnId, connections.contains(chatAgentConnId) {
                 m.chatSubStatus = status
             }
         }

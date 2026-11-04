@@ -18,10 +18,11 @@ for run in {1..10}; do
   echo "Tor recovery repeat $run/10"
   "$temp/tor-recovery-tests"
 done
+python3 "$root/scripts/ios/extract-lifecycle-tests.py" "$root" "$temp/Activation.swift"
 swiftc -swift-version 5 -parse-as-library \
   "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
   "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" \
-  "$tests/RecoveryTests.swift" -o "$temp/coordinated-recovery-tests"
+  "$temp/SubscriptionEvents.swift" "$tests/RecoveryTests.swift" -o "$temp/coordinated-recovery-tests"
 "$temp/coordinated-recovery-tests"
 
 # Exercise the actual path adapter with a controlled Network module, including
@@ -38,7 +39,6 @@ swiftc -swift-version 5 -parse-as-library -I "$temp" -L "$temp" -lNetwork -lSimp
 
 # Compile and execute the real app activation/session-classification functions
 # with an NSE callback that can be held across lifecycle/profile changes.
-python3 "$root/scripts/ios/extract-lifecycle-tests.py" "$root" "$temp/Activation.swift"
 swiftc -swift-version 5 -parse-as-library \
   "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
   "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" \

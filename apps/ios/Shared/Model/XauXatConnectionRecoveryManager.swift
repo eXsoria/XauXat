@@ -126,6 +126,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     private var epoch = 0
     private var outboundPending = false
     private var subscriptionPending = false
+    private var subscriptionScan: (id: UUID, epoch: Int, userId: Int64, alternateStore: Bool)?
     private var loop: Task<Void, Never>?
     private var loopId: UUID?
     private var networkTask: Task<Void, Never>?
@@ -251,6 +252,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
 
     private func perform(_ requested: Scope, reason: Reason, force: Bool, context: Context, epoch operationEpoch: Int) async throws {
         var reconnectingAll = false
+        let subscriptionScanId = subscriptionScan?.id
         do {
             try requireCurrent(context, operationEpoch, reason: reason)
             if case let .relays(relays) = requested {
@@ -273,6 +275,9 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 do { failed = try await dependencies.failedRelays() }
                 catch { record(reason, "summary_failed"); throw error }
                 try requireCurrent(context, operationEpoch, reason: reason)
+                if !failed.keys.contains(where: { $0.userId == context.userId }), subscriptionScan?.id == subscriptionScanId {
+                    subscriptionScan = nil
+                }
                 let now = dependencies.now()
                 firstObserved = firstObserved.filter { failed[$0.key] != nil }
                 var targets: Set<Relay> = []
@@ -382,6 +387,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             if scope == .all {
                 routeRetry = nil
                 sessionRetry = nil
+                if subscriptionScan?.id == subscriptionScanId { subscriptionScan = nil }
                 lastGlobal = (operationEpoch, context, dependencies.now())
                 firstObserved.removeAll()
             }
@@ -402,7 +408,25 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
 
     func setOutboundPending(_ pending: Bool) { outboundPending = pending; updateLoop() }
     func setSubscriptionPending(_ pending: Bool) { subscriptionPending = pending; updateLoop() }
-    private var hasPendingWork: Bool { outboundPending || subscriptionPending }
+    private var hasPendingWork: Bool { outboundPending || subscriptionPending || needsSubscriptionScan }
+    private var needsSubscriptionScan: Bool {
+        guard let subscriptionScan else { return false }
+        let context = dependencies.context()
+        return subscriptionScan.epoch == epoch && subscriptionScan.userId == context.userId
+            && subscriptionScan.alternateStore == context.alternateStore
+    }
+
+    /// Subscription events arrive independently of the selected chat. Wake a
+    /// current-profile summary scan; the event itself does not identify targets
+    /// or justify resetting Tor. Preserve the signal across temporary inactive
+    /// scenes, while updateLoop still gates every command on foreground/unlock.
+    func subscriptionsNeedRecovery() {
+        let context = dependencies.context()
+        guard let userId = context.userId, dependencies.sessionState().canRecover else { return }
+        subscriptionScan = (UUID(), epoch, userId, context.alternateStore)
+        record(.pendingWork, "subscription_scan_requested")
+        updateLoop()
+    }
     private var needsRouteRetry: Bool {
         guard let routeRetry else { return false }
         return routeRetry.epoch == epoch && routeRetry.context == dependencies.context()
@@ -527,6 +551,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     /// settled generation may reconfigure/reconnect the core.
     func networkChanged(online: Bool, network: Network = .unknown) {
         epoch += 1
+        subscriptionScan = nil
         self.network = network
         routeRetry = nil
         sessionRetry = nil
@@ -564,6 +589,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     func pause() {
         record(.foreground, "paused")
         epoch += 1
+        subscriptionScan = nil
         routeRetry = nil
         sessionRetry = nil
         dependencies.invalidateTor()
@@ -606,6 +632,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             + "foreground=\(context.active) online=\(context.online) network=\(network.rawValue) profile_available=\(context.userId != nil) session=\(dependencies.sessionState().rawValue) recovery=\(state.rawValue) route_retry=\(needsRouteRetry)\n"
             + "outbound_pending=\(outboundPending) subscription_pending=\(subscriptionPending)\n"
             + "session_retry=\(needsSessionRetry) unchanged_path_updates=\(unchangedPathUpdates)\n"
+            + "subscription_scan=\(needsSubscriptionScan)\n"
             + events.joined(separator: "\n")
     }
 }
