@@ -32,6 +32,26 @@ struct SimpleXApp: App {
         UserDefaults.standard.register(defaults: appDefaults)
         setGroupDefaults()
         registerGroupDefaults()
+        if xauXatStoragePromotionPending() {
+            let model = chatModel
+            model.ctrlInitInProgress = true
+            Task { @MainActor in
+                defer { model.ctrlInitInProgress = false }
+                do {
+                    try await xauXatPrepareLocalStorageChange()
+                    guard xauXatResumeStoragePromotion() else {
+                        throw RuntimeError("Unable to complete pending local profile promotion")
+                    }
+                    xauXatClearDuressSettings()
+                } catch {
+                    model.chatDbStatus = .errorKeychain
+                    logger.error("Unable to complete pending local profile promotion")
+                }
+            }
+        }
+        if kcSelfDestructPassword.get() == nil {
+            xauXatClearDuressSettings()
+        }
         // The real store is the neutral launch default. When a decoy PIN is
         // configured, neither store is opened until the user enters a PIN.
         setXauXatStorageScope(.primary)

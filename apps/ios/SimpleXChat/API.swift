@@ -13,6 +13,7 @@ private let XAUXAT_NTF_SERVER_INFO_KEY = "XauXatNotificationServerBase64"
 private let XAUXAT_NTF_SERVER_ENV = "XAUXAT_NTF_SERVER"
 
 private var chatController: chat_ctrl?
+private var chatControllerDatabasePath: String?
 
 private var migrationResult: (Bool, DBMigrationResult)?
 private let chatStoreStateLock = NSLock()
@@ -34,15 +35,25 @@ public func hasChatCtrl() -> Bool {
     chatController != nil
 }
 
+public func chatControllerMatchesCurrentStorage() -> Bool {
+    chatControllerDatabasePath == getAppDatabasePath().path
+}
+
 public func getChatCtrl() -> chat_ctrl {
     if let controller = chatController { return controller }
     fatalError("chat controller not initialized")
 }
 
 public func chatMigrateInit(_ useKey: String? = nil, confirmMigrations: MigrationConfirmation? = nil, backgroundMode: Bool = false) -> (Bool, DBMigrationResult) {
-    if let res = migrationResult { return res }
+    // An interrupted promotion must be completed by the main app before any
+    // process opens a store with the old role/credential mapping.
+    if xauXatStoragePromotionPending() { return (false, .errorKeychain) }
+    if let res = migrationResult {
+        return chatControllerMatchesCurrentStorage() ? res : (false, .errorKeychain)
+    }
     applyXauXatNotificationServerEnvironment()
     let dbPath = getAppDatabasePath().path
+    chatControllerDatabasePath = dbPath
     // Keychain items survive reinstalls and database deletion. Numeric native
     // connection IDs belong to this database, not to the installation/account.
     if !FileManager.default.fileExists(atPath: dbPath + CHAT_DB),
@@ -150,8 +161,8 @@ public func chatCloseStore() {
 
 @discardableResult
 public func chatReopenStore() -> Bool {
-    guard hasChatCtrl() else { return false }
     setChatStoreOpen(false)
+    guard hasChatCtrl(), chatControllerMatchesCurrentStorage(), !xauXatStoragePromotionPending() else { return false }
     let err = fromCString(chat_reopen_store(getChatCtrl()))
     setChatStoreOpen(err == "")
     if err != "" {
@@ -164,6 +175,7 @@ public func chatReopenStore() -> Bool {
 public func resetChatCtrl() {
     setChatStoreOpen(false)
     chatController = nil
+    chatControllerDatabasePath = nil
     migrationResult = nil
 }
 

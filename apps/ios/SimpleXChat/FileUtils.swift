@@ -63,9 +63,11 @@ func getAppDirectory(_ scope: XauXatStorageScope = xauXatStorageScope()) -> URL 
     let base = dbContainerGroupDefault.get() == .group
         ? getGroupContainerDirectory()
         : getDocumentsDirectory()
-    return scope == .decoy
-        ? base.appendingPathComponent(DECOY_STORAGE_DIRECTORY, isDirectory: true)
-        : base
+    switch xauXatStorageSlot(scope) {
+    case "primary": return base
+    case "localProfile": return base.appendingPathComponent(DECOY_STORAGE_DIRECTORY, isDirectory: true)
+    case let slot: return base.appendingPathComponent(DECOY_STORAGE_DIRECTORY + "-" + slot, isDirectory: true)
+    }
 }
 
 /// XauXat keeps its live database, settings and received media off device and
@@ -149,8 +151,8 @@ func getLegacyDatabasePath() -> URL {
 
 // Spec: spec/database.md#getAppDatabasePath
 public func getAppDatabasePath(_ scope: XauXatStorageScope = xauXatStorageScope()) -> URL {
-    if scope == .decoy {
-        return getAppDirectory(.decoy).appendingPathComponent(DB_FILE_PREFIX, isDirectory: false)
+    if xauXatStorageSlot(scope) != "primary" {
+        return getAppDirectory(scope).appendingPathComponent(DB_FILE_PREFIX, isDirectory: false)
     }
     return dbContainerGroupDefault.get() == .group
         ? getGroupContainerDirectory().appendingPathComponent(DB_FILE_PREFIX, isDirectory: false)
@@ -267,7 +269,12 @@ private func restoreBackupFile(fromPath: String, toPath: String) throws {
 }
 
 public func hasLegacyDatabase() -> Bool {
-    hasDatabaseAtPath(getLegacyDatabasePath())
+    if xauXatStoragePromotionPending(), dbContainerGroupDefault.get() == .documents,
+       hasDecoyDatabase() { return true }
+    if xauXatStorageSlot(.primary) != "primary" {
+        return dbContainerGroupDefault.get() == .documents && hasDatabaseAtPath(getAppDatabasePath(.primary))
+    }
+    return hasDatabaseAtPath(getLegacyDatabasePath())
 }
 
 public func hasDatabase() -> Bool {
@@ -289,21 +296,26 @@ public func destroyXauXatStorage(_ scope: XauXatStorageScope) -> Bool {
     case .primary: keyRemoved = kcPrimaryDatabasePassword.remove()
     case .decoy: keyRemoved = kcDecoyDatabasePassword.remove()
     }
+    guard keyRemoved else { return false }
+    removeExpressionLibraryKeys(scope)
     _ = xauXatRemoveConversationLocks(scope)
     _ = xauXatRemoveHiddenChats(scope)
     _ = xauXatRemoveProtectedProfiles(scope)
     _ = xauXatRemoveProtectedProfilePasswords(scope)
     _ = xauXatRemoveContactInvitePolicies(scope)
+    _ = xauXatRemoveGroupAccessPolicies(scope)
+    _ = xauXatRemoveOneTimeGroupInvites(scope)
 
     let fm = FileManager.default
-    if scope == .decoy {
-        try? fm.removeItem(at: getAppDirectory(.decoy))
+    if xauXatStorageSlot(scope) != "primary" {
+        try? fm.removeItem(at: getAppDirectory(scope))
     } else {
-        let dbPath = getAppDatabasePath(.primary).path
-        try? fm.removeItem(atPath: dbPath + CHAT_DB)
-        try? fm.removeItem(atPath: dbPath + AGENT_DB)
-        try? fm.removeItem(atPath: dbPath + CHAT_DB_BAK)
-        try? fm.removeItem(atPath: dbPath + AGENT_DB_BAK)
+        let dbPath = getAppDatabasePath(scope).path
+        for suffix in [CHAT_DB, AGENT_DB, CHAT_DB_BAK, AGENT_DB_BAK] {
+            for sidecar in ["", "-wal", "-shm", "-journal"] {
+                try? fm.removeItem(atPath: dbPath + suffix + sidecar)
+            }
+        }
         try? fm.removeItem(at: getAppDirectory(.primary).appendingPathComponent("app_files", isDirectory: true))
         try? fm.removeItem(at: getAppDirectory(.primary).appendingPathComponent("temp_files", isDirectory: true))
         try? fm.removeItem(at: getAppDirectory(.primary).appendingPathComponent("assets", isDirectory: true))
@@ -361,7 +373,7 @@ public func removeStaleXauXatProtectedFiles() {
 }
 
 public func getMigrationTempFilesDirectory() -> URL {
-    let base = xauXatStorageScope() == .decoy ? getAppDirectory(.decoy) : getDocumentsDirectory()
+    let base = xauXatStorageSlot(xauXatStorageScope()) != "primary" ? getAppDirectory() : getDocumentsDirectory()
     return base.appendingPathComponent("migration_temp_files", isDirectory: true)
 }
 

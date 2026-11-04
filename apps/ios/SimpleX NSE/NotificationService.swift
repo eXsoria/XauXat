@@ -925,13 +925,17 @@ var networkConfig: NetCfg = xauXatManagedTorConfig(getNetCfg(), socksProxy: "127
     // Spec: spec/services/notifications.md#startChat-NSE
 func startChat() -> DBMigrationResult? {
     logger.debug("NotificationService: startChat")
-    // only skip creating if there is chat controller
-    if case .active = NSEChatState.shared.value, hasChatCtrl() {
-        return applyCurrentNSEConfig() ? .ok : nil
-    }
-
     startLock.wait()
     defer { startLock.signal() }
+    if xauXatStoragePromotionPending() { return .errorKeychain }
+
+    // The main app can promote the decoy while this extension is suspended.
+    // Never reactivate a surviving controller for the erased old primary.
+    if hasChatCtrl() && !chatControllerMatchesCurrentStorage() {
+        chatCloseStore()
+        resetChatCtrl()
+        NSEChatState.shared.set(.created)
+    }
 
     if hasChatCtrl() {
         guard applyCurrentNSEConfig() else { return nil }
@@ -1206,7 +1210,7 @@ func apiStartChat() throws -> Bool {
 }
 
 func apiActivateChat() -> Bool {
-    chatReopenStore()
+    guard chatReopenStore() else { return false }
     let r: APIResult<NSEChatResponse> = sendSimpleXCmd(NSEChatCommand.apiActivateChat(restoreChat: false))
     if case .result(.cmdOk) = r { return true }
     logger.error("NotificationService: chat activation failed")
