@@ -49,10 +49,17 @@ final class VoiceRecordingTests: XCTestCase {
 
     func testHoldReleasePreviewResumeAndSend() {
         openRecorder()
-        mic.press(forDuration: 2)
+        let record = mic
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            record.exists && record.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 10), .completed)
+        // Allow cold simulator audio preparation while retaining hold/release.
+        record.press(forDuration: 5)
         preview()
         snapshot("released-recording-preview")
         let firstFileDuration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
+        XCTAssertGreaterThan(firstFileDuration, 0.5, "The first hold must capture playable audio before testing resume")
         app.buttons["voice.play"].tap()
         let first = app.staticTexts["voice.duration"].label
         app.buttons["voice.resume"].tap()
