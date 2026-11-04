@@ -321,14 +321,10 @@ jobs:
           retention-days: 14
 
   simulator:
-    name: iOS Simulator (arm64 launch, Xcode 26.3)
-    # Keep a real ARM launch on the stable iOS 26.2 image while the macOS 26
-    # ARM pool is capacity-constrained. Device Release uses the current SDK.
-    runs-on: macos-15
+    name: Latest iOS Simulator (arm64 launch)
+    runs-on: macos-26
     timeout-minutes: 75
     needs: [native-core, qr-images]
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
 
     steps:
       - name: Check out fork and submodules
