@@ -18,7 +18,7 @@ final class VoiceRecordingTests: XCTestCase {
         proof.lifetime = .keepAlways
         add(proof)
     }
-    private func preview() {
+    private func preview(canResume: Bool = true) {
         let phase = app.staticTexts["voice.phase"]
         let send = app.buttons["voice.send"]
         let recordingError = app.staticTexts["voice.error"]
@@ -29,7 +29,11 @@ final class VoiceRecordingTests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 60), .completed,
                        "Preview did not finish: \(phase.label); \(recordingError.label)")
-        XCTAssertTrue(app.buttons["voice.resume"].isHittable)
+        if canResume {
+            XCTAssertTrue(app.buttons["voice.resume"].isHittable)
+        } else {
+            XCTAssertFalse(app.buttons["voice.resume"].exists, "The completed recorder cannot resume past the limit")
+        }
         XCTAssertTrue(app.buttons["voice.delete"].isHittable)
         XCTAssertFalse(app.staticTexts["Playable 0.00"].exists, "A paused recording must already be playable")
         XCTAssertTrue(app.staticTexts["Sent 0"].exists, "Releasing must never send")
@@ -40,9 +44,20 @@ final class VoiceRecordingTests: XCTestCase {
         app.buttons["Soundboard"].tap()
         XCTAssertTrue(app.buttons["Preview Ta-da"].waitForExistence(timeout: 5))
         app.buttons["Preview Ta-da"].tap()
-        mic.press(forDuration: 2)
-        preview()
+        // The tray must close while capture continues. Measure captured media
+        // after locking, rather than assuming audio preparation fits in a hold.
+        let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        origin.press(forDuration: 0.8, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
+        let captured = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let duration = self.app.staticTexts["voice.duration"]
+            return self.app.staticTexts["voice.phase"].label == "Phase locked"
+                && duration.exists && (Double(duration.label.split(separator: " ").last ?? "0") ?? 0) >= 1.5
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [captured], timeout: 30), .completed,
+                       "Recording must continue after closing the soundboard")
         XCTAssertFalse(app.buttons["Preview Ta-da"].exists, "Recording must close the soundboard")
+        mic.tap()
+        preview()
         let duration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
         XCTAssertGreaterThan(duration, 1, "Closing a playing tray cannot stop the microphone session")
     }
@@ -121,9 +136,7 @@ final class VoiceRecordingTests: XCTestCase {
         openRecorder()
         let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         origin.press(forDuration: 0.7, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
-        // The limit is media time; hosted simulator accessibility queries can stall longer.
-        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 30), app.staticTexts["voice.error"].label)
-        XCTAssertFalse(app.buttons["voice.resume"].exists, "The completed recorder cannot resume past the limit")
+        preview(canResume: false)
         XCTAssertFalse(app.staticTexts["Playable 0.00"].exists)
         let duration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
         XCTAssertEqual(duration, 6, accuracy: 0.3, "Hands-free capture must stop at the recording limit")
@@ -142,8 +155,7 @@ final class VoiceRecordingTests: XCTestCase {
         mic.press(forDuration: 2)
         preview()
         app.buttons["voice.resume"].tap()
-        XCTAssertTrue(app.buttons["voice.send"].waitForExistence(timeout: 20), app.staticTexts["voice.error"].label)
-        XCTAssertFalse(app.buttons["voice.resume"].exists)
+        preview(canResume: false)
         let duration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
         XCTAssertEqual(duration, 6, accuracy: 0.3, "Pausing cannot reset the total recording limit")
     }
