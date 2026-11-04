@@ -3,6 +3,7 @@ This build focuses on private-connection startup and recovery on real iPhones.
 What to test:
 - Open XauXat repeatedly on Wi-Fi and on mobile data. Confirm the existing profile and chats open after Tor becomes ready.
 - Send and receive text, photos and voice messages in both directions between two devices.
+- Briefly tap the microphone and confirm no voice draft remains. Hold to record, release to preview, then resume and send; audio should only be sent when you press Send.
 - Stay on the chat list with no conversation selected and no outgoing messages. Confirm incoming delivery continues after a temporary connection failure.
 - Leave the app, lock the phone, then return without force-closing XauXat. Confirm the same session resumes and both sending and receiving recover.
 - Switch Wi-Fi/mobile data and briefly enable airplane mode, then restore connectivity. Check recovery while the app is open and after returning to it.

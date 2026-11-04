@@ -2511,8 +2511,8 @@ struct ComposeView: View {
         }
     }
 
-    private func releaseVoiceMessageRecording() {
-        switch voiceInteraction.release() {
+    private func releaseVoiceMessageRecording(_ touch: VoiceRecordingTouchTiming) {
+        switch voiceInteraction.release(touch: touch) {
         case .finish: finishVoiceMessageRecording()
         case .cancel: discardVoiceMessageRecording()
         default: break
@@ -2613,7 +2613,7 @@ struct ComposeView: View {
                 try await finalization.value
                 guard audioRecorder === recorder, recorder.owner == voiceRecordingOwner, composeState.voiceMessageRecordingFileName == fileName, !recorder.cancelled else { return }
                 finishingVoiceFileName = nil
-                if recorder.duration < 0.3 {
+                if recorder.duration < VoiceRecordingInteraction.minimumRecordingDuration {
                     discardVoiceMessageRecording()
                     return
                 }
