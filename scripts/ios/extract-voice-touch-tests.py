@@ -45,7 +45,7 @@ class UIEvent {}
 final class UITouch: Hashable {
     let timestamp: TimeInterval
     init(_ timestamp: TimeInterval) { self.timestamp = timestamp }
-    func location(in view: UIView?) -> CGPoint { .zero }
+    func location(in view: UIView?) -> CGPoint { CGPoint(x: 0, y: 0) }
     static func == (a: UITouch, b: UITouch) -> Bool { a === b }
     func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
 }
