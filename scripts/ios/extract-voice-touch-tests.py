@@ -8,12 +8,15 @@ out = Path(sys.argv[2])
 compose = root / "apps/ios/Shared/Views/Chat/ComposeMessage"
 controls = (compose / "VoiceRecordingControls.swift").read_text(encoding="utf-8")
 controller = (compose / "ComposeView.swift").read_text(encoding="utf-8")
+audio = (root / "apps/ios/Shared/Model/AudioRecPlay.swift").read_text(encoding="utf-8")
 
 
 def declaration(source, marker):
     assert source.count(marker) == 1, marker
     start = source.index(marker)
-    brace = source.index("{", start)
+    # Include any default-argument closure in the marker so its opening brace
+    # cannot be mistaken for the function body.
+    brace = source.index("{", start + len(marker))
     depth = 0
     for index in range(brace, len(source)):
         if source[index] == "{":
@@ -82,5 +85,37 @@ final class Probe {
     }
 """
 source += textwrap.indent(compose_handlers, "    ") + "\n}\n"
+source += """
+// Only the AV permission boundary and capture side effects are adapters. The
+// asynchronous start method, including all post-await guards, is production.
+struct PermissionTestLogger { func error(_ message: String) {} }
+private let logger = PermissionTestLogger()
+@MainActor final class PermissionRecorder {
+    enum StartError: Equatable { case permission, error(String), cancelled }
+    var cancelled = false
+    var recordingFileName: String?
+    var segmentStarts = 0
+    private var permission: CheckedContinuation<Bool, Never>?
+    private var requested = false
+    private var observers: [CheckedContinuation<Void, Never>] = []
+    func checkPermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            permission = continuation
+            requested = true
+            let waiting = observers
+            observers.removeAll()
+            waiting.forEach { $0.resume() }
+        }
+    }
+    func waitForPermissionRequest() async {
+        if requested { return }
+        await withCheckedContinuation { observers.append($0) }
+    }
+    func grant(_ allowed: Bool) { permission!.resume(returning: allowed); permission = nil }
+    func startSegment(_ name: String) throws { segmentStarts += 1 }
+    func stop() { cancelled = true }
+"""
+source += textwrap.indent(declaration(audio,
+    "func start(fileName: String, shouldStart: () -> Bool = { true }) async -> StartError?"), "    ") + "\n}\n"
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(source, encoding="utf-8")

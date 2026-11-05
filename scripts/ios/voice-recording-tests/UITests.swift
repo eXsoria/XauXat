@@ -182,14 +182,48 @@ final class VoiceRecordingTests: XCTestCase {
         openRecorder()
         mic.press(forDuration: 0.2)
         let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Allow"]
-        XCTAssertTrue(allow.waitForExistence(timeout: 5))
-        allow.tap()
+        // A released tap may cancel before the startup Task asks the OS. If
+        // the real prompt appears, grant only after the finger has lifted.
+        if allow.waitForExistence(timeout: 5) { allow.tap() }
         XCTAssertTrue(app.staticTexts["Phase idle"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["voice.send"].exists)
-        // A new explicit hands-free intent proves recovery without assuming
-        // that two seconds includes permission/session preparation and capture.
-        lockAndCaptureAudio(timeout: 60)
+        XCTAssertTrue(app.staticTexts["Duration 0.00"].exists)
+        XCTAssertTrue(app.staticTexts["Playable 0.00"].exists)
+        XCTAssertTrue(app.staticTexts["Sent 0"].exists)
+
+        let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        origin.press(forDuration: 0.8, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
+        // The new intent can be the first one to request permission. Observe
+        // the real prompt or actual capture; never retry a timeout or failure.
+        let permissionOrCapture = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            allow.exists || (self.app.staticTexts["Phase locked"].exists
+                && (Double(self.app.staticTexts["voice.duration"].label.split(separator: " ").last ?? "0") ?? 0) >= 1.5)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [permissionOrCapture], timeout: 60), .completed)
+        if allow.exists {
+            allow.tap()
+            // Presenting the OS prompt may cancel the held touch before its
+            // slide-up locks. Only that empty, observed cancellation warrants
+            // a new intentional gesture after permission has been granted.
+            let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                self.app.staticTexts["Phase idle"].exists || self.app.staticTexts["Phase locked"].exists
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed)
+            if app.staticTexts["Phase idle"].exists {
+                XCTAssertTrue(app.staticTexts["Duration 0.00"].exists)
+                XCTAssertTrue(app.staticTexts["Playable 0.00"].exists)
+                XCTAssertTrue(app.staticTexts["Sent 0"].exists)
+                XCTAssertFalse(app.buttons["voice.send"].exists)
+                origin.press(forDuration: 0.8, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
+            }
+        }
+        let captured = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.app.staticTexts["Phase locked"].exists
+                && (Double(self.app.staticTexts["voice.duration"].label.split(separator: " ").last ?? "0") ?? 0) >= 1.5
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [captured], timeout: 60), .completed)
         mic.tap()
         preview()
+        XCTAssertGreaterThan(Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!, 1)
     }
 }

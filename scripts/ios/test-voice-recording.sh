@@ -21,6 +21,10 @@ swiftc "$root/apps/ios/Shared/Views/Chat/ComposeMessage/VoiceRecordingInteractio
   "$temp/TouchHandlers.swift" "$root/scripts/ios/voice-recording-tests/TouchCancellationTests.swift" \
   -o "$temp/touch-cancellation-tests"
 "$temp/touch-cancellation-tests" | tee "$out/touch-cancellation.log"
+swiftc "$root/apps/ios/Shared/Views/Chat/ComposeMessage/VoiceRecordingInteraction.swift" \
+  "$temp/TouchHandlers.swift" "$root/scripts/ios/voice-recording-tests/PermissionTests.swift" \
+  -o "$temp/permission-tests"
+"$temp/permission-tests" | tee "$out/permission.log"
 python3 "$root/scripts/ios/voice-recording-tests/make-project.py" "$root" "$temp/project"
 xcodebuild -list -json -project "$temp/project/VoiceHarness.xcodeproj" > "$out/project.json"
 # Compile before booting iOS: the Intel runner has limited memory, and a fresh
