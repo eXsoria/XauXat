@@ -1,0 +1,133 @@
+name: XauXat full UI qualification
+
+on:
+  push:
+    branches: [xauxat/ios-ui-qualification]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xauxat-ui-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    name: Full ${{ matrix.suite }} suite
+    runs-on: macos-26-intel
+    timeout-minutes: ${{ matrix.minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: voice
+            script: scripts/ios/test-voice-recording.sh
+            cases: 10
+            minutes: 30
+          - suite: avatar
+            script: scripts/ios/test-avatar-editor.sh
+            cases: 5
+            minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      UI_SCRIPT: ${{ matrix.script }}
+      UI_CASES: ${{ matrix.cases }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: d57086902743373d2c7c127c5b5bf9a419ccd40b
+          persist-credentials: false
+      - name: Record exact source and simulator environment
+        timeout-minutes: 2
+        env:
+          VOICE_TEST_OUTPUT: ${{ runner.temp }}/ui-proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$VOICE_TEST_OUTPUT"
+          git rev-parse HEAD | tee "$VOICE_TEST_OUTPUT/source-sha.txt"
+          test "$(git rev-parse HEAD)" = d57086902743373d2c7c127c5b5bf9a419ccd40b
+          {
+            date -u
+            uname -m
+            sw_vers
+            xcodebuild -version
+            xcrun --sdk iphonesimulator --show-sdk-version
+            xcrun simctl list runtimes available
+          } 2>&1 | tee "$VOICE_TEST_OUTPUT/environment.log"
+      - name: Run unchanged complete suite with startup watchdog
+        env:
+          VOICE_TEST_OUTPUT: ${{ runner.temp }}/ui-proof
+          AVATAR_TEST_OUTPUT: ${{ runner.temp }}/ui-proof
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import signal
+          import subprocess
+          import threading
+          import time
+
+          out = Path(os.environ['VOICE_TEST_OUTPUT'])
+          expected = int(os.environ['UI_CASES'])
+          started = threading.Event()
+          finished = threading.Event()
+          expired = threading.Event()
+          counts = []
+          process = subprocess.Popen(['bash', os.environ['UI_SCRIPT']],
+              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+              text=True, errors='replace', bufsize=1, start_new_session=True)
+
+          def watchdog():
+              # Only bootstrap is bounded here. Once XCTest starts, all original
+              # assertions and their timeouts run unchanged, under the job limit.
+              deadline = time.monotonic() + 15 * 60
+              while not finished.wait(1):
+                  if started.is_set():
+                      return
+                  if time.monotonic() >= deadline:
+                      expired.set()
+                      print('BOOTSTRAP FAILED: no Test Suite within 15 minutes', flush=True)
+                      try:
+                          os.killpg(process.pid, signal.SIGTERM)
+                      except ProcessLookupError:
+                          return
+                      if not finished.wait(30):
+                          try:
+                              os.killpg(process.pid, signal.SIGKILL)
+                          except ProcessLookupError:
+                              pass
+                      return
+
+          timer = threading.Thread(target=watchdog, daemon=True)
+          timer.start()
+          with (out / 'complete-suite.log').open('w') as log:
+              for line in process.stdout:
+                  print(line, end='', flush=True)
+                  log.write(line)
+                  log.flush()
+                  if re.search(r"Test Suite '.*' started", line):
+                      started.set()
+                  match = re.search(r'Executed (\d+) tests?, with (\d+) failures', line)
+                  if match:
+                      counts.append(tuple(map(int, match.groups())))
+          result = process.wait()
+          finished.set()
+          timer.join(timeout=2)
+          if expired.is_set():
+              raise SystemExit(124)
+          if result:
+              raise SystemExit(result if result > 0 else 128 - result)
+          assert started.is_set(), 'No XCTest suite executed'
+          assert (expected, 0) in counts, f'Complete {expected}-case suite required: {counts}'
+          print(f'QUALIFIED: all {expected} UI cases passed on sourced570869')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: XauXat-UI-qualification-${{ matrix.suite }}-d570869-${{ github.run_id }}
+          path: ${{ runner.temp }}/ui-proof
+          if-no-files-found: error
+          retention-days: 7
