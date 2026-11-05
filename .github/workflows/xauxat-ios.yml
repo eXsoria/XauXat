@@ -111,6 +111,14 @@ jobs:
       - run: bash scripts/ios/test-onboarding-notifications.sh
       - run: bash scripts/ios/test-device-architectures.sh
 
+  kill-switch:
+    name: Kill switch promotion and interruption recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: bash scripts/ios/test-kill-switch.sh
+
   notification-configuration:
     name: Notification configuration and signing guards
     runs-on: ubuntu-24.04

@@ -64,7 +64,8 @@ struct LocalAuthView: View {
     private var configuredPasscodes: [String] {
         var passcodes = [authRequest.password]
         if authRequest.selfDestruct {
-            if let password = kcSelfDestructPassword.get() { passcodes.append(password) }
+            if UserDefaults.standard.bool(forKey: DEFAULT_LA_SELF_DESTRUCT),
+               let password = kcSelfDestructPassword.get() { passcodes.append(password) }
             if let password = kcDecoyPassword.get() { passcodes.append(password) }
         }
         return passcodes
@@ -91,10 +92,12 @@ struct LocalAuthView: View {
 
     private func submitPasscode() {
         pendingFailure?.cancel()
-        if let sdPassword = kcSelfDestructPassword.get(), authRequest.selfDestruct && password == sdPassword {
+        if let sdPassword = kcSelfDestructPassword.get(),
+           UserDefaults.standard.bool(forKey: DEFAULT_LA_SELF_DESTRUCT),
+           authRequest.selfDestruct && password == sdPassword {
             resetAttemptProtection()
             allowToReact = false
-            deleteStorageAndRestart(sdPassword) { r in
+            promoteDecoyAndRestart(sdPassword) { r in
                 m.laRequest = nil
                 authRequest.completed(r)
             }
@@ -197,6 +200,16 @@ struct LocalAuthView: View {
                     try await Task.sleep(nanoseconds: 50_000_000)
                 }
 
+                if xauXatStoragePromotionPending() {
+                    try await xauXatPrepareLocalStorageChange()
+                    guard xauXatResumeStoragePromotion() else {
+                        throw RuntimeError("Unable to resume local profile promotion")
+                    }
+                    xauXatClearDuressSettings()
+                    let currentPIN = scope == .primary ? kcAppPassword.get() : kcDecoyPassword.get()
+                    guard password == currentPIN else { throw RuntimeError("Passcode changed during promotion") }
+                }
+
                 if m.chatInitialized && xauXatStorageScope() == scope {
                     completed(.success)
                     return
@@ -250,6 +263,89 @@ struct LocalAuthView: View {
         ChatModel.shared.secondaryIM?.chatState.clear()
         m.updateChats([])
         m.users = []
+    }
+
+    private func promoteDecoyAndRestart(_ appPIN: String, completed: @escaping (LAResult) -> Void) {
+        Task { @MainActor in
+            do {
+                while m.ctrlInitInProgress {
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                }
+                if m.chatRunning == true { try await stopChatAsync() }
+                // Keep extensions suspended throughout both local-store changes.
+                try await xauXatPrepareLocalStorageChange()
+                closeLocalProfile()
+                m.chatDbChanged = true
+
+                if xauXatStoragePromotionPending() {
+                    guard xauXatResumeStoragePromotion() else {
+                        throw RuntimeError("Unable to resume local profile promotion")
+                    }
+                } else {
+                    // Older installations may have a duress PIN without a
+                    // configured decoy. Prepare that profile before erasing any
+                    // primary data; the former main PIN opens the empty decoy.
+                    let decoyPIN = kcDecoyPassword.get() ?? authRequest.password
+                    try initializeLocalProfile(.decoy, createIfEmpty: true)
+                    closeLocalProfile()
+                    guard xauXatPromoteDecoyStorage(appPIN: appPIN, decoyPIN: decoyPIN) else {
+                        throw RuntimeError("Unable to promote local profile")
+                    }
+                }
+
+                xauXatClearDuressSettings()
+                XauXatPINAttemptStore.shared.reset()
+                await NtfManager.shared.removeAllNotifications()
+
+                // Create the replacement's ordinary profile now, without
+                // starting its network session or copying the erased identity.
+                try initializeLocalProfile(.decoy, createIfEmpty: true)
+                closeLocalProfile()
+                try initializeLocalProfile(.primary, createIfEmpty: false)
+                try startChat()
+                m.chatDbChanged = false
+                AppChatState.shared.set(.active)
+                completed(.success)
+            } catch {
+                // Never leave a failed replacement-store initialization visible
+                // as an authenticated primary profile.
+                if kcSelfDestructPassword.get() == nil { xauXatClearDuressSettings() }
+                closeLocalProfile()
+                setXauXatStorageScope(.primary)
+                m.chatDbChanged = false
+                completed(.failed(authError: NSLocalizedString("Unable to open local profile. Please try again.", comment: "Local profile promotion failed")))
+            }
+        }
+    }
+
+    @MainActor
+    private func closeLocalProfile() {
+        if isChatStoreOpen() { chatCloseStore() }
+        resetChatCtrl()
+        clearVisibleChatData()
+        m.chatInitialized = false
+        m.chatRunning = false
+    }
+
+    @MainActor
+    private func initializeLocalProfile(_ scope: XauXatStorageScope, createIfEmpty: Bool) throws {
+        setXauXatStorageScope(scope)
+        try prepareXauXatStorageScope()
+        try initializeChat(start: false)
+        guard m.chatInitialized, m.chatDbStatus == .ok else {
+            throw RuntimeError("Unable to initialize local profile")
+        }
+        if m.currentUser == nil {
+            guard createIfEmpty else { throw RuntimeError("Promoted profile is unavailable") }
+            let name = UserDefaults.standard.string(forKey: DEFAULT_LA_DECOY_DISPLAY_NAME)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            m.currentUser = try apiCreateActiveUser(
+                Profile(displayName: name?.isEmpty == false ? name! : "Alex", fullName: ""),
+                pastTimestamp: true
+            )
+        }
+        onboardingStageDefault.set(.onboardingComplete)
+        m.onboardingStage = .onboardingComplete
     }
 
     private func deleteStorageAndRestart(
@@ -321,7 +417,13 @@ struct LocalAuthView: View {
                 try initializeChat(start: true)
                 m.chatDbChanged = false
                 AppChatState.shared.set(.active)
-                if m.currentUser != nil || !m.chatInitialized { return }
+                guard m.chatInitialized else {
+                    throw RuntimeError("Unable to initialize replacement profile")
+                }
+                if m.currentUser != nil {
+                    completed(.success)
+                    return
+                }
                 var profile: Profile? = nil
                 if let displayName = displayName, displayName != "" {
                     profile = Profile(displayName: displayName, fullName: "")
