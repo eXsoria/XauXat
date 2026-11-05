@@ -2519,9 +2519,14 @@ struct ComposeView: View {
         }
     }
 
-    private func cancelVoiceMessageTouch() {
-        // A system-cancelled touch never keeps an unconfirmed microphone open.
-        if voiceInteraction.active { finishVoiceMessageRecording() }
+    private func cancelVoiceMessageTouch(_ touch: VoiceRecordingTouchTiming) {
+        // Queued OS cancellation must not keep capture from after an
+        // unconfirmed hold ended. Locked recordings retain their preview.
+        if voiceInteraction.phase == .holding {
+            releaseVoiceMessageRecording(touch)
+        } else if voiceInteraction.active {
+            finishVoiceMessageRecording()
+        }
     }
 
     private func discardVoiceMessageRecording() {

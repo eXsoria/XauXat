@@ -93,7 +93,7 @@ struct VoiceRecordingButton: View {
     let begin: (Bool) -> Void
     let move: (Double, Double) -> Void
     let release: (VoiceRecordingTouchTiming) -> Void
-    let cancelTouch: () -> Void
+    let cancelTouch: (VoiceRecordingTouchTiming) -> Void
     let pause: () -> Void
 
     var body: some View {
@@ -145,7 +145,7 @@ private struct VoiceRecordingTouchSurface: UIViewRepresentable {
     let touchDown: () -> Void
     let move: (Double, Double) -> Void
     let release: (VoiceRecordingTouchTiming) -> Void
-    let cancel: () -> Void
+    let cancel: (VoiceRecordingTouchTiming) -> Void
     let activate: () -> Void
 
     func makeUIView(context: Context) -> TouchView { TouchView() }
@@ -189,9 +189,13 @@ private struct VoiceRecordingTouchSurface: UIViewRepresentable {
         }
 
         override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+            let timing = VoiceRecordingTouchTiming(
+                beganAt: beganAt ?? .nan,
+                endedAt: touches.first?.timestamp ?? .nan
+            )
             origin = nil
             beganAt = nil
-            actions?.cancel()
+            actions?.cancel(timing)
         }
 
         override func accessibilityActivate() -> Bool {

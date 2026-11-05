@@ -35,7 +35,7 @@ struct SendMessageView: View {
     var startVoiceMessageRecording: ((Bool) -> Void)? = nil
     var moveVoiceMessageRecording: ((Double, Double) -> Void)? = nil
     var releaseVoiceMessageRecording: ((VoiceRecordingTouchTiming) -> Void)? = nil
-    var cancelVoiceMessageTouch: (() -> Void)? = nil
+    var cancelVoiceMessageTouch: ((VoiceRecordingTouchTiming) -> Void)? = nil
     var discardVoiceMessageRecording: (() -> Void)? = nil
     var finishVoiceMessageRecording: (() -> Void)? = nil
     var allowVoiceMessagesToContact: (() -> Void)? = nil
@@ -147,7 +147,7 @@ struct SendMessageView: View {
                         begin: { startVoiceMessageRecording?($0) },
                         move: { moveVoiceMessageRecording?($0, $1) },
                         release: { releaseVoiceMessageRecording?($0) },
-                        cancelTouch: { cancelVoiceMessageTouch?() },
+                        cancelTouch: { cancelVoiceMessageTouch?($0) },
                         pause: { finishVoiceMessageRecording?() }
                     )
                     .padding(.trailing, 2)
