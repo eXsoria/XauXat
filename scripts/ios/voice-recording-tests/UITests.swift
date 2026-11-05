@@ -38,6 +38,18 @@ final class VoiceRecordingTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Playable 0.00"].exists, "A paused recording must already be playable")
         XCTAssertTrue(app.staticTexts["Sent 0"].exists, "Releasing must never send")
     }
+    private func lockAndCaptureAudio(timeout: TimeInterval = 30) {
+        let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        origin.press(forDuration: 0.8, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
+        let captured = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let phase = self.app.staticTexts["voice.phase"]
+            let duration = self.app.staticTexts["voice.duration"]
+            return phase.exists && phase.label == "Phase locked" && duration.exists
+                && (Double(duration.label.split(separator: " ").last ?? "0") ?? 0) >= 1.5
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [captured], timeout: timeout), .completed,
+                       "An explicit hands-free recording must capture real media before pausing")
+    }
     func testStartingMicrophoneClosesPlayingSoundboard() {
         openRecorder()
         app.buttons["voice.expressions"].tap()
@@ -46,15 +58,7 @@ final class VoiceRecordingTests: XCTestCase {
         app.buttons["Preview Ta-da"].tap()
         // The tray must close while capture continues. Measure captured media
         // after locking, rather than assuming audio preparation fits in a hold.
-        let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        origin.press(forDuration: 0.8, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
-        let captured = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            let duration = self.app.staticTexts["voice.duration"]
-            return self.app.staticTexts["voice.phase"].label == "Phase locked"
-                && duration.exists && (Double(duration.label.split(separator: " ").last ?? "0") ?? 0) >= 1.5
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [captured], timeout: 30), .completed,
-                       "Recording must continue after closing the soundboard")
+        lockAndCaptureAudio()
         XCTAssertFalse(app.buttons["Preview Ta-da"].exists, "Recording must close the soundboard")
         mic.tap()
         preview()
@@ -64,12 +68,26 @@ final class VoiceRecordingTests: XCTestCase {
 
     func testHoldReleasePreviewResumeAndSend() {
         openRecorder()
+        // Exercise a cold recording through the real UI, then discard it. The
+        // measured hold below checks gestures after capture is available; it
+        // does not impose a five-second deadline on cold simulator preparation.
+        lockAndCaptureAudio(timeout: 60)
+        mic.tap()
+        preview()
+        let coldFileDuration = Double(app.staticTexts["voice.playable"].label.split(separator: " ").last!)!
+        XCTAssertGreaterThan(coldFileDuration, 1, "Cold preparation must produce playable AAC")
+        app.buttons["voice.delete"].tap()
+        XCTAssertTrue(app.staticTexts["Phase idle"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Sent 0"].exists)
+        XCTAssertFalse(app.buttons["voice.send"].exists)
+        XCTAssertTrue(app.staticTexts["Playable 0.00"].exists,
+                      "Discarded preparation audio cannot supply the measured clip's duration")
         let record = mic
         let hittable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             record.exists && record.isHittable
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 10), .completed)
-        // Allow cold simulator audio preparation while retaining hold/release.
+        // Retain the actual physical hold/release and every preview/append check.
         record.press(forDuration: 5)
         preview()
         snapshot("released-recording-preview")
@@ -168,7 +186,10 @@ final class VoiceRecordingTests: XCTestCase {
         allow.tap()
         XCTAssertTrue(app.staticTexts["Phase idle"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["voice.send"].exists)
-        mic.press(forDuration: 2)
+        // A new explicit hands-free intent proves recovery without assuming
+        // that two seconds includes permission/session preparation and capture.
+        lockAndCaptureAudio(timeout: 60)
+        mic.tap()
         preview()
     }
 }
