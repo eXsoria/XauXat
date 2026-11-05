@@ -34,8 +34,8 @@ struct SendMessageView: View {
     var voiceRecordingLevels: [CGFloat] = []
     var startVoiceMessageRecording: ((Bool) -> Void)? = nil
     var moveVoiceMessageRecording: ((Double, Double) -> Void)? = nil
-    var releaseVoiceMessageRecording: (() -> Void)? = nil
-    var cancelVoiceMessageTouch: (() -> Void)? = nil
+    var releaseVoiceMessageRecording: ((VoiceRecordingTouchTiming) -> Void)? = nil
+    var cancelVoiceMessageTouch: ((VoiceRecordingTouchTiming) -> Void)? = nil
     var discardVoiceMessageRecording: (() -> Void)? = nil
     var finishVoiceMessageRecording: (() -> Void)? = nil
     var allowVoiceMessagesToContact: (() -> Void)? = nil
@@ -146,8 +146,8 @@ struct SendMessageView: View {
                         disabled: composeState.inProgress || !isEnabled,
                         begin: { startVoiceMessageRecording?($0) },
                         move: { moveVoiceMessageRecording?($0, $1) },
-                        release: { releaseVoiceMessageRecording?() },
-                        cancelTouch: { cancelVoiceMessageTouch?() },
+                        release: { releaseVoiceMessageRecording?($0) },
+                        cancelTouch: { cancelVoiceMessageTouch?($0) },
                         pause: { finishVoiceMessageRecording?() }
                     )
                     .padding(.trailing, 2)

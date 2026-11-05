@@ -2511,17 +2511,22 @@ struct ComposeView: View {
         }
     }
 
-    private func releaseVoiceMessageRecording() {
-        switch voiceInteraction.release() {
+    private func releaseVoiceMessageRecording(_ touch: VoiceRecordingTouchTiming) {
+        switch voiceInteraction.release(touch: touch) {
         case .finish: finishVoiceMessageRecording()
         case .cancel: discardVoiceMessageRecording()
         default: break
         }
     }
 
-    private func cancelVoiceMessageTouch() {
-        // A system-cancelled touch never keeps an unconfirmed microphone open.
-        if voiceInteraction.active { finishVoiceMessageRecording() }
+    private func cancelVoiceMessageTouch(_ touch: VoiceRecordingTouchTiming) {
+        // Queued OS cancellation must not keep capture from after an
+        // unconfirmed hold ended. Locked recordings retain their preview.
+        if voiceInteraction.phase == .holding {
+            releaseVoiceMessageRecording(touch)
+        } else if voiceInteraction.active {
+            finishVoiceMessageRecording()
+        }
     }
 
     private func discardVoiceMessageRecording() {
@@ -2613,7 +2618,7 @@ struct ComposeView: View {
                 try await finalization.value
                 guard audioRecorder === recorder, recorder.owner == voiceRecordingOwner, composeState.voiceMessageRecordingFileName == fileName, !recorder.cancelled else { return }
                 finishingVoiceFileName = nil
-                if recorder.duration < 0.3 {
+                if recorder.duration < VoiceRecordingInteraction.minimumRecordingDuration {
                     discardVoiceMessageRecording()
                     return
                 }

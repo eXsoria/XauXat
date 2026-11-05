@@ -92,8 +92,8 @@ struct VoiceRecordingButton: View {
     var disabled = false
     let begin: (Bool) -> Void
     let move: (Double, Double) -> Void
-    let release: () -> Void
-    let cancelTouch: () -> Void
+    let release: (VoiceRecordingTouchTiming) -> Void
+    let cancelTouch: (VoiceRecordingTouchTiming) -> Void
     let pause: () -> Void
 
     var body: some View {
@@ -144,8 +144,8 @@ private struct VoiceRecordingTouchSurface: UIViewRepresentable {
     let hint: String
     let touchDown: () -> Void
     let move: (Double, Double) -> Void
-    let release: () -> Void
-    let cancel: () -> Void
+    let release: (VoiceRecordingTouchTiming) -> Void
+    let cancel: (VoiceRecordingTouchTiming) -> Void
     let activate: () -> Void
 
     func makeUIView(context: Context) -> TouchView { TouchView() }
@@ -162,10 +162,12 @@ private struct VoiceRecordingTouchSurface: UIViewRepresentable {
     final class TouchView: UIView {
         var actions: VoiceRecordingTouchSurface?
         private var origin: CGPoint?
+        private var beganAt: TimeInterval?
 
         override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
             guard actions?.enabled == true, origin == nil, let touch = touches.first else { return }
             origin = touch.location(in: window)
+            beganAt = touch.timestamp
             actions?.touchDown()
         }
 
@@ -177,13 +179,23 @@ private struct VoiceRecordingTouchSurface: UIViewRepresentable {
 
         override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
             guard origin != nil else { return }
+            let timing = VoiceRecordingTouchTiming(
+                beganAt: beganAt ?? .nan,
+                endedAt: touches.first?.timestamp ?? .nan
+            )
             origin = nil
-            actions?.release()
+            beganAt = nil
+            actions?.release(timing)
         }
 
         override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+            let timing = VoiceRecordingTouchTiming(
+                beganAt: beganAt ?? .nan,
+                endedAt: touches.first?.timestamp ?? .nan
+            )
             origin = nil
-            actions?.cancel()
+            beganAt = nil
+            actions?.cancel(timing)
         }
 
         override func accessibilityActivate() -> Bool {

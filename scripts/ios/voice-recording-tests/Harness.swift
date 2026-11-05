@@ -143,7 +143,12 @@ struct HarnessView: View {
                     .frame(height: 320)
             }
             if composeState.voiceMessageRecordingState == .finished, let name = composeState.voiceMessageRecordingFileName {
-                ComposeVoiceView(recordingFileName: name, recordingTime: $voiceMessageRecordingTime, recordingState: $composeState.voiceMessageRecordingState, maskingState: $composeState.voiceMaskingState, recordingLevels: voiceRecordingLevels, resumeRecording: audioRecorder?.canResume == true ? resumeVoiceMessageRecording : nil, applyVoiceMask: { _, _ in }, cancelVoiceMessage: { _ in discardVoiceMessageRecording() }, cancelEnabled: true, stopPlayback: $stopPlayback)
+                ComposeVoiceView(recordingFileName: name, recordingTime: $voiceMessageRecordingTime, recordingState: $composeState.voiceMessageRecordingState, maskingState: $composeState.voiceMaskingState, recordingLevels: voiceRecordingLevels, resumeRecording: audioRecorder?.canResume == true ? resumeVoiceMessageRecording : nil, applyVoiceMask: { _, _ in }, cancelVoiceMessage: { _ in
+                    // A deleted preview must not leave stale playable-duration
+                    // telemetry for the next clip. Sending keeps its own proof.
+                    validDuration = 0
+                    discardVoiceMessageRecording()
+                }, cancelEnabled: true, stopPlayback: $stopPlayback)
             }
             SendMessageView(
                 composeState: $composeState,
