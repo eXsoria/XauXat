@@ -30,6 +30,7 @@ struct SimpleXApp: App {
 //            hs_init(0, nil)
         }
         UserDefaults.standard.register(defaults: appDefaults)
+        migrateXauXatAppLockDelay()
         setGroupDefaults()
         registerGroupDefaults()
         // The real store is the neutral launch default. When a decoy PIN is

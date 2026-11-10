@@ -439,7 +439,7 @@ struct SimplexLockView: View {
     @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     @AppStorage(DEFAULT_LA_NOTICE_SHOWN) private var prefLANoticeShown = false
     @State private var laMode: LAMode = privacyLocalAuthModeDefault.get()
-    @AppStorage(DEFAULT_LA_LOCK_DELAY) private var laLockDelay = 30
+    @AppStorage(DEFAULT_LA_LOCK_DELAY) private var laLockDelay = 0
     @State private var performLA: Bool = UserDefaults.standard.bool(forKey: DEFAULT_PERFORM_LA)
     @State private var selfDestruct: Bool = UserDefaults.standard.bool(forKey: DEFAULT_LA_SELF_DESTRUCT)
     @State private var currentSelfDestruct: Bool = UserDefaults.standard.bool(forKey: DEFAULT_LA_SELF_DESTRUCT)
@@ -489,7 +489,7 @@ struct SimplexLockView: View {
         var id: Self { self }
     }
 
-    let laDelays: [Int] = [10, 30, 60, 180, 600, 0]
+    let laDelays: [Int] = [0, 30, 60, 180, 600]
 
     func laDelayText(_ t: Int) -> LocalizedStringKey {
         let m = t / 60
@@ -736,7 +736,7 @@ struct SimplexLockView: View {
             case .enableAuth:
                 SetAppPasscodeView {
                     m.contentViewAccessAuthenticated = true
-                    laLockDelay = 30
+                    laLockDelay = 0
                     prefPerformLA = true
                     showChangePassword = true
                     showLAAlert(.laPasscodeSetAlert)
@@ -745,7 +745,7 @@ struct SimplexLockView: View {
                 }
             case .toggleMode:
                 SetAppPasscodeView {
-                    laLockDelay = 30
+                    laLockDelay = 0
                     updateLAMode()
                     showChangePassword = true
                     showLAAlert(.laPasscodeSetAlert)
@@ -1020,7 +1020,7 @@ struct SimplexLockView: View {
         _ = kcAppPassword.remove()
         XauXatPINAttemptStore.shared.reset()
         destroyAfterFailedAttempts = false
-        laLockDelay = 30
+        laLockDelay = 0
         showChangePassword = false
         resetSelfDestruct()
     }
