@@ -226,6 +226,11 @@ class CustomUITextField: UITextView, UITextViewDelegate {
         })
     }
 
+    func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        // Reject keys without resigning first responder or hiding the keyboard.
+        parent?.disableEditing != true
+    }
+
     func textViewDidChange(_ textView: UITextView) {
         placeholderLabel.isHidden = !text.isEmpty
         if textView.markedTextRange == nil {
