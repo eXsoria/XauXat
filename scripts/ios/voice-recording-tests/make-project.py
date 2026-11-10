@@ -26,6 +26,11 @@ sources = [(compose / name).read_text(encoding="utf-8").replace("import SimpleXC
 chat_types = (root / "apps/ios/SimpleXChat/ChatTypes.swift").read_text(encoding="utf-8")
 sources += [declaration(chat_types, "public func durationText(")]
 sources += [(compose / name).read_text(encoding="utf-8") for name in ("XauXatExpressionLibrary.swift", "XauXatExpressionsView.swift")]
+native_editor = (compose / "NativeTextEditor.swift").read_text(encoding="utf-8")
+sources += [native_editor[:native_editor.index("struct NativeTextEditor_Previews")]
+            .replace("import SimpleXChat", "").replace("import SwiftyGif", "")]
+sources += [(root / "apps/ios/Shared/Views/Chat" / name).read_text(encoding="utf-8")
+            for name in ("EndlessScrollView.swift", "ScrollViewCells.swift")]
 audio = (root / "apps/ios/Shared/Model/AudioRecPlay.swift").read_text(encoding="utf-8")
 sources += ["import AVFoundation\nimport OSLog\n", declaration(audio, "@MainActor\nclass AudioRecorder:"), declaration(audio, "class AudioPlayer:")]
 preview = (compose / "ComposeVoiceView.swift").read_text(encoding="utf-8")

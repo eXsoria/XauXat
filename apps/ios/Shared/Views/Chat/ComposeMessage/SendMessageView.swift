@@ -61,7 +61,27 @@ struct SendMessageView: View {
         let composeShape = RoundedRectangle(cornerSize: CGSize(width: 20, height: 20))
         let trailingContentInset: CGFloat = composeState.progressByTimeout ? progressTrailingContentInset : 32
         let recordingActionInset: CGFloat = sendLiveMessage != nil && updateLiveMessage != nil && composeState.contextItem == .noContextItem ? 96 : 52
+        let showingVoiceContent = voiceInteraction.active || composeState.voiceMessageRecordingFileName != nil
         ZStack(alignment: .leading) {
+            // Keep the same UITextView and first responder throughout recording.
+            // Removing it dismisses the keyboard and moves the conversation.
+            NativeTextEditor(
+                text: $composeState.message,
+                disableEditing: Binding(get: { composeState.inProgress || showingVoiceContent }, set: { _ in }),
+                height: $teHeight,
+                focused: $keyboardVisible,
+                lastUnfocusedDate: $keyboardHiddenDate,
+                placeholder: Binding(get: { placeholder ?? composeState.placeholder }, set: { _ in }),
+                selectedRange: $selectedRange,
+                onImagesAdded: onMediaAdded
+            )
+            .padding(.trailing, trailingContentInset)
+            .allowsTightening(false)
+            .fixedSize(horizontal: false, vertical: true)
+            .opacity(showingVoiceContent ? 0 : 1)
+            .allowsHitTesting(!showingVoiceContent)
+            .accessibilityHidden(showingVoiceContent)
+
             if voiceInteraction.active {
                 VoiceRecordingStatus(interaction: voiceInteraction, time: voiceRecordingTime, levels: voiceRecordingLevels, color: sendButtonColor, deleteRecording: discardVoiceMessageRecording)
                     .padding(.leading, 12)
@@ -78,20 +98,6 @@ struct SendMessageView: View {
                     .padding(.vertical, 8)
                     .padding(.trailing, trailingContentInset)
                     .frame(maxWidth: .infinity)
-            } else {
-                NativeTextEditor(
-                    text: $composeState.message,
-                    disableEditing: $composeState.inProgress,
-                    height: $teHeight,
-                    focused: $keyboardVisible,
-                    lastUnfocusedDate: $keyboardHiddenDate,
-                    placeholder: Binding(get: { placeholder ?? composeState.placeholder }, set: { _ in }),
-                    selectedRange: $selectedRange,
-                    onImagesAdded: onMediaAdded
-                )
-                .padding(.trailing, trailingContentInset)
-                .allowsTightening(false)
-                .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(minHeight: 44)

@@ -117,8 +117,10 @@ struct HarnessView: View {
     @Environment(\.scenePhase) var scenePhase
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("Voice messages").font(.system(size: 20, weight: .semibold))
+        VStack(spacing: CommandLine.arguments.contains("chat-layout") ? 0 : 16) {
+            if !CommandLine.arguments.contains("chat-layout") {
+                Text("Voice messages").font(.system(size: 20, weight: .semibold))
+            }
             VStack(spacing: 4) {
                 Text("Sent \(sent)")
                 Text("Phase \(String(describing: voiceInteraction.phase))").accessibilityIdentifier("voice.phase")
@@ -129,14 +131,20 @@ struct HarnessView: View {
                     .accessibilityIdentifier("voice.error")
             }
             .font(.system(size: 12))
-            Spacer()
-            Button("Open expressions") {
-                let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-                expressionLibrary = try? XauXatExpressionLibrary(directory: folder, key: Data(repeating: 42, count: 32))
-                showExpressions = true
+            if CommandLine.arguments.contains("chat-layout") {
+                RecordingTestConversation()
+            } else {
+                Spacer()
             }
-            .accessibilityIdentifier("voice.expressions")
-            .disabled(voiceInteraction.active || !composeState.noPreview)
+            if !CommandLine.arguments.contains("chat-layout") {
+                Button("Open expressions") {
+                    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                    expressionLibrary = try? XauXatExpressionLibrary(directory: folder, key: Data(repeating: 42, count: 32))
+                    showExpressions = true
+                }
+                .accessibilityIdentifier("voice.expressions")
+                .disabled(voiceInteraction.active || !composeState.noPreview)
+            }
             if showExpressions, let library = expressionLibrary {
                 XauXatExpressionsView(library: library, allowStickers: true, allowSounds: true,
                                       allowPlayback: !voiceInteraction.active, close: closeExpressions) { _, _ in }
@@ -186,6 +194,30 @@ struct HarnessView: View {
         }
         .onChange(of: scenePhase) { phase in
             if phase == .background { finishVoiceMessageRecording() }
+        }
+    }
+}
+
+private struct RecordingTestMessage: Identifiable, Hashable {
+    let id: Int
+}
+
+// Use the same bottom-anchored UIKit message list as the app so removing the
+// keyboard exposes the real conversation movement, rather than a fixed label.
+private struct RecordingTestConversation: View {
+    @State private var scrollView = EndlessScrollView<RecordingTestMessage>(frame: .zero)
+
+    var body: some View {
+        ScrollRepresentable(scrollView: scrollView) { _, message in
+            Text("Message \(message.id)")
+                .font(.system(size: 16))
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .trailing)
+                .padding(.horizontal, 16)
+                .accessibilityIdentifier("chat.message.\(message.id)")
+        }
+        .onAppear {
+            scrollView.updateItems((0..<80).map { RecordingTestMessage(id: $0) })
+            scrollView.scrollToBottom()
         }
     }
 }

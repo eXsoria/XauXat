@@ -50,6 +50,51 @@ final class VoiceRecordingTests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [captured], timeout: timeout), .completed,
                        "An explicit hands-free recording must capture real media before pausing")
     }
+    private func assertRecordingKeepsConversationInPlace(withKeyboard: Bool) {
+        app.launchArguments.append("chat-layout")
+        openRecorder()
+        let editor = app.textViews.firstMatch
+        let keyboard = app.keyboards.firstMatch
+        if withKeyboard {
+            XCTAssertTrue(editor.waitForExistence(timeout: 5))
+            editor.tap()
+            XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        } else {
+            XCTAssertFalse(keyboard.exists)
+        }
+        let message = app.staticTexts["chat.message.0"]
+        XCTAssertTrue(message.waitForExistence(timeout: 5))
+        let messageFrame = message.frame
+        let microphoneFrame = mic.frame
+        let keyboardFrame = withKeyboard ? keyboard.frame : .zero
+        let origin = mic.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        origin.press(forDuration: 0.8, thenDragTo: origin.withOffset(CGVector(dx: 0, dy: -120)))
+        XCTAssertTrue(app.staticTexts["Phase locked"].waitForExistence(timeout: 5))
+        XCTAssertEqual(keyboard.exists, withKeyboard, "Starting recording must preserve the keyboard state")
+        if withKeyboard {
+            XCTAssertEqual(keyboard.frame.minY, keyboardFrame.minY, accuracy: 1)
+            app.typeText("ignored during recording")
+            XCTAssertTrue(app.staticTexts["Phase locked"].exists, "Hidden text input must not replace the recording controls")
+        }
+        XCTAssertEqual(mic.frame.minY, microphoneFrame.minY, accuracy: 1, "The microphone must stay under the original touch")
+        XCTAssertEqual(message.frame.minY, messageFrame.minY, accuracy: 1, "Recording must not move the conversation")
+        XCTAssertTrue(app.staticTexts["Sent 0"].exists)
+        snapshot(withKeyboard ? "recording-keyboard-and-chat-stable" : "recording-chat-stable")
+        app.buttons["voice.cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Phase idle"].waitForExistence(timeout: 5))
+        XCTAssertEqual(keyboard.exists, withKeyboard)
+        XCTAssertEqual(message.frame.minY, messageFrame.minY, accuracy: 1)
+        if withKeyboard {
+            app.typeText("still focused")
+            XCTAssertEqual(editor.value as? String, "still focused", "Cancelling restores the same focused editor")
+        }
+    }
+    func testRecordingKeepsKeyboardAndConversationInPlace() {
+        assertRecordingKeepsConversationInPlace(withKeyboard: true)
+    }
+    func testRecordingKeepsConversationInPlaceWithoutKeyboard() {
+        assertRecordingKeepsConversationInPlace(withKeyboard: false)
+    }
     func testStartingMicrophoneClosesPlayingSoundboard() {
         openRecorder()
         app.buttons["voice.expressions"].tap()

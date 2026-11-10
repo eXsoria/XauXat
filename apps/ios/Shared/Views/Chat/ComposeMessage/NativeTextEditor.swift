@@ -30,7 +30,7 @@ struct NativeTextEditor: UIViewRepresentable {
         field.textAlignment = alignment(text)
         field.autocapitalizationType = .sentences
         field.setOnTextChangedListener { newText, images in
-            if !disableEditing {
+            if !(field.parent?.disableEditing ?? disableEditing) {
                 text = newText
                 field.textAlignment = alignment(text)
                 field.updateFont()
@@ -58,6 +58,7 @@ struct NativeTextEditor: UIViewRepresentable {
     }
     
     func updateUIView(_ field: CustomUITextField, context: Context) {
+        field.parent = self
         if field.markedTextRange == nil && field.text != text {
             field.text = text
             field.textAlignment = alignment(text)

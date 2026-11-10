@@ -2,24 +2,20 @@ import SwiftUI
 
 // Non-audio services used by the production composer. The actual body, action
 // branching, voice touch surface and recording callbacks are compiled unchanged.
-struct UploadContent {}
+enum UploadContent {
+    case simpleImage(image: UIImage)
+    case animatedImage(image: UIImage)
+    static func loadFromURL(url: URL) -> Self? { nil }
+}
 struct FixtureTimePreference { func get() -> Int? { nil } }
 let customDisappearingMessageTimeDefault = FixtureTimePreference()
 
-struct NativeTextEditor: View {
-    static let minHeight: CGFloat = 44
-    @Binding var text: String
-    @Binding var disableEditing: Bool
-    @Binding var height: CGFloat
-    @Binding var focused: Bool
-    @Binding var lastUnfocusedDate: Date
-    @Binding var placeholder: String
-    @Binding var selectedRange: NSRange
-    let onImagesAdded: ([UploadContent]) -> Void
-    var body: some View {
-        Text(placeholder)
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-    }
+// Media/emoji services are outside these recording tests. The UITextView,
+// its focus callbacks, intrinsic sizing and keyboard lifecycle are production.
+func isRightToLeft(_ text: String) -> Bool { false }
+func isShortEmoji(_ text: String) -> Bool { false }
+let largeEmojiUIFont = UIFont.systemFont(ofSize: 48)
+let mediumEmojiUIFont = UIFont.systemFont(ofSize: 36)
+extension UIImage {
+    convenience init(gifData: Data) throws { throw CocoaError(.fileReadUnsupportedScheme) }
 }
