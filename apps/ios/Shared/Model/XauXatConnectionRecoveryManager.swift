@@ -269,6 +269,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 }
             }
             var scope = requested
+            var relayBudgets: [Relay: TimeInterval] = [:]
             if dependencies.sessionState() == .suspended {
                 // A suspended core cannot provide a reliable relay summary.
                 // Verify Tor first, then resume the existing profile/session.
@@ -315,6 +316,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                     record(reason, "no_eligible_failed_relays")
                     return
                 }
+                relayBudgets = failed.filter { targets.contains($0.key) }
                 scope = .relays(targets)
             }
             if case let .relays(relays) = scope {
@@ -410,6 +412,13 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 if reason == .networkChange {
                     requestSubscriptionScan(reconnectStartedAt: lastGlobal?.time)
                 }
+            } else {
+                // Check the new attempt at its deadline even during a long polling backoff.
+                for (relay, budget) in relayBudgets {
+                    guard let started = relayAttempts[relay] else { continue }
+                    let deadline = started + max(cooldown, budget)
+                    nextRelayCheck = min(nextRelayCheck ?? deadline, deadline)
+                }
             }
             state = .monitoring
             record(reason, "command_accepted")
@@ -447,7 +456,11 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     private func requestSubscriptionScan(reconnectStartedAt: TimeInterval? = nil) {
         let context = dependencies.context()
         guard let userId = context.userId, dependencies.sessionState().canRecover else { return }
-        let startedAt = reconnectStartedAt ?? (needsSubscriptionScan ? subscriptionScan?.reconnectStartedAt : nil)
+        let recentGlobal = lastGlobal.flatMap { global in
+            global.epoch == epoch && global.context == context && dependencies.now() - global.time < cooldown
+                ? global.time : nil
+        }
+        let startedAt = reconnectStartedAt ?? (needsSubscriptionScan ? subscriptionScan?.reconnectStartedAt : nil) ?? recentGlobal
         subscriptionScan = (UUID(), epoch, userId, context.alternateStore, startedAt)
         record(.pendingWork, "subscription_scan_requested")
         updateLoop()

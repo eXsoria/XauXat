@@ -14,7 +14,12 @@ rows = source[source.index("private struct XauXatChatDestination:"):source.index
 # File-level access only; leave the implementation and nested private members intact.
 rows = rows.replace("private struct ", "struct ")
 palette = palette.replace("private struct ", "struct ")
-(out / "Rows.swift").write_text("import SwiftUI\n" + palette + rows, encoding="utf-8")
+theme = root / "apps/ios/SimpleXChat/Theme"
+theme_types = (theme / "ThemeTypes.swift").read_text(encoding="utf-8")
+colors = (theme / "Color.swift").read_text(encoding="utf-8")
+background = next(line for line in theme_types.splitlines() if line.startswith("public let xauXatDarkBackground ="))
+argb = colors[colors.index("extension Color {\n    public init(_ argb:"):colors.index("    public init(_ r: Int")]
+(out / "Rows.swift").write_text("import SwiftUI\n" + argb + "}\n" + background + "\n" + palette + rows, encoding="utf-8")
 
 project = out / "HomeChatHarness.xcodeproj"
 project.mkdir(exist_ok=True)
