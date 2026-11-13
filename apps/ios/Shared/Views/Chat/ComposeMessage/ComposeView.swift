@@ -2846,7 +2846,7 @@ struct ComposeView: View {
                 voiceInteraction.finishFailed()
                 AlertManager.shared.showAlert(Alert(
                     title: Text("Unable to prepare voice message"),
-                    message: Text("Your audio has been kept. Try again to prepare it for playback and sending."),
+                    message: Text(error.localizedDescription),
                     primaryButton: .default(Text("Try again")) { finishVoiceMessageRecording() },
                     secondaryButton: .destructive(Text("Delete recording")) { discardVoiceMessageRecording() }
                 ))
