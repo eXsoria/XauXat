@@ -1,0 +1,42 @@
+--- a/src/Simplex/Messaging/Agent/Client.hs
++++ b/src/Simplex/Messaging/Agent/Client.hs
+@@ -687,14 +687,31 @@
+ getSMPProxyClient c@AgentClient {active, smpClients, smpProxiedRelays, workerSeq} nm proxySrv_ destSess@(userId, destSrv, qId) = do
+   unlessM (readTVarIO active) $ throwE INACTIVE
+   proxySrv <- maybe (getNextServer c userId proxySrvs [destSrv]) pure proxySrv_
+-  ts <- liftIO getCurrentTime
+-  (tSess, auth) <- atomically $ proxiedTransportSession proxySrv
+-  withGetSessVar workerSeq tSess smpClients ts (newProxyClient tSess auth ts) (waitForProxyClient tSess auth)
+-  where
+-    proxiedTransportSession :: SMPServerWithAuth -> STM (SMPTransportSession, Maybe SMP.BasicAuth)
+-    proxiedTransportSession proxySrv = do
+-      ProtoServerWithAuth srv auth <- TM.lookup destSess smpProxiedRelays >>= maybe (TM.insert destSess proxySrv smpProxiedRelays $> proxySrv) pure
+-      pure ((userId, srv, qId), auth)
++  selected@(ProtoServerWithAuth srv _) <- atomically $
++    TM.lookup destSess smpProxiedRelays >>= maybe (TM.insert destSess proxySrv smpProxiedRelays $> proxySrv) pure
++  connectProxy selected `catchAllErrors` \e -> do
++    cfg <- getNetworkConfig c
++    -- Only retry setup here. No message has been handed to the forwarding relay yet.
++    if isNothing proxySrv_ && isJust (socksProxy cfg) && socksMode cfg == SMAlways && temporaryOrHostError e
++      then do
++        servers <- getUserServers_ c userId proxySrvs
++        let usedHosts = S.union (serverHosts srv) (serverHosts destSrv)
++        case L.nonEmpty $ L.filter (isUnusedServer usedHosts) servers of
++          Nothing -> throwE e
++          Just alternatives -> do
++            next <- pickServer alternatives
++            retrySrv <- atomically $ do
++              current <- TM.lookup destSess smpProxiedRelays
++              case current of
++                Just alternative@(ProtoServerWithAuth currentSrv _) | currentSrv /= srv -> pure alternative
++                _ -> TM.insert destSess next smpProxiedRelays $> next
++            connectProxy retrySrv
++      else throwE e
++  where
++    connectProxy (ProtoServerWithAuth srv auth) = do
++      ts <- liftIO getCurrentTime
++      let tSess = (userId, srv, qId)
++      withGetSessVar workerSeq tSess smpClients ts (newProxyClient tSess auth ts) (waitForProxyClient tSess auth)
+     newProxyClient :: SMPTransportSession -> Maybe SMP.BasicAuth -> UTCTime -> SMPClientVar -> AM (SMPConnectedClient, Either AgentErrorType ProxiedRelay)
+     newProxyClient tSess auth ts v = do
+       prs <- liftIO TM.emptyIO
