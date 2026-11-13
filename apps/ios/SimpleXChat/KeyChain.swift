@@ -1297,6 +1297,15 @@ func randomDatabasePassword() -> String {
     }
 }
 
+#if DEBUG
+public func xauXatDirectCallTestDatabaseKey() -> String? {
+    let item = KeyChainItem(forKey: "xauxatDirectCallTestDatabaseKey")
+    if let key = item.get(), !key.isEmpty { return key }
+    let key = randomDatabasePassword()
+    return !key.isEmpty && item.set(key) ? key : nil
+}
+#endif
+
 private func getItemData(forKey key: String) -> Data? {
     var query = baseItemQuery(forKey: key)
     query[kSecMatchLimit] = kSecMatchLimitOne

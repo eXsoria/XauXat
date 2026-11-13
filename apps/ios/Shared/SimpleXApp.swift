@@ -51,8 +51,7 @@ struct SimpleXApp: App {
                 guard xauXatAppIsForeground(), chatModel.networkInfo.online else { throw CancellationError() }
                 _ = try await EmbeddedTorManager.shared.refreshConnection()
                 guard xauXatAppIsForeground() else { return }
-                initializeAfterTor()
-                if chatModel.chatInitialized { resumeChatAfterTor() }
+                resumeChatAfterTor()
             })
                 .environmentObject(chatModel)
                 .environmentObject(plusEntitlements)
@@ -76,13 +75,26 @@ struct SimpleXApp: App {
                         chatModel.onboardingStage = onboardingStageDefault.get()
                     }
                     initializeNewInstallation()
-                    startEmbeddedTor(showError: true) {
-                        initializeAfterTor()
-                    }
+                    startEmbeddedTor(showError: true) { resumeChatAfterTor() }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                     initializeNewInstallation()
+                    #if DEBUG
+                    prepareDirectCallTest()
+                    #endif
                 }
+                .onChange(of: chatModel.networkInfo.online) { online in
+                    guard online, xauXatAppIsForeground(), chatModel.chatRunning != true else { return }
+                    startEmbeddedTor { resumeChatAfterTor() }
+                }
+                #if DEBUG
+                .onChange(of: chatModel.onboardingStage) { _ in
+                    XauXatDirectCallTest.shared.start()
+                }
+                .onChange(of: chatModel.contentViewAccessAuthenticated) { authenticated in
+                    if authenticated { XauXatDirectCallTest.shared.start() }
+                }
+                #endif
 // Spec: spec/architecture.md#scenePhaseHandling
                 .onChange(of: scenePhase) { phase in
                     logger.debug("scenePhase was \(String(describing: scenePhase)), now \(String(describing: phase))")
@@ -110,7 +122,6 @@ struct SimpleXApp: App {
                         initializeNewInstallation()
                         startEmbeddedTor {
                             guard xauXatAppIsForeground() else { return }
-                            initializeAfterTor()
                             resumeChatAfterTor()
                         }
                     default:
@@ -145,6 +156,10 @@ struct SimpleXApp: App {
     }
 
     private func startEmbeddedTor(showError: Bool = false, _ completion: @escaping () -> Void) {
+        #if DEBUG
+        prepareDirectCallTest()
+        if XauXatDirectCallTest.shared.holdsTorForTest { return }
+        #endif
         EmbeddedTorManager.shared.startRetrying(whileAvailable: {
             xauXatAppIsForeground() && ChatModel.shared.networkInfo.online
         }) { result in
@@ -153,6 +168,9 @@ struct SimpleXApp: App {
                 completion()
             case let .failure(error):
                 XauXatConnectionRecoveryManager.shared.routeUnavailable()
+                #if DEBUG
+                if XauXatDirectCallTest.shared.canOpenLocalProfile { return }
+                #endif
                 if showError {
                     AlertManager.shared.showAlert(Alert(
                         title: Text("Private connection unavailable"),
@@ -167,6 +185,18 @@ struct SimpleXApp: App {
         }
     }
 
+    #if DEBUG
+    private func prepareDirectCallTest() {
+        guard XauXatDirectCallTest.shared.canOpenLocalProfile, xauXatAppIsForeground(),
+              AppChatState.shared.value != .stopped, chatModel.migrationState == nil else { return }
+        if !chatModel.chatInitialized, !chatModel.ctrlInitInProgress {
+            initChatAndMigrate(start: false)
+            XauXatCallTiming.mark("direct.local_profile_prepared")
+        }
+        XauXatDirectCallTest.shared.start()
+    }
+    #endif
+
     private func resumeChatAfterTor() {
         guard xauXatAppIsForeground() else { return }
         // With a decoy PIN configured, the unlock PIN must select the storage
@@ -176,6 +206,21 @@ struct SimpleXApp: App {
         }
         let appState = AppChatState.shared.value
         guard appState != .stopped else { return }
+        guard chatModel.chatInitialized else { initializeAfterTor(); return }
+        var startedMessaging = false
+        if chatModel.chatRunning != true, chatModel.currentUser != nil {
+            do {
+                guard isChatStoreOpen() || chatReopenStore() else { throw RuntimeError("Chat storage is unavailable") }
+                try startChat()
+                startedMessaging = true
+                if let id = chatModel.chatId, let chat = chatModel.getChat(id) {
+                    Task { await loadChat(chat: chat, im: ItemsModel.shared, clearItems: false) }
+                }
+            } catch {
+                logger.error("XauXat could not start messaging after verifying Tor")
+                return
+            }
+        }
 
         var configurationReconnected = false
         if hasChatCtrl(), chatModel.currentUser != nil {
@@ -206,7 +251,8 @@ struct SimpleXApp: App {
                 XauXatConnectionRecoveryManager.shared.routeUnavailable()
                 return
             }
-            if configurationReconnected { XauXatConnectionRecoveryManager.shared.configurationApplied() }
+            if configurationReconnected || startedMessaging { XauXatConnectionRecoveryManager.shared.configurationApplied() }
+            XauXatConnectionRecoveryManager.shared.subscriptionsNeedRecovery()
             XauXatConnectionRecoveryManager.shared.resume()
             if let ntfResponse = chatModel.notificationResponse {
                 chatModel.notificationResponse = nil
@@ -215,7 +261,7 @@ struct SimpleXApp: App {
             if appState.inactive {
                 Task {
                     do {
-                        if !configurationReconnected { try await reconnectAllServers(reason: .foreground) }
+                        if !configurationReconnected && !startedMessaging { try await reconnectAllServers(reason: .foreground) }
                         logger.notice("XauXat foreground recovery reconnected relay sessions")
                     } catch {
                         logger.error("XauXat foreground recovery failed: \(responseError(error), privacy: .public)")

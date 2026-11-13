@@ -30,6 +30,9 @@ enum XauXatVoiceMaskPreset: String, CaseIterable, Identifiable {
     case alloy
     case hollow
     case wisp
+    #if DEBUG
+    case stealth
+    #endif
 
     static let defaultPreferenceKey = "xauxat.voiceMask.defaultPreset"
 
@@ -41,6 +44,9 @@ enum XauXatVoiceMaskPreset: String, CaseIterable, Identifiable {
         case .alloy: return NSLocalizedString("Alloy", comment: "Plus voice masking preset name")
         case .hollow: return NSLocalizedString("Hollow", comment: "Plus voice masking preset name")
         case .wisp: return NSLocalizedString("Wisp", comment: "Plus voice masking preset name")
+        #if DEBUG
+        case .stealth: return NSLocalizedString("Stealth", comment: "LLVC voice masking preset name")
+        #endif
         }
     }
 
@@ -50,10 +56,18 @@ enum XauXatVoiceMaskPreset: String, CaseIterable, Identifiable {
         case .alloy: return NSLocalizedString("Bright and metallic", comment: "voice masking preset description")
         case .hollow: return NSLocalizedString("Deep and distant", comment: "voice masking preset description")
         case .wisp: return NSLocalizedString("Light and airy", comment: "voice masking preset description")
+        #if DEBUG
+        case .stealth: return NSLocalizedString("Neural voice transformation on this device", comment: "LLVC voice masking preset description")
+        #endif
         }
     }
 
-    var requiresPlus: Bool { self != .veil }
+    var requiresPlus: Bool {
+        #if DEBUG
+        if self == .stealth { return false }
+        #endif
+        return self != .veil
+    }
 
     var pitch: Float {
         switch self {
@@ -61,25 +75,38 @@ enum XauXatVoiceMaskPreset: String, CaseIterable, Identifiable {
         case .alloy: return 320
         case .hollow: return -700
         case .wisp: return 610
+        #if DEBUG
+        case .stealth: return 0
+        #endif
         }
     }
+}
+
+// Give the transformed speech 4 dB of gain while leaving headroom for ambience.
+func xauXatBoostMaskedVoice(_ sample: Float) -> Float {
+    let amplified = sample * 1.585
+    let magnitude = abs(amplified)
+    let knee: Float = 0.70
+    guard magnitude > knee else { return amplified }
+    let excess = magnitude - knee
+    let limited = knee + 0.20 * excess / (0.20 + excess)
+    return amplified < 0 ? -limited : limited
 }
 
 struct XauXatVoiceMask {
     private static let renderBufferSize: AVAudioFrameCount = 4096
 
-    static func apply(to recordingURL: URL, preset: XauXatVoiceMaskPreset) throws {
+    static func apply(to recordingURL: URL, preset: XauXatVoiceMaskPreset?, ambience: XauXatCallAmbience = .off, declaredDuration: TimeInterval = 0) throws {
         let maskedURL = recordingURL.deletingLastPathComponent()
             .appendingPathComponent(".\(UUID().uuidString)-masked.m4a")
         defer { try? FileManager.default.removeItem(at: maskedURL) }
-        try render(from: recordingURL, to: maskedURL, preset: preset)
+        try render(from: recordingURL, to: maskedURL, preset: preset, ambience: ambience)
 
-        _ = try FileManager.default.replaceItemAt(
-            recordingURL,
-            withItemAt: maskedURL,
-            backupItemName: nil,
-            options: []
-        )
+        guard AudioPlayer.hasPlayableVoiceMessage(at: maskedURL, declaredDuration: declaredDuration) else {
+            throw XauXatVoiceMaskError.renderingFailed
+        }
+        // Keep the existing draft if the validated output cannot be committed.
+        try Data(contentsOf: maskedURL).write(to: recordingURL, options: [.atomic, .completeFileProtection])
         _ = excludeFromSystemBackup(recordingURL)
     }
 
@@ -91,27 +118,11 @@ struct XauXatVoiceMask {
         return try Data(contentsOf: previewURL, options: .mappedIfSafe)
     }
 
-    private static func render(from recordingURL: URL, to outputURL: URL, preset: XauXatVoiceMaskPreset) throws {
+    private static func render(from recordingURL: URL, to outputURL: URL, preset: XauXatVoiceMaskPreset?, ambience: XauXatCallAmbience = .off) throws {
         let sourceFile = try AVAudioFile(forReading: recordingURL)
         guard sourceFile.length > 0 else { throw XauXatVoiceMaskError.emptyRecording }
 
-        let engine = AVAudioEngine()
-        let player = AVAudioPlayerNode()
-        let timePitch = AVAudioUnitTimePitch()
         let renderFormat = sourceFile.processingFormat
-        timePitch.pitch = preset.pitch
-        timePitch.rate = 1
-
-        engine.attach(player)
-        engine.attach(timePitch)
-        engine.connect(player, to: timePitch, format: renderFormat)
-        engine.connect(timePitch, to: engine.mainMixerNode, format: renderFormat)
-        try engine.enableManualRenderingMode(
-            .offline,
-            format: renderFormat,
-            maximumFrameCount: renderBufferSize
-        )
-
         let outputSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: renderFormat.sampleRate,
@@ -125,47 +136,88 @@ struct XauXatVoiceMask {
             commonFormat: renderFormat.commonFormat,
             interleaved: renderFormat.isInterleaved
         )
-        guard let renderBuffer = AVAudioPCMBuffer(
-            pcmFormat: engine.manualRenderingFormat,
-            frameCapacity: renderBufferSize
-        ) else {
-            throw XauXatVoiceMaskError.renderingFailed
+        #if DEBUG
+        if preset == .stealth, let maskedFile {
+            try XauXatLLVCCapture.renderRecording(sourceFile, to: maskedFile, ambience: ambience)
+        } else {
+            try renderPitch()
         }
-
-        player.scheduleFile(sourceFile, at: nil)
-        try engine.start()
-        player.play()
-
-        var stalledRenderAttempts = 0
-        while engine.manualRenderingSampleTime < sourceFile.length {
-            let remainingFrames = sourceFile.length - engine.manualRenderingSampleTime
-            let framesToRender = min(renderBufferSize, AVAudioFrameCount(remainingFrames))
-
-            switch try engine.renderOffline(framesToRender, to: renderBuffer) {
-            case .success:
-                try maskedFile?.write(from: renderBuffer)
-                stalledRenderAttempts = 0
-            case .insufficientDataFromInputNode, .cannotDoInCurrentContext:
-                stalledRenderAttempts += 1
-                if stalledRenderAttempts > 20 {
-                    throw XauXatVoiceMaskError.renderingFailed
-                }
-            case .error:
-                throw XauXatVoiceMaskError.renderingFailed
-            @unknown default:
-                throw XauXatVoiceMaskError.renderingFailed
-            }
-        }
-
-        player.stop()
-        engine.stop()
+        #else
+        try renderPitch()
+        #endif
+        if #available(iOS 18, *) { maskedFile?.close() }
         maskedFile = nil
-        let maskedFileSize = try outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard maskedFileSize > 0 else {
+        let sourceDuration = Double(sourceFile.length) / renderFormat.sampleRate
+        guard let rendered = try? AVAudioPlayer(contentsOf: outputURL),
+              rendered.duration >= max(0.001, sourceDuration - 0.128) else {
             throw XauXatVoiceMaskError.renderingFailed
         }
         try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: outputURL.path)
         _ = excludeFromSystemBackup(outputURL)
+
+        func renderPitch() throws {
+            let engine = AVAudioEngine()
+            let player = AVAudioPlayerNode()
+            let timePitch = AVAudioUnitTimePitch()
+            let ambienceMixer = ambience == .off ? nil : XauXatCallAmbienceMixer(sampleRate: renderFormat.sampleRate)
+            engine.attach(player)
+            if let preset {
+                timePitch.pitch = preset.pitch
+                engine.attach(timePitch)
+                engine.connect(player, to: timePitch, format: renderFormat)
+                engine.connect(timePitch, to: engine.mainMixerNode, format: renderFormat)
+            } else {
+                engine.connect(player, to: engine.mainMixerNode, format: renderFormat)
+            }
+            try engine.enableManualRenderingMode(
+                .offline,
+                format: renderFormat,
+                maximumFrameCount: renderBufferSize
+            )
+
+            guard let renderBuffer = AVAudioPCMBuffer(
+                pcmFormat: engine.manualRenderingFormat,
+                frameCapacity: renderBufferSize
+            ) else {
+                throw XauXatVoiceMaskError.renderingFailed
+            }
+
+            player.scheduleFile(sourceFile, at: nil)
+            try engine.start()
+            player.play()
+
+            var stalledRenderAttempts = 0
+            while engine.manualRenderingSampleTime < sourceFile.length {
+                let remainingFrames = sourceFile.length - engine.manualRenderingSampleTime
+                let framesToRender = min(renderBufferSize, AVAudioFrameCount(remainingFrames))
+
+                switch try engine.renderOffline(framesToRender, to: renderBuffer) {
+                case .success:
+                    if preset != nil, let samples = renderBuffer.floatChannelData {
+                        for channel in 0..<Int(renderFormat.channelCount) {
+                            for frame in 0..<Int(renderBuffer.frameLength) {
+                                samples[channel][frame] = xauXatBoostMaskedVoice(samples[channel][frame])
+                            }
+                        }
+                    }
+                    try ambienceMixer?.mix(into: renderBuffer, selection: ambience, remainingFrames: remainingFrames)
+                    try maskedFile?.write(from: renderBuffer)
+                    stalledRenderAttempts = 0
+                case .insufficientDataFromInputNode, .cannotDoInCurrentContext:
+                    stalledRenderAttempts += 1
+                    if stalledRenderAttempts > 20 {
+                        throw XauXatVoiceMaskError.renderingFailed
+                    }
+                case .error:
+                    throw XauXatVoiceMaskError.renderingFailed
+                @unknown default:
+                    throw XauXatVoiceMaskError.renderingFailed
+                }
+            }
+
+            player.stop()
+            engine.stop()
+        }
     }
 }
 
@@ -457,6 +509,22 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
 }
 
 class AudioPlayer: NSObject, AVAudioPlayerDelegate {
+    static func minimumVoiceMessageDuration(_ declaredDuration: TimeInterval) -> TimeInterval {
+        // The duration stored with a message is rounded to seconds.
+        declaredDuration > 0 ? max(0.1, declaredDuration - 1) : 0
+    }
+
+    static func hasPlayableVoiceMessage(at url: URL, declaredDuration: TimeInterval) -> Bool {
+        let duration = (try? AVAudioPlayer(contentsOf: url))?.duration ?? 0
+        let valid = duration > 0 && duration >= minimumVoiceMessageDuration(declaredDuration)
+        #if DEBUG
+        if !valid {
+            logger.notice("Voice duration check rejected expected=\(declaredDuration, privacy: .public) actual=\(duration, privacy: .public)")
+        }
+        #endif
+        return valid
+    }
+
     var onTimer: ((TimeInterval) -> Void)?
     var onFinishPlayback: (() -> Void)?
 
@@ -468,50 +536,56 @@ class AudioPlayer: NSObject, AVAudioPlayerDelegate {
         self.onFinishPlayback = onFinishPlayback
     }
 
-    func start(fileSource: CryptoFile, at: TimeInterval?) {
+    @discardableResult
+    func start(fileSource: CryptoFile, at: TimeInterval?, minimumDuration: TimeInterval = 0) -> Bool {
         let url = getAppFilePath(fileSource.filePath)
-        if let cfArgs = fileSource.cryptoArgs {
-            if let data = try? readCryptoFile(path: url.path, cryptoArgs: cfArgs) {
-                audioPlayer = try? AVAudioPlayer(data: data)
-            }
-        } else {
-            audioPlayer = try? AVAudioPlayer(contentsOf: url)
-        }
-        audioPlayer?.delegate = self
-        audioPlayer?.prepareToPlay()
-        if let at = at {
-            audioPlayer?.currentTime = at
-        }
-        audioPlayer?.play()
-
-        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { timer in
-            if self.audioPlayer?.isPlaying ?? false {
-                AppDelegate.keepScreenOn(true)
-                guard let time = self.audioPlayer?.currentTime else { return }
-                self.onTimer?(time)
-                AudioPlayer.changeAudioSession(true)
+        do {
+            let player: AVAudioPlayer
+            if let args = fileSource.cryptoArgs {
+                let data = try readCryptoFile(path: url.path, cryptoArgs: args)
+                player = try AVAudioPlayer(data: data)
             } else {
-                AudioPlayer.changeAudioSession(false)
+                player = try AVAudioPlayer(contentsOf: url)
             }
+            guard player.duration >= minimumDuration else { return false }
+            return start(player, at: at)
+        } catch {
+            logger.error("Voice playback could not open the attachment: \(error.localizedDescription, privacy: .private)")
+            return false
         }
     }
 
-    func start(data: Data, at: TimeInterval? = nil) {
-        audioPlayer = try? AVAudioPlayer(data: data)
-        audioPlayer?.delegate = self
-        audioPlayer?.prepareToPlay()
-        if let at { audioPlayer?.currentTime = at }
-        audioPlayer?.play()
+    @discardableResult
+    func start(data: Data, at: TimeInterval? = nil) -> Bool {
+        guard let player = try? AVAudioPlayer(data: data) else { return false }
+        return start(player, at: at)
+    }
 
-        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { _ in
-            if self.audioPlayer?.isPlaying ?? false {
-                AppDelegate.keepScreenOn(true)
-                guard let time = self.audioPlayer?.currentTime else { return }
-                self.onTimer?(time)
-                AudioPlayer.changeAudioSession(true)
-            } else {
-                AudioPlayer.changeAudioSession(false)
-            }
+    private func start(_ player: AVAudioPlayer, at: TimeInterval?) -> Bool {
+        stop()
+        player.delegate = self
+        if let at, at.isFinite, at >= 0, at < player.duration { player.currentTime = at }
+        guard player.prepareToPlay(), activatePlayback(), player.play() else {
+            Self.changeAudioSession(false)
+            return false
+        }
+        audioPlayer = player
+        AppDelegate.keepScreenOn(true)
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self, let player = self.audioPlayer, player.isPlaying else { return }
+            self.onTimer?(player.currentTime)
+        }
+        return true
+    }
+
+    private func activatePlayback() -> Bool {
+        Self.changeAudioSession(true)
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            return true
+        } catch {
+            logger.error("Voice playback could not activate the audio session: \(error.localizedDescription, privacy: .private)")
+            return false
         }
     }
 
@@ -520,8 +594,11 @@ class AudioPlayer: NSObject, AVAudioPlayerDelegate {
         AppDelegate.keepScreenOn(false)
     }
 
-    func play() {
-        audioPlayer?.play()
+    @discardableResult
+    func play() -> Bool {
+        guard let player = audioPlayer, activatePlayback(), player.play() else { return false }
+        AppDelegate.keepScreenOn(true)
+        return true
     }
 
     func seek(_ to: TimeInterval) {
@@ -556,7 +633,7 @@ class AudioPlayer: NSObject, AVAudioPlayerDelegate {
         if playback {
             if AVAudioSession.sharedInstance().category != .playback {
                 logger.log("AudioSession: playback")
-                try? AVAudioSession.sharedInstance().setCategory(AVAudioSession.Category.playback, options: [.duckOthers, .allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
             }
         } else {
             if AVAudioSession.sharedInstance().category != .soloAmbient {

@@ -10,6 +10,67 @@ import Foundation
 import SwiftUI
 import SimpleXChat
 import WebRTC
+#if DEBUG
+import CryptoKit
+#endif
+
+enum XauXatCallTiming {
+    static let enabled: Bool = {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "xauxatCallTiming")
+        #else
+        false
+        #endif
+    }()
+
+    static func mark(_ stage: String) {
+        guard enabled else { return }
+        logger.notice("XauXatCallTiming \(stage, privacy: .public)")
+    }
+
+    #if DEBUG
+    static func exportTransportSnapshot() {
+        guard UserDefaults.standard.bool(forKey: "xauxatCallTransportExport") else { return }
+        Task.detached(priority: .utility) {
+            let query = """
+                SELECT json_array(hex(m.shared_msg_id), m.chat_msg_event, m.msg_sent, m.created_at,
+                    d.created_at, d.delivery_status, d.updated_at,
+                    CASE WHEN m.msg_sent = 0 THEN coalesce(m.broker_ts, d.chat_ts) END,
+                    CASE WHEN m.msg_sent = 0 AND json_valid(d.agent_msg_meta)
+                         THEN json_extract(d.agent_msg_meta, '$.rcvTs') END)
+                FROM messages m LEFT JOIN msg_deliveries d ON m.message_id = d.message_id
+                WHERE m.shared_msg_id IS NOT NULL
+                  AND m.chat_msg_event IN ('x.call.inv', 'x.call.offer', 'x.call.answer', 'x.call.end')
+                  AND julianday(m.created_at) >= julianday('now', '-2 hours')
+                ORDER BY m.message_id DESC LIMIT 160
+                """
+            guard let data = sendSimpleXCmdStr("/sql chat " + query.replacingOccurrences(of: "\n", with: " "), retryNum: 0),
+                  let envelope = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let result = envelope["result"] as? [String: Any],
+                  let response = result["sQLResult"] as? [String: Any],
+                  let rows = response["rows"] as? [String] else {
+                mark("transport.snapshot.failed")
+                return
+            }
+            let sanitized = rows.compactMap { row -> [Any]? in
+                guard var fields = (try? JSONSerialization.jsonObject(with: Data(row.utf8))) as? [Any],
+                      fields.count == 9, let id = fields[0] as? String, !id.isEmpty else { return nil }
+                fields[0] = SHA256.hash(data: Data(id.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+                return fields
+            }
+            do {
+                let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("xauxat-call-transport.json")
+                let output = try JSONSerialization.data(withJSONObject: sanitized)
+                try output.write(to: url, options: .atomic)
+                mark("transport.snapshot.rows=\(sanitized.count)")
+            } catch {
+                mark("transport.snapshot.failed")
+            }
+        }
+    }
+    #endif
+}
 
 class Call: ObservableObject, Equatable {
     static func == (lhs: Call, rhs: Call) -> Bool {
@@ -20,6 +81,7 @@ class Call: ObservableObject, Equatable {
     var contact: Contact
     var callUUID: String?
     var initialCallType: CallMediaType
+    let startWithModifiedVoice: Bool
     @Published var localMediaSources: CallMediaSources
     @Published var callState: CallState
     @Published var localCapabilities: CallCapabilities?
@@ -35,13 +97,15 @@ class Call: ObservableObject, Equatable {
         callUUID: String?,
         callState: CallState,
         initialCallType: CallMediaType,
-        sharedKey: String? = nil
+        sharedKey: String? = nil,
+        startWithModifiedVoice: Bool = false
     ) {
         self.direction = direction
         self.contact = contact
         self.callUUID = callUUID
         self.callState = callState
         self.initialCallType = initialCallType
+        self.startWithModifiedVoice = startWithModifiedVoice
         self.sharedKey = sharedKey
         self.localMediaSources = CallMediaSources(
             mic: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,

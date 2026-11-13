@@ -3,51 +3,113 @@
 
 import AVFoundation
 import Foundation
+import UIKit
 import WebRTC
+
+enum XauXatCallAmbience: String {
+    case off, rain, traffic
+}
 
 @MainActor
 final class XauXatRealtimeVoiceMasking: ObservableObject {
     static let shared = XauXatRealtimeVoiceMasking()
 
     @Published private(set) var enabled = false
+    @Published private(set) var llvcEnabled = false
     @Published private(set) var preset: XauXatVoiceMaskPreset = .veil
+    @Published private(set) var ambience: XauXatCallAmbience = .off
     @Published var failureMessage: String?
+    private var activeCall: ObjectIdentifier?
 
     private init() {}
 
-    func beginCall() {
+    func beginCall(_ call: Call) {
+        activeCall = ObjectIdentifier(call)
         enabled = false
+        llvcEnabled = false
+        setAmbience(.off)
         preset = .veil
         failureMessage = nil
+        #if DEBUG
+        if call.startWithModifiedVoice {
+            setLLVCEnabled(true)
+            return
+        }
+        #endif
         XauXatRealtimeAudioDevice.shared.configureMasking(enabled: false, preset: .veil)
     }
 
     func setEnabled(_ enabled: Bool) {
+        guard activeCall != nil else { return }
         self.enabled = enabled
+        llvcEnabled = false
         failureMessage = nil
         XauXatRealtimeAudioDevice.shared.configureMasking(enabled: enabled, preset: preset)
     }
 
     func setPreset(_ preset: XauXatVoiceMaskPreset) {
+        guard activeCall != nil else { return }
         self.preset = preset
+        guard !llvcEnabled else { return }
         failureMessage = nil
         XauXatRealtimeAudioDevice.shared.configureMasking(enabled: enabled, preset: preset)
     }
 
-    func endCall() {
+    func setAmbience(_ ambience: XauXatCallAmbience) {
+        guard activeCall != nil else { return }
+        self.ambience = ambience
+        XauXatRealtimeAudioDevice.shared.setAmbience(ambience)
+    }
+
+    func endCall(_ call: Call) {
+        guard activeCall == ObjectIdentifier(call) else { return }
+        activeCall = nil
+        XauXatRealtimeAudioDevice.shared.suspendCapture()
         enabled = false
+        llvcEnabled = false
+        ambience = .off
         failureMessage = nil
-        XauXatRealtimeAudioDevice.shared.configureMasking(enabled: false, preset: .veil)
     }
 
     func reportFailure(_ message: String) {
-        guard enabled else { return }
+        guard enabled || llvcEnabled else { return }
         failureMessage = message
     }
+
+    #if DEBUG
+    func setLLVCEnabled(_ enabled: Bool) {
+        guard activeCall != nil else { return }
+        self.enabled = false
+        llvcEnabled = enabled
+        failureMessage = nil
+        if enabled { XauXatLLVCCapture.warmUp() }
+        XauXatRealtimeAudioDevice.shared.configureMasking(enabled: false, preset: preset, llvc: enabled)
+    }
+    #endif
 }
 
 final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
     static let shared = XauXatRealtimeAudioDevice()
+
+    private struct AudioRoute: Equatable {
+        struct Port: Equatable {
+            let uid: String
+            let dataSource: NSNumber?
+
+            init(_ description: AVAudioSessionPortDescription) {
+                uid = description.uid
+                dataSource = description.selectedDataSource?.dataSourceID
+            }
+        }
+
+        let inputs: [Port]
+        let outputs: [Port]
+
+        init(_ route: AVAudioSessionRouteDescription) {
+            inputs = route.inputs.map(Port.init)
+            outputs = route.outputs.map(Port.init)
+        }
+    }
 
     private let audioSession = AVAudioSession.sharedInstance()
     private let stateQueue = DispatchQueue(label: "pt.exsoria.xauxat.realtime-audio-device")
@@ -55,6 +117,7 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
     private var observers: [NSObjectProtocol] = []
     private var engineConfigurationObserver: NSObjectProtocol?
     private var audioEngine: AVAudioEngine?
+    private var engineRoute: AudioRoute?
     private var audioSinkNode: AVAudioSinkNode?
     private var audioSourceNode: AVAudioSourceNode?
     private var timePitch: AVAudioUnitTimePitch?
@@ -62,9 +125,13 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
     private var shouldRecord = false
     private var interrupted = false
     private var maskingEnabled = false
+    private var captureSuspended = true
     private var maskingPreset: XauXatVoiceMaskPreset = .veil
     private var suppressInputUntil: CFTimeInterval = 0
     private var maskingPipelineFailed = false
+    private var llvcEnabled = false
+    private var maskingGeneration: UInt64 = 0
+    private var ambience: XauXatCallAmbience = .off
 
     private var audioInputFormat: AVAudioFormat?
     private var audioOutputFormat: AVAudioFormat?
@@ -80,16 +147,20 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
         super.init()
     }
 
-    func configureMasking(enabled: Bool, preset: XauXatVoiceMaskPreset) {
+    func configureMasking(enabled: Bool, preset: XauXatVoiceMaskPreset, llvc: Bool = false) {
         stateQueue.sync {
+            captureSuspended = false
             maskingEnabled = enabled
             maskingPreset = preset
+            llvcEnabled = llvc
+            maskingGeneration &+= 1
             maskingPipelineFailed = false
             suppressInputUntil = CACurrentMediaTime() + 0.08
         }
         let update = { [weak self] in
             guard let self else { return }
             self.timePitch?.pitch = enabled ? preset.pitch : 0
+            self.timePitch?.bypass = llvc
         }
         if let delegate {
             delegate.dispatchAsync(update)
@@ -98,20 +169,34 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
         }
     }
 
-    private func currentMaskingState() -> (enabled: Bool, suppress: Bool, failed: Bool) {
+    func suspendCapture() {
         stateQueue.sync {
-            (maskingEnabled, CACurrentMediaTime() < suppressInputUntil, maskingPipelineFailed)
+            captureSuspended = true
+            ambience = .off
+            maskingGeneration &+= 1
         }
     }
 
-    private func reportPipelineFailure(_ message: String) {
+    func setAmbience(_ ambience: XauXatCallAmbience) {
+        stateQueue.sync { self.ambience = ambience }
+    }
+
+    private func currentMaskingState() -> (enabled: Bool, suppress: Bool, failed: Bool, llvc: Bool, generation: UInt64, suspended: Bool, ambience: XauXatCallAmbience) {
+        stateQueue.sync {
+            (maskingEnabled, CACurrentMediaTime() < suppressInputUntil, maskingPipelineFailed, llvcEnabled, maskingGeneration, captureSuspended, ambience)
+        }
+    }
+
+    private func reportPipelineFailure(_ message: String, generation: UInt64? = nil) {
         let shouldReport = stateQueue.sync { () -> Bool in
-            guard maskingEnabled else { return false }
+            guard !captureSuspended, (maskingEnabled || llvcEnabled), !maskingPipelineFailed,
+                  generation == nil || generation == maskingGeneration else { return false }
             maskingPipelineFailed = true
             return true
         }
         guard shouldReport else { return }
         DispatchQueue.main.async {
+            if let generation, self.currentMaskingState().generation != generation { return }
             XauXatRealtimeVoiceMasking.shared.reportFailure(
                 NSLocalizedString(
                     "Voice masking is unavailable on the current audio route. Your microphone is muted until you disable masking or change route.",
@@ -144,6 +229,7 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
             self.timePitch = nil
         }
         self.audioEngine = nil
+        engineRoute = nil
     }
 
     private func updateEngine() {
@@ -152,14 +238,32 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
             return
         }
 
-        if let audioEngine,
-           !audioEngine.xauxatMatchesHardwareSampleRate(audioSession) {
+        if let engineRoute, engineRoute != AudioRoute(audioSession.currentRoute) {
+            XauXatCallTiming.mark("audio.engine.rebuild.route_changed")
             shutdownEngine()
+        }
+
+        if let audioEngine {
+            let inputChanged = shouldRecord && audioSinkNode != nil && {
+                let format = audioEngine.inputNode.outputFormat(forBus: 1)
+                return audioInputFormat?.sampleRate != format.sampleRate
+                    || audioInputFormat?.channelCount != min(2, format.channelCount)
+            }()
+            let outputChanged = shouldPlay && audioSourceNode != nil && {
+                let format = audioEngine.outputNode.outputFormat(forBus: 0)
+                return audioOutputFormat?.sampleRate != format.sampleRate
+                    || audioOutputFormat?.channelCount != format.channelCount
+            }()
+            if inputChanged || outputChanged {
+                XauXatCallTiming.mark("audio.engine.rebuild.format")
+                shutdownEngine()
+            }
         }
 
         let shouldUseVoiceProcessing = audioSession.xauxatSupportsVoiceProcessing
         if let audioEngine,
            audioEngine.outputNode.isVoiceProcessingEnabled != shouldUseVoiceProcessing {
+            XauXatCallTiming.mark("audio.engine.rebuild.voice_processing")
             shutdownEngine()
         }
 
@@ -181,11 +285,11 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
                 forName: .AVAudioEngineConfigurationChange,
                 object: engine,
                 queue: nil
-            ) { [weak self] _ in
+            ) { [weak self, weak engine] _ in
                 guard let self else { return }
-                self.delegate?.dispatchAsync { [weak self] in
-                    self?.shutdownEngine()
-                    self?.updateEngine()
+                self.delegate?.dispatchAsync { [weak self, weak engine] in
+                    guard let self, let engine, self.audioEngine === engine else { return }
+                    self.updateEngine()
                 }
             }
             self.audioEngine = engine
@@ -216,39 +320,71 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
                     return
                 }
 
+                #if !DEBUG
                 let pitchNode = AVAudioUnitTimePitch()
-                let preset = stateQueue.sync { maskingPreset }
-                let enabled = stateQueue.sync { maskingEnabled }
+                let (preset, enabled, llvcEnabled) = stateQueue.sync { (maskingPreset, maskingEnabled, self.llvcEnabled) }
                 pitchNode.pitch = enabled ? preset.pitch : 0
+                pitchNode.bypass = llvcEnabled
                 pitchNode.rate = 1
                 engine.attach(pitchNode)
                 engine.connect(engine.inputNode, to: pitchNode, format: inputFormat)
+                #endif
 
                 let deliverRecordedData = delegate.deliverRecordedData
+                let ambienceMixer = XauXatCallAmbienceMixer(sampleRate: inputFormat.sampleRate)
+                #if DEBUG
+                let llvc = XauXatLLVCCapture(format: inputFormat, channels: Int(channels)) { [weak self] generation, message in
+                    self?.reportPipelineFailure(message, generation: generation)
+                }
+                #endif
                 let renderBlock: RTCAudioDeviceRenderRecordedDataBlock = { _, _, _, frameCount, output, context in
                     guard let context else { return kAudio_ParamError }
-                    let pair = context.assumingMemoryBound(
-                        to: (Unmanaged<XauXatRealtimeAudioConverter>, UnsafeMutablePointer<AudioBufferList>).self
+                    let input = context.assumingMemoryBound(
+                        to: (UnsafeMutablePointer<AudioBufferList>, XauXatCallAmbience).self
                     ).pointee
-                    return pair.0.takeUnretainedValue().convert(
+                    let result = converter.convert(
                         frameCount: frameCount,
-                        from: pair.1,
+                        from: input.0,
                         to: output
                     )
+                    if result == noErr {
+                        ambienceMixer.mix(into: output, frames: Int(frameCount), selection: input.1)
+                    }
+                    return result
                 }
                 let sink = AVAudioSinkNode { [weak self] timestamp, frameCount, inputData in
                     guard let self else { return noErr }
                     let masking = self.currentMaskingState()
+                    guard !masking.suspended else { return noErr }
+                    var flags: AudioUnitRenderActionFlags = []
+                    #if DEBUG
+                    if masking.llvc {
+                        guard frameCount > 0, !masking.suppress, !masking.failed else { return noErr }
+                        guard var samples = llvc?.render(inputData, count: Int(frameCount), generation: masking.generation) else {
+                            self.reportPipelineFailure("LLVC capture format is unsupported", generation: masking.generation)
+                            return noErr
+                        }
+                        ambienceMixer.mix(into: &samples, frames: Int(frameCount), selection: masking.ambience)
+                        return deliverRecordedData(&flags, timestamp, 1, frameCount, &samples, nil, nil)
+                    }
+                    // The prototype capture graph has no legacy pitch processor.
+                    if masking.enabled { return noErr }
+                    #else
                     if masking.enabled && (masking.suppress || masking.failed) {
                         return noErr
                     }
-                    var flags: AudioUnitRenderActionFlags = []
-                    var context = (Unmanaged.passUnretained(converter), inputData)
+                    #endif
+                    var context = (inputData, masking.ambience)
                     return deliverRecordedData(&flags, timestamp, 1, frameCount, nil, &context, renderBlock)
                 }
                 engine.attach(sink)
+                #if DEBUG
+                // TimePitch is a format converter and aborts in the live mic chain.
+                engine.connect(engine.inputNode, to: sink, format: inputFormat)
+                #else
                 engine.connect(pitchNode, to: sink, format: inputFormat)
                 timePitch = pitchNode
+                #endif
                 audioSinkNode = sink
                 audioInputFormat = rtcRecordFormat
                 cachedInputLatency = audioSession.inputLatency
@@ -300,7 +436,12 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
         do {
             engine.prepare()
             try engine.start()
+            engineRoute = AudioRoute(audioSession.currentRoute)
+            if XauXatCallTiming.enabled {
+                XauXatCallTiming.mark("audio.engine.started.capture=\(shouldRecord).playout=\(shouldPlay)")
+            }
         } catch {
+            XauXatCallTiming.mark("audio.engine.failed")
             reportPipelineFailure("engine start: \(error.localizedDescription)")
         }
     }
@@ -313,13 +454,17 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
                 guard let self,
                       let rawType = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? NSNumber,
                       let type = AVAudioSession.InterruptionType(rawValue: rawType.uintValue) else { return }
-                self.stateQueue.sync { self.interrupted = type == .began }
-                self.delegate?.dispatchAsync { [weak self] in self?.updateEngine() }
+                guard let delegate = self.delegate else { return }
+                delegate.dispatchAsync { [weak self, weak delegate] in
+                    guard let self, let delegate, self.delegate === delegate else { return }
+                    self.interrupted = type == .began
+                    self.updateEngine()
+                }
             },
             center.addObserver(forName: AVAudioSession.routeChangeNotification, object: audioSession, queue: nil) { [weak self] _ in
                 guard let self else { return }
+                // The session can post route notifications without changing devices.
                 self.delegate?.dispatchAsync { [weak self] in
-                    self?.shutdownEngine()
                     self?.updateEngine()
                 }
             },
@@ -359,6 +504,7 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
     func terminateDevice() -> Bool {
         shouldPlay = false
         shouldRecord = false
+        interrupted = false
         updateEngine()
         unsubscribeFromAudioSession()
         delegate = nil
@@ -394,6 +540,89 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
     }
 }
 
+// Owned by the capture callback. Assets load before the audio engine starts.
+final class XauXatCallAmbienceMixer {
+    private static let rain = samples(named: "CallAmbienceRain")
+    private static let traffic = samples(named: "CallAmbienceTraffic")
+    private let rainSamples: [Int16]
+    private let trafficSamples: [Int16]
+    private let step: Double
+    private let fadeStep: Float
+    private var phase = 0.0
+    private var rainGain: Float = 0
+    private var trafficGain: Float = 0
+
+    init(sampleRate: Double) {
+        rainSamples = Self.rain
+        trafficSamples = Self.traffic
+        step = 16_000 / sampleRate
+        fadeStep = Float(1 / (0.02 * sampleRate))
+    }
+
+    func mix(into buffer: UnsafeMutablePointer<AudioBufferList>, frames: Int, selection: XauXatCallAmbience) {
+        guard selection != .off || rainGain > 0 || trafficGain > 0,
+              frames > 0, buffer.pointee.mNumberBuffers == 1,
+              let data = buffer.pointee.mBuffers.mData else { return }
+        let channels = Int(buffer.pointee.mBuffers.mNumberChannels)
+        guard channels > 0, frames <= Int(buffer.pointee.mBuffers.mDataByteSize) / (channels * MemoryLayout<Int16>.stride) else { return }
+        let samples = data.assumingMemoryBound(to: Int16.self)
+        let length = max(rainSamples.count, trafficSamples.count)
+        guard length > 0 else { return }
+        for frame in 0..<frames {
+            let noise = Int(nextSample(selection: selection, length: length))
+            for channel in 0..<channels {
+                let index = frame * channels + channel
+                samples[index] = Int16(clamping: Int(samples[index]) + noise)
+            }
+        }
+    }
+
+    func mix(into buffer: AVAudioPCMBuffer, selection: XauXatCallAmbience, remainingFrames: AVAudioFramePosition) throws {
+        let length = max(rainSamples.count, trafficSamples.count)
+        guard (selection == .rain ? !rainSamples.isEmpty : !trafficSamples.isEmpty),
+              let channels = buffer.floatChannelData, !buffer.format.isInterleaved else {
+            throw XauXatVoiceMaskError.renderingFailed
+        }
+        let frames = Int(buffer.frameLength)
+        for frame in 0..<frames {
+            let fadeOut = min(1, max(0, Float(remainingFrames - AVAudioFramePosition(frame + 1)) * fadeStep))
+            let noise = nextSample(selection: selection, length: length) / 32_768 * fadeOut
+            for channel in 0..<Int(buffer.format.channelCount) {
+                channels[channel][frame] = min(1, max(-1, channels[channel][frame] + noise))
+            }
+        }
+    }
+
+    private func nextSample(selection: XauXatCallAmbience, length: Int) -> Float {
+        rainGain = nextGain(rainGain, selected: selection == .rain)
+        trafficGain = nextGain(trafficGain, selected: selection == .traffic)
+        let noise = sample(rainSamples, gain: rainGain) + sample(trafficSamples, gain: trafficGain)
+        phase += step
+        if phase >= Double(length) { phase.formTruncatingRemainder(dividingBy: Double(length)) }
+        return noise
+    }
+
+    private func nextGain(_ gain: Float, selected: Bool) -> Float {
+        selected ? min(1, gain + fadeStep) : max(0, gain - fadeStep)
+    }
+
+    private func sample(_ samples: [Int16], gain: Float) -> Float {
+        guard gain > 0, !samples.isEmpty else { return 0 }
+        let offset = Int(phase)
+        let index = offset % samples.count
+        let first = Float(samples[index])
+        let next = Float(samples[(index + 1) % samples.count])
+        return (first + (next - first) * Float(phase - Double(offset))) * gain
+    }
+
+    private static func samples(named name: String) -> [Int16] {
+        guard let data = NSDataAsset(name: name)?.data, data.count.isMultiple(of: MemoryLayout<Int16>.stride) else { return [] }
+        var samples = [Int16](repeating: 0, count: data.count / MemoryLayout<Int16>.stride)
+        _ = samples.withUnsafeMutableBytes { data.copyBytes(to: $0) }
+        return samples
+    }
+}
+
 private final class XauXatRealtimeAudioConverter {
     private var converter: AudioConverterRef?
 
@@ -421,14 +650,6 @@ private final class XauXatRealtimeAudioConverter {
 private extension AVAudioSession {
     var xauxatSupportsVoiceProcessing: Bool {
         category == .playAndRecord && (mode == .voiceChat || mode == .videoChat)
-    }
-}
-
-private extension AVAudioEngine {
-    func xauxatMatchesHardwareSampleRate(_ audioSession: AVAudioSession) -> Bool {
-        let sampleRate = audioSession.sampleRate
-        return inputNode.inputFormat(forBus: 1).sampleRate == sampleRate
-            && outputNode.outputFormat(forBus: 0).sampleRate == sampleRate
     }
 }
 

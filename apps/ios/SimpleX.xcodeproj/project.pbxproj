@@ -233,8 +233,12 @@
 		8CE848A32C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */; };
 		A11E005233D7000100000052 /* XauXatConnectionRecoveryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E005133D7000100000051 /* XauXatConnectionRecoveryManager.swift */; };
 		A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000133D1000100000001 /* EmbeddedTorManager.swift */; };
+		A11E020233D1000100000002 /* XauXatDirectCallTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E020133D1000100000001 /* XauXatDirectCallTest.swift */; };
 		A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000333D2000100000003 /* XauXatHomeView.swift */; };
 		A11E000533D2000200000005 /* XauXatRealtimeAudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000433D2000200000004 /* XauXatRealtimeAudioDevice.swift */; };
+		A11E000B33D200020000000B /* LLVC-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = A11E000A33D200020000000A /* LLVC-LICENSE.txt */; };
+		A11E000933D2000200000009 /* XauXatLLVC.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = A11E000833D2000200000008 /* XauXatLLVC.mlpackage */; };
+		A11E000733D2000200000007 /* XauXatLLVCCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000633D2000200000006 /* XauXatLLVCCapture.swift */; };
 		A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */; };
 		A11E001233D3000100000012 /* NSEEmbeddedTorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */; };
 		A11E002233D4000100000022 /* XauXatGroupAccessRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E002133D4000100000021 /* XauXatGroupAccessRules.swift */; };
@@ -641,8 +645,12 @@
 		8CE848A22C5A0FA000D5C7C8 /* SelectableChatItemToolbars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableChatItemToolbars.swift; sourceTree = "<group>"; };
 		A11E005133D7000100000051 /* XauXatConnectionRecoveryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatConnectionRecoveryManager.swift; sourceTree = "<group>"; };
 		A11E000133D1000100000001 /* EmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedTorManager.swift; sourceTree = "<group>"; };
+		A11E020133D1000100000001 /* XauXatDirectCallTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatDirectCallTest.swift; sourceTree = "<group>"; };
 		A11E000333D2000100000003 /* XauXatHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatHomeView.swift; sourceTree = "<group>"; };
 		A11E000433D2000200000004 /* XauXatRealtimeAudioDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatRealtimeAudioDevice.swift; sourceTree = "<group>"; };
+		A11E000A33D200020000000A /* LLVC-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "LLVC-LICENSE.txt"; sourceTree = "<group>"; };
+		A11E000833D2000200000008 /* XauXatLLVC.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = XauXatLLVC.mlpackage; sourceTree = "<group>"; };
+		A11E000633D2000200000006 /* XauXatLLVCCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatLLVCCapture.swift; sourceTree = "<group>"; };
 		A11E000533D3000100000005 /* XauXatCodeLockedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatCodeLockedContent.swift; sourceTree = "<group>"; };
 		A11E001133D3000100000011 /* NSEEmbeddedTorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEEmbeddedTorManager.swift; sourceTree = "<group>"; };
 		A11E002133D4000100000021 /* XauXatGroupAccessRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XauXatGroupAccessRules.swift; sourceTree = "<group>"; };
@@ -814,10 +822,14 @@
 				5C5E5D3A2824468B00B0488A /* ActiveCallView.swift */,
 				5C029EA9283942EA004A9677 /* CallController.swift */,
 				5C55A91E283AD0E400C4E99E /* CallManager.swift */,
+				A11E020133D1000100000001 /* XauXatDirectCallTest.swift */,
 				5C55A920283CCCB700C4E99E /* IncomingCallView.swift */,
 				5C55A922283CEDE600C4E99E /* SoundPlayer.swift */,
 				18415323A4082FC92887F906 /* WebRTCClient.swift */,
 				A11E000433D2000200000004 /* XauXatRealtimeAudioDevice.swift */,
+				A11E000A33D200020000000A /* LLVC-LICENSE.txt */,
+				A11E000833D2000200000008 /* XauXatLLVC.mlpackage */,
+				A11E000633D2000200000006 /* XauXatLLVCCapture.swift */,
 				18415B08031E8FB0F7FC27F9 /* CallViewRenderers.swift */,
 				8CC4ED8F2BD7B8530078AEE8 /* CallAudioDeviceManager.swift */,
 				8C81482B2BD91CD4002CBEC3 /* AudioDevicePicker.swift */,
@@ -1540,6 +1552,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A92026110400000000000001 /* PrivacyInfo.xcprivacy in Resources */,
+				A11E000B33D200020000000B /* LLVC-LICENSE.txt in Resources */,
+				A11E000933D2000200000009 /* XauXatLLVC.mlpackage in Resources */,
 				5C55A92E283D0FDE00C4E99E /* sounds in Resources */,
 				5CA059EF279559F40002BEB4 /* Assets.xcassets in Resources */,
 				5CC2C0FC2809BF11000C35E3 /* Localizable.strings in Resources */,
@@ -1680,6 +1694,7 @@
 			files = (
 				A11E000433D2000100000004 /* XauXatHomeView.swift in Sources */,
 				A11E000233D1000100000002 /* EmbeddedTorManager.swift in Sources */,
+			A11E020233D1000100000002 /* XauXatDirectCallTest.swift in Sources */,
 				A11E005233D7000100000052 /* XauXatConnectionRecoveryManager.swift in Sources */,
 				A11E000633D3000100000006 /* XauXatCodeLockedContent.swift in Sources */,
 				A11E002233D4000100000022 /* XauXatGroupAccessRules.swift in Sources */,
@@ -1875,6 +1890,7 @@
 				64A779F62DBFB9F200FDEF2F /* MemberAdmissionView.swift in Sources */,
 				18415C6C56DBCEC2CBBD2F11 /* WebRTCClient.swift in Sources */,
 				A11E000533D2000200000005 /* XauXatRealtimeAudioDevice.swift in Sources */,
+				A11E000733D2000200000007 /* XauXatLLVCCapture.swift in Sources */,
 				8CB15EA02CFDA30600C28209 /* ChatItemsMerger.swift in Sources */,
 				184152CEF68D2336FC2EBCB0 /* CallViewRenderers.swift in Sources */,
 				5CB634AD29E46CF70066AD6B /* LocalAuthView.swift in Sources */,
@@ -2320,6 +2336,7 @@
 				CLANG_TIDY_MISC_REDUNDANT_EXPRESSION = YES;
 				CODE_SIGN_ENTITLEMENTS = "XauXat Release.entitlements";
 				CODE_SIGN_STYLE = Automatic;
+				EXCLUDED_SOURCE_FILE_NAMES = "XauXatLLVC.mlpackage LLVC-LICENSE.txt";
 				PROVISIONING_PROFILE_SPECIFIER = "$(XAUXAT_MAIN_PROFILE)";
 				CURRENT_PROJECT_VERSION = 12;
 				DEAD_CODE_STRIPPING = YES;

@@ -18,10 +18,13 @@ enum XauXatProductPolicy {
 }
 
 class CallManager {
-    func newOutgoingCall(_ contact: Contact, _ media: CallMediaType) -> String {
+    func newOutgoingCall(_ contact: Contact, _ media: CallMediaType, startWithModifiedVoice: Bool) -> String {
         let media = XauXatProductPolicy.callMedia(media)
         let uuid = UUID().uuidString.lowercased()
-        let call = Call(direction: .outgoing, contact: contact, callUUID: uuid, callState: .waitCapabilities, initialCallType: media)
+        let call = Call(
+            direction: .outgoing, contact: contact, callUUID: uuid,
+            callState: .waitCapabilities, initialCallType: media, startWithModifiedVoice: startWithModifiedVoice
+        )
         call.speakerEnabled = media == .video
         ChatModel.shared.activeCall = call
         return uuid
@@ -45,7 +48,8 @@ class CallManager {
         return false
     }
 
-    func answerIncomingCall(invitation: RcvCallInvitation) {
+    func answerIncomingCall(invitation: RcvCallInvitation, startWithModifiedVoice: Bool = false) {
+        XauXatCallTiming.mark("incoming.accept")
         let m = ChatModel.shared
         let media = XauXatProductPolicy.callMedia(invitation.callType.media)
         m.callInvitations.removeValue(forKey: invitation.contact.id)
@@ -55,7 +59,8 @@ class CallManager {
             callUUID: invitation.callUUID,
             callState: .invitationAccepted,
             initialCallType: media,
-            sharedKey: invitation.sharedKey
+            sharedKey: invitation.sharedKey,
+            startWithModifiedVoice: startWithModifiedVoice
         )
         call.speakerEnabled = media == .video
         let useRelay = UserDefaults.standard.bool(forKey: DEFAULT_WEBRTC_POLICY_RELAY)
@@ -98,41 +103,61 @@ class CallManager {
     }
 
     func endCall(call: Call, completed: @escaping () -> Void) {
-        let m = ChatModel.shared
-        if case .ended = call.callState {
-            logger.debug("CallManager.endCall: call ended")
-            m.activeCall = nil
-            m.activeCallViewIsCollapsed = false
-            m.showCallView = false
-            completed()
-        } else {
-            logger.debug("CallManager.endCall: ending call...")
+        let shouldSignal = call.callState != .ended
+        if Self.clearActiveCall(call), shouldSignal {
             Task {
-                await m.callCommand.processCommand(.end)
-                await MainActor.run {
-                    m.activeCall = nil
-                    m.activeCallViewIsCollapsed = false
-                    m.showCallView = false
-                    completed()
-                }
+                XauXatCallTiming.mark("end.sending")
                 do {
                     try await apiEndCall(call.contact)
+                    XauXatCallTiming.mark("end.queued")
                 } catch {
+                    XauXatCallTiming.mark("end.failed")
                     logger.error("CallController.provider apiEndCall error: \(responseError(error))")
                 }
             }
         }
+        completed()
+    }
+
+    @discardableResult
+    static func clearActiveCall(_ call: Call) -> Bool {
+        let m = ChatModel.shared
+        guard m.activeCall === call else { return false }
+        call.callState = .ended
+        m.showCallView = false
+        m.activeCallViewIsCollapsed = false
+        m.activeCall = nil
+        return true
     }
 
     func endCall(invitation: RcvCallInvitation, completed: @escaping () -> Void) {
-        ChatModel.shared.callInvitations.removeValue(forKey: invitation.contact.id)
+        let m = ChatModel.shared
+        let id = invitation.contact.id
+        guard let current = m.callInvitations[id], current.callTs == invitation.callTs,
+              current.callUUID == invitation.callUUID else {
+            completed()
+            return
+        }
+        m.callInvitations.removeValue(forKey: id)
+        completed()
         Task {
+            XauXatCallTiming.mark("reject.sending")
             do {
+                #if DEBUG
+                if UserDefaults.standard.bool(forKey: "xauxatLegacyReject") {
+                    // The prebuilt iOS core only sends XCallEnd for /_call end.
+                    try await apiEndCall(invitation.contact)
+                } else {
+                    try await apiRejectCall(invitation.contact)
+                }
+                #else
                 try await apiRejectCall(invitation.contact)
+                #endif
+                XauXatCallTiming.mark("reject.queued")
             } catch {
+                XauXatCallTiming.mark("reject.failed")
                 logger.error("CallController.provider apiRejectCall error: \(responseError(error))")
             }
-            completed()
         }
     }
 
