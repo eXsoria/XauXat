@@ -32,6 +32,27 @@ change all presets while speaking, and repeat on receiver, speaker, wired, and
 Bluetooth routes. Confirm that the call remains connected and that no original
 voice is heard during either preset transitions or forced processing failures.
 
+## LLVC call prototype
+
+Run the Debug configuration of `SimpleX (iOS)` on an iPhone. In a private
+audio call, open the XauXat mask button and enable **xauxat voice mask**.
+Start with the built-in microphone. Have the recipient compare normal and
+converted speech during a conversation, including quick turns and overlapping
+speech. Switching the toggle off restores the normal microphone.
+
+The bundled Core ML model uses the MIT-licensed KoeAI LLVC `G_500000` checkpoint,
+with a single target voice. Inference stays on the phone. The prototype accepts
+16 kHz and 48 kHz capture routes and sends silence during startup or failure.
+It is available in Debug independently of Plus and has no validated speaker
+anonymization claim.
+
+To reproduce the model, run [export-llvc.py](../../scripts/ios/export-llvc.py)
+with PyTorch, SpeechBrain and Core ML Tools on macOS. Pass the
+[upstream source at 1627c5d](https://github.com/KoeAI/LLVC/tree/1627c5d358cf9bb2b92b0ccc513d8b36807c923d),
+the [G_500000.pth checkpoint](https://huggingface.co/KoeAI/llvc_models/tree/main/models/checkpoints/llvc)
+and the output path for `XauXatLLVC.mlpackage`. The script verifies the
+checkpoint hash and compares successive Core ML outputs with upstream PyTorch.
+
 ## Third-party reference
 
 The AVAudioEngine bridge is adapted from Yury Yaroshevich's MIT-licensed

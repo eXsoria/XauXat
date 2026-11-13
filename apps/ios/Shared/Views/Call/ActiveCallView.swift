@@ -78,7 +78,6 @@ struct ActiveCallView: View {
             dismissAllSheets()
             hideKeyboard()
             prevColorScheme = colorScheme
-            XauXatRealtimeVoiceMasking.shared.beginCall()
         }
         .onChange(of: canConnectCall) { _ in
             logger.debug("ActiveCallView: canConnectCall changed to \(canConnectCall)")
@@ -91,10 +90,11 @@ struct ActiveCallView: View {
             logger.debug("ActiveCallView: disappear")
             Task { await m.callCommand.setClient(nil) }
             AppDelegate.keepScreenOn(false)
-            client?.endCall()
-            XauXatRealtimeVoiceMasking.shared.endCall()
+            XauXatRealtimeVoiceMasking.shared.endCall(call)
             CallSoundsPlayer.shared.stop()
-            try? AVAudioSession.sharedInstance().setCategory(.soloAmbient)
+            if let client {
+                DispatchQueue.global(qos: .utility).async { client.endCall() }
+            }
             if (wasConnected) {
                 CallSoundsPlayer.shared.vibrate(long: true)
             }
@@ -105,7 +105,8 @@ struct ActiveCallView: View {
     }
 
     private func createWebRTCClient() {
-        if client == nil && canConnectCall {
+        if client == nil && canConnectCall && m.activeCall === call {
+            XauXatRealtimeVoiceMasking.shared.beginCall(call)
             client = WebRTCClient({ msg in await MainActor.run { processRtcMessage(msg: msg) } }, $localRendererAspectRatio)
             Task {
                 await m.callCommand.setClient(client)
@@ -115,7 +116,7 @@ struct ActiveCallView: View {
 
     @MainActor
     private func processRtcMessage(msg: WVAPIMessage) {
-        if call == m.activeCall,
+        if call === m.activeCall,
            let call = m.activeCall,
            let client = client {
             logger.debug("ActiveCallView: response \(msg.resp.respType)")
@@ -123,43 +124,63 @@ struct ActiveCallView: View {
             case let .capabilities(capabilities):
                 let callType = CallType(media: call.initialCallType, capabilities: capabilities)
                 Task {
+                    XauXatCallTiming.mark("invitation.sending")
                     do {
                         try await apiSendCallInvitation(call.contact, callType)
+                        XauXatCallTiming.mark("invitation.queued")
                     } catch {
+                        XauXatCallTiming.mark("invitation.failed")
                         logger.error("apiSendCallInvitation \(responseError(error))")
+                        showSignalingError(for: call)
+                        return
                     }
+                    guard m.activeCall === call else { return }
                     await MainActor.run {
-                        call.callState = .invitationSent
+                        if call.callState == .waitCapabilities { call.callState = .invitationSent }
                         call.localCapabilities = capabilities
                     }
                     if call.hasVideo && !AVAudioSession.sharedInstance().hasExternalAudioDevice() {
                         try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
                     }
-                    CallSoundsPlayer.shared.startConnectingCallSound()
-                    activeCallWaitDeliveryReceipt()
+                    if call.callState == .invitationSent {
+                        CallSoundsPlayer.shared.startConnectingCallSound()
+                        activeCallWaitDeliveryReceipt()
+                    }
                 }
             case let .offer(offer, iceCandidates, capabilities):
                 Task {
+                    XauXatCallTiming.mark("offer.sending")
                     do {
                         try await apiSendCallOffer(call.contact, offer, iceCandidates,
                                                    media: call.initialCallType, capabilities: capabilities)
+                        XauXatCallTiming.mark("offer.queued")
                     } catch {
+                        XauXatCallTiming.mark("offer.failed")
                         logger.error("apiSendCallOffer \(responseError(error))")
+                        showSignalingError(for: call)
+                        return
                     }
                     await MainActor.run {
-                        call.callState = .offerSent
+                        guard m.activeCall === call else { return }
+                        if call.callState == .invitationAccepted { call.callState = .offerSent }
                         call.localCapabilities = capabilities
                     }
                 }
             case let .answer(answer, iceCandidates):
                 Task {
+                    XauXatCallTiming.mark("answer.sending")
                     do {
                         try await apiSendCallAnswer(call.contact, answer, iceCandidates)
+                        XauXatCallTiming.mark("answer.queued")
                     } catch {
+                        XauXatCallTiming.mark("answer.failed")
                         logger.error("apiSendCallAnswer \(responseError(error))")
+                        showSignalingError(for: call)
+                        return
                     }
                     await MainActor.run {
-                        call.callState = .negotiated
+                        guard m.activeCall === call else { return }
+                        if call.callState == .offerReceived { call.callState = .negotiated }
                         CallSoundsPlayer.shared.stop()
                     }
                 }
@@ -174,6 +195,7 @@ struct ActiveCallView: View {
             case let .connection(state):
                 if let callStatus = WebRTCCallStatus.init(rawValue: state.connectionState),
                    case .connected = callStatus {
+                    CallSoundsPlayer.shared.stop()
                     call.direction == .outgoing
                     ? CallController.shared.reportOutgoingCall(call: call, connectedAt: nil)
                     : CallController.shared.reportIncomingCall(call: call, connectedAt: nil)
@@ -200,6 +222,7 @@ struct ActiveCallView: View {
                     }
                 }
             case let .connected(connectionInfo):
+                CallSoundsPlayer.shared.stop()
                 call.callState = .connected
                 call.connectionInfo = connectionInfo
                 call.connectedAt = .now
@@ -224,7 +247,7 @@ struct ActiveCallView: View {
             case .ok:
                 switch msg.command {
                 case .answer:
-                    call.callState = .negotiated
+                    if call.callState == .answerReceived { call.callState = .negotiated }
                 case .end:
                     closeCallView(client)
                     m.activeCall = nil
@@ -232,6 +255,7 @@ struct ActiveCallView: View {
                 default: ()
                 }
             case let .error(message):
+                XauXatCallTiming.mark("webrtc.command_failed")
                 logger.debug("ActiveCallView: command error: \(message)")
                 AlertManager.shared.showAlert(Alert(title: Text("Error"), message: Text(message)))
             case let .invalid(type):
@@ -239,6 +263,12 @@ struct ActiveCallView: View {
                 AlertManager.shared.showAlert(Alert(title: Text("Invalid response"), message: Text(type)))
             }
         }
+    }
+
+    @MainActor
+    private func showSignalingError(for call: Call) {
+        guard CallController.shared.endCallAfterSignalingFailure(call) else { return }
+        AlertManager.shared.showAlertMsg(title: "Call failed", message: "The call could not be established. Please try again.")
     }
 
     private func activeCallWaitDeliveryReceipt() {
@@ -299,7 +329,6 @@ struct ActiveCallOverlay: View {
     @ObservedObject private var deviceManager = CallAudioDeviceManager.shared
     @StateObject private var voiceMasking = XauXatRealtimeVoiceMasking.shared
     @State private var showVoiceMasking = false
-    @State private var showVoiceMaskingPaywall = false
 
     var body: some View {
         VStack {
@@ -368,19 +397,7 @@ struct ActiveCallOverlay: View {
             deviceManager.stop()
         }
         .sheet(isPresented: $showVoiceMasking) {
-            XauXatRealtimeVoiceMaskingView()
-        }
-        .sheet(isPresented: $showVoiceMaskingPaywall) {
-            NavigationView {
-                XauXatPlusView()
-                    .navigationTitle("XauXat Plus")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { showVoiceMaskingPaywall = false }
-                        }
-                    }
-            }
+            XauXatRealtimeVoiceMaskingView(allowsVoiceMasking: plusEntitlements.isAuthorized(for: .realTimeVoiceMasking))
         }
         .alert("Voice masking unavailable", isPresented: Binding(
             get: { voiceMasking.failureMessage != nil },
@@ -471,29 +488,21 @@ struct ActiveCallOverlay: View {
     }
 
     private func realtimeVoiceMaskButton() -> some View {
-        controlButton(
-            call,
-            voiceMasking.enabled ? "waveform.badge.shield.lefthalf.filled" : "waveform.badge.shield.lefthalf",
-            padding: 13
-        ) {
-            if plusEntitlements.isAuthorized(for: .realTimeVoiceMasking) {
-                showVoiceMasking = true
-            } else {
-                showVoiceMaskingPaywall = true
+        let isModified = voiceMasking.enabled || voiceMasking.llvcEnabled || voiceMasking.ambience != .off
+        let background = XauXatProductPolicy.videoCallsEnabled && call.peerMediaSources.hasVideo
+            ? Color.black.opacity(0.2) : Color.white.opacity(0.2)
+        return callButton(Image("xauxat-mask"), background, padding: 13) {
+            showVoiceMasking = true
+        }
+        .overlay {
+            if isModified {
+                Circle().strokeBorder(whiteColorWithAlpha, lineWidth: 2)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
-        .overlay(alignment: .topTrailing) {
-            if !plusEntitlements.isAuthorized(for: .realTimeVoiceMasking) {
-                Image(systemName: "lock.fill")
-                    .font(.caption2)
-                    .foregroundColor(whiteColorWithAlpha)
-                    .padding(3)
-            }
-        }
-        .accessibilityLabel(plusEntitlements.isAuthorized(for: .realTimeVoiceMasking)
-            ? "Real-time voice masking"
-            : "Real-time voice masking, XauXat Plus")
-        .accessibilityValue(voiceMasking.enabled ? voiceMasking.preset.name : "Off")
+        .accessibilityLabel("Call audio effects")
+        .accessibilityValue(isModified ? Text("Effects active") : Text("Off"))
     }
 
     func audioDeviceButton() -> some View {
@@ -568,10 +577,14 @@ struct ActiveCallOverlay: View {
     }
 
     private func callButton(_ imageName: String, _ background: Color, padding: CGFloat, _ perform: @escaping () -> Void) -> some View {
+        callButton(Image(systemName: imageName), background, padding: padding, perform)
+    }
+
+    private func callButton(_ image: Image, _ background: Color, padding: CGFloat, _ perform: @escaping () -> Void) -> some View {
         Button {
             perform()
         } label: {
-            Image(systemName: imageName)
+            image
                 .resizable()
                 .scaledToFit()
                 .padding(padding)
@@ -588,41 +601,77 @@ struct ActiveCallOverlay: View {
 }
 
 private struct XauXatRealtimeVoiceMaskingView: View {
+    let allowsVoiceMasking: Bool
     @Environment(\.dismiss) private var dismiss
     @StateObject private var voiceMasking = XauXatRealtimeVoiceMasking.shared
 
     var body: some View {
         NavigationView {
             Form {
+                #if DEBUG
                 Section {
-                    Toggle("Mask my voice", isOn: Binding(
-                        get: { voiceMasking.enabled },
-                        set: voiceMasking.setEnabled
+                    Toggle("Stealth", isOn: Binding(
+                        get: { voiceMasking.llvcEnabled },
+                        set: voiceMasking.setLLVCEnabled
                     ))
                 } footer: {
-                    Text("Your microphone is transformed locally before WebRTC receives it. Preset changes keep the call connected.")
+                    Text("Processed locally on your iPhone. With active noise cancelation.")
                 }
-
-                Section("Voice preset") {
-                    ForEach(XauXatVoiceMaskPreset.allCases) { preset in
-                        Button { voiceMasking.setPreset(preset) } label: {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(preset.name)
-                                        .foregroundColor(.primary)
-                                    Text(preset.detail)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: voiceMasking.preset == preset ? "checkmark.circle.fill" : "circle")
-                                    .foregroundColor(voiceMasking.preset == preset ? .accentColor : .secondary)
-                            }
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
+                #else
+                if allowsVoiceMasking {
+                    Section {
+                        Toggle("Mask my voice", isOn: Binding(
+                            get: { voiceMasking.enabled },
+                            set: voiceMasking.setEnabled
+                        ))
+                    } footer: {
+                        Text("Your microphone is transformed locally before WebRTC receives it. Preset changes keep the call connected.")
                     }
+
+                    Section("Voice preset") {
+                        ForEach(XauXatVoiceMaskPreset.allCases) { preset in
+                            Button { voiceMasking.setPreset(preset) } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(preset.name)
+                                            .foregroundColor(.primary)
+                                        Text(preset.detail)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: voiceMasking.preset == preset ? "checkmark.circle.fill" : "circle")
+                                        .foregroundColor(voiceMasking.preset == preset ? .accentColor : .secondary)
+                                }
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } else {
+                    NavigationLink {
+                        XauXatPlusView()
+                            .navigationTitle("XauXat Plus")
+                            .navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        Label("Voice masking · XauXat Plus", systemImage: "lock")
+                    }
+                }
+                #endif
+
+                Section {
+                    Picker("Background sound", selection: Binding(
+                        get: { voiceMasking.ambience },
+                        set: voiceMasking.setAmbience
+                    )) {
+                        Text("Off").tag(XauXatCallAmbience.off)
+                        Text("Rain").tag(XauXatCallAmbience.rain)
+                        Text("Outside").tag(XauXatCallAmbience.traffic)
+                    }
+                    .pickerStyle(.menu)
+                } footer: {
+                    Text("The other person hears this sound during the call.")
                 }
 
                 if let failureMessage = voiceMasking.failureMessage {
@@ -632,7 +681,7 @@ private struct XauXatRealtimeVoiceMaskingView: View {
                     }
                 }
             }
-            .navigationTitle("Call voice masking")
+            .navigationTitle("Call audio effects")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

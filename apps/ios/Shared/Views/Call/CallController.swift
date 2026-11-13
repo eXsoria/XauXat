@@ -20,7 +20,15 @@ import WebRTC
 class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, ObservableObject {
     static let shared = CallController()
     static let isInChina = SKStorefront().countryCode == "CHN"
-    static func useCallKit() -> Bool { !isInChina && callKitEnabledGroupDefault.get() }
+    static func useCallKit() -> Bool {
+        #if DEBUG
+        // The personally signed LLVC prototype uses the in-app call interface.
+        if Bundle.main.bundleIdentifier == "pt.exsoria.xauxat.llvcprototype" {
+            return false
+        }
+        #endif
+        return !isInChina && callKitEnabledGroupDefault.get()
+    }
 
     private let provider = CXProvider(configuration: {
         let configuration = CXProviderConfiguration()
@@ -351,6 +359,22 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
         }
     }
 
+    @MainActor
+    func endCallAfterSignalingFailure(_ call: Call) -> Bool {
+        guard ChatModel.shared.activeCall === call else { return false }
+        if CallController.useCallKit(), let callUUID = call.callUUID, let uuid = UUID(uuidString: callUUID) {
+            if let action = fulfillOnConnect, action.callUUID == uuid {
+                action.fail()
+                fulfillOnConnect = nil
+            }
+            provider.reportCall(with: uuid, endedAt: nil, reason: .failed)
+        }
+        let cleared = CallManager.clearActiveCall(call)
+        suspendOnEndCall()
+        return cleared
+    }
+
+    @MainActor
     func startCall(_ contact: Contact, _ media: CallMediaType) {
         logger.debug("CallController.startCall")
         guard xauXatContactInvitePermissions(contact).calls else {
@@ -363,22 +387,40 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
 
         let media = XauXatProductPolicy.callMedia(media)
         let useRelay = UserDefaults.standard.bool(forKey: DEFAULT_WEBRTC_POLICY_RELAY)
-        let privacyMessage: LocalizedStringKey = useRelay
-            ? "Call audio does not use Tor. It is end-to-end encrypted and routed through a call relay, which hides your IP address from the contact. The relay can see your IP address and the call duration."
-            : "Call audio does not use Tor. It is end-to-end encrypted, but it may connect directly and expose your IP address to the contact. If a call relay is used, the relay can see your IP address and the call duration."
+        let callProtection = useRelay
+            ? NSLocalizedString("Your call uses end-to-end encryption when supported by both devices. A call relay hides your IP address from the other person.", comment: "call privacy warning with relay")
+            : NSLocalizedString("Your call uses end-to-end encryption when supported by both devices. A direct connection can reveal your IP address to the other person.", comment: "call privacy warning without mandatory relay")
+        #if DEBUG
+        let voiceMaskMessage = useRelay
+            ? NSLocalizedString("Although your call is end-to-end encrypted and your IP is hidden through a relay, your voice is still a part of you. We recommend you to use the xauxat voice mask for an extra layer of privacy", comment: "call privacy warning with relay and voice mask")
+            : callProtection + "\n\n" + NSLocalizedString("Your voice can still identify you. For an extra layer of privacy, use the xauxat voice mask.", comment: "call privacy warning voice mask recommendation")
+        let privacyMessage = XauXatDirectCallTest.shared.usesDirectSignaling(for: contact)
+            ? voiceMaskMessage + "\n\n" + NSLocalizedString("The messaging relay can see your IP address during this test call.", comment: "direct SMP test privacy warning")
+            : voiceMaskMessage
+        #else
+        let privacyMessage = callProtection
+        #endif
 
-        AlertManager.shared.showAlert(Alert(
-            title: Text("Before this call"),
-            message: Text(privacyMessage),
-            primaryButton: .default(Text("Continue call")) { [weak self] in
-                self?.startCallAfterPrivacyConfirmation(contact, media)
-            },
-            secondaryButton: .cancel()
-        ))
+        showAlert(NSLocalizedString("Important warning", comment: "call privacy alert title"), message: privacyMessage) {
+            var actions = [
+                UIAlertAction(title: NSLocalizedString("Continue", comment: "start call without voice modification"), style: .default) { [weak self] _ in
+                    self?.startCallAfterPrivacyConfirmation(contact, media, startWithModifiedVoice: false)
+                }
+            ]
+            #if DEBUG
+            actions.append(UIAlertAction(title: NSLocalizedString("use voice mask", comment: "start call with LLVC enabled"), style: .default) { [weak self] _ in
+                self?.startCallAfterPrivacyConfirmation(contact, media, startWithModifiedVoice: true)
+            })
+            #endif
+            actions.append(UIAlertAction(title: NSLocalizedString("Cancel", comment: "alert button"), style: .cancel))
+            return actions
+        }
     }
 
-    private func startCallAfterPrivacyConfirmation(_ contact: Contact, _ media: CallMediaType) {
-        let callUUID = callManager.newOutgoingCall(contact, media)
+    private func startCallAfterPrivacyConfirmation(_ contact: Contact, _ media: CallMediaType, startWithModifiedVoice: Bool) {
+        guard ChatModel.shared.activeCall == nil else { return }
+        XauXatCallTiming.mark("outgoing.start")
+        let callUUID = callManager.newOutgoingCall(contact, media, startWithModifiedVoice: startWithModifiedVoice)
         guard let uuid = UUID(uuidString: callUUID) else {
             return
         }
@@ -386,7 +428,14 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
             let handle = CXHandle(type: .generic, value: contact.id)
             let action = CXStartCallAction(call: uuid, handle: handle)
             action.isVideo = media == .video
-            requestTransaction(with: action) {
+            requestTransaction(with: action, onFailure: {
+                DispatchQueue.main.async {
+                    if let call = ChatModel.shared.activeCall, call.callUUID == callUUID,
+                       CallManager.clearActiveCall(call) {
+                        AlertManager.shared.showAlertMsg(title: "Call failed", message: "The iOS call interface could not start the call.")
+                    }
+                }
+            }) {
                 let update = CXCallUpdate()
                 update.remoteHandle = CXHandle(type: .generic, value: contact.id)
                 update.hasVideo = false
@@ -400,12 +449,14 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
         }
     }
 
-    func answerCall(invitation: RcvCallInvitation) {
+    func answerCall(invitation: RcvCallInvitation, startWithModifiedVoice: Bool = false) {
         logger.debug("CallController: answering a call")
+        guard let current = ChatModel.shared.callInvitations[invitation.contact.id],
+              current.callUUID == invitation.callUUID, current.callTs == invitation.callTs else { return }
         if CallController.useCallKit(), let callUUID = invitation.callUUID, let uuid = UUID(uuidString: callUUID) {
             requestTransaction(with: CXAnswerCallAction(call: uuid))
         } else {
-            callManager.answerIncomingCall(invitation: invitation)
+            callManager.answerIncomingCall(invitation: invitation, startWithModifiedVoice: startWithModifiedVoice)
         }
         if invitation.contact.id == self.activeCallInvitation?.contact.id {
             self.activeCallInvitation = nil
@@ -432,13 +483,11 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
 
     func endCall(invitation: RcvCallInvitation) {
         logger.debug("CallController: ending the call with invitation")
-        callManager.endCall(invitation: invitation) {
-            if invitation.contact.id == self.activeCallInvitation?.contact.id {
-                DispatchQueue.main.async {
-                    self.activeCallInvitation = nil
-                }
-            }
+        if let activeCallInvitation, activeCallInvitation.contact.id == invitation.contact.id,
+           activeCallInvitation.callTs == invitation.callTs, activeCallInvitation.callUUID == invitation.callUUID {
+            self.activeCallInvitation = nil
         }
+        callManager.endCall(invitation: invitation) {}
     }
 
     func endCall(call: Call, completed: @escaping () -> Void) {
@@ -464,10 +513,11 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
         controller.callObserver.calls.count > 0
     }
 
-    private func requestTransaction(with action: CXAction, onSuccess: @escaping () -> Void = {}) {
+    private func requestTransaction(with action: CXAction, onFailure: @escaping () -> Void = {}, onSuccess: @escaping () -> Void = {}) {
         controller.request(CXTransaction(action: action)) { error in
             if let error = error {
                 logger.error("CallController.requestTransaction error requesting transaction: \(error.localizedDescription)")
+                onFailure()
             } else {
                 logger.debug("CallController.requestTransaction requested transaction successfully")
                 onSuccess()

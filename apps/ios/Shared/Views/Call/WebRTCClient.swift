@@ -25,6 +25,9 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
     private static let ivTagBytes: Int = 28
     private static let enableEncryption: Bool = true
     private var chat_ctrl = getChatCtrl()
+    #if DEBUG
+    private var audioTimingTask: Task<Void, Never>?
+    #endif
 
     struct Call {
         var connection: RTCPeerConnection
@@ -64,7 +67,10 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
     }
 
     private let rtcAudioSession =  RTCAudioSession.sharedInstance()
-    private let audioQueue = DispatchQueue(label: "pt.exsoria.xauxat.audio")
+    private static let audioQueue = DispatchQueue(label: "pt.exsoria.xauxat.audio")
+    private static weak var audioSessionOwner: WebRTCClient?
+    private let usesCallKitAudio = CallController.useCallKit()
+    private var activatedAudioSession = false
     private var sendCallResponse: (WVAPIMessage) async -> Void
     var activeCall: Call?
     var notConnectedCall: NotConnectedCall?
@@ -81,8 +87,8 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
     required init(_ sendCallResponse: @escaping (WVAPIMessage) async -> Void, _ localRendererAspectRatio: Binding<CGFloat?>) {
         self.sendCallResponse = sendCallResponse
         self.localRendererAspectRatio = localRendererAspectRatio
-        rtcAudioSession.useManualAudio = CallController.useCallKit()
-        rtcAudioSession.isAudioEnabled = !CallController.useCallKit()
+        rtcAudioSession.useManualAudio = usesCallKitAudio
+        rtcAudioSession.isAudioEnabled = !usesCallKitAudio
         logger.debug("WebRTCClient: rtcAudioSession has manual audio \(self.rtcAudioSession.useManualAudio) and audio enabled \(self.rtcAudioSession.isAudioEnabled)")
         super.init()
     }
@@ -656,16 +662,23 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
     }
 
     private func _endCall() {
+        #if DEBUG
+        audioTimingTask?.cancel()
+        audioTimingTask = nil
+        #endif
         (notConnectedCall?.localCameraAndTrack?.0 as? RTCCameraVideoCapturer)?.stopCapture()
-        guard let call = activeCall else { return }
+        guard let call = activeCall else {
+            audioSessionToDefaults()
+            return
+        }
         logger.debug("WebRTCClient: ending the call")
+        activeCall = nil
         call.connection.close()
         call.connection.delegate = nil
         call.frameEncryptor?.delegate = nil
         call.frameDecryptor?.delegate = nil
         (call.localCamera as? RTCCameraVideoCapturer)?.stopCapture()
         audioSessionToDefaults()
-        activeCall = nil
     }
 
     func untilIceComplete(timeoutMs: UInt64, stepMs: UInt64, action: @escaping () async -> Void) async {
@@ -775,6 +788,9 @@ extension WebRTCClient: RTCPeerConnectionDelegate {
         else {
             return
         }
+        if XauXatCallTiming.enabled {
+            XauXatCallTiming.mark("ice.\(connectionStateString)")
+        }
         Task {
             await sendCallResponse(.init(
                 corrId: nil,
@@ -789,6 +805,11 @@ extension WebRTCClient: RTCPeerConnectionDelegate {
 
             switch newState {
             case .checking:
+                #if DEBUG
+                if XauXatCallTiming.enabled, audioTimingTask == nil {
+                    audioTimingTask = Task { await Self.measureFirstAudio(connection) }
+                }
+                #endif
                 if let frameDecryptor = activeCall?.frameDecryptor {
                     connection.receivers.forEach { $0.setRtcFrameDecryptor(frameDecryptor) }
                 }
@@ -800,6 +821,43 @@ extension WebRTCClient: RTCPeerConnectionDelegate {
             }
         }
     }
+
+    #if DEBUG
+    private static func measureFirstAudio(_ connection: RTCPeerConnection) async {
+        var pending: Set<String> = ["audio.source.energy", "audio.rtp.sent", "audio.rtp.received", "audio.inbound.energy"]
+        let deadline = ProcessInfo.processInfo.systemUptime + 45
+        while !Task.isCancelled, !pending.isEmpty, ProcessInfo.processInfo.systemUptime < deadline {
+            let report: RTCStatisticsReport = await withCheckedContinuation { continuation in
+                connection.statistics { continuation.resume(returning: $0) }
+            }
+            guard !Task.isCancelled else { return }
+            for stat in report.statistics.values {
+                let kind = (stat.values["kind"] ?? stat.values["mediaType"]) as? String
+                guard kind == "audio" else { continue }
+                func markWhenPositive(_ field: String, _ stage: String) {
+                    if let value = stat.values[field] as? NSNumber, value.doubleValue > 0,
+                       pending.remove(stage) != nil {
+                        XauXatCallTiming.mark(stage)
+                    }
+                }
+                switch stat.type {
+                case "media-source":
+                    markWhenPositive("totalAudioEnergy", "audio.source.energy")
+                case "outbound-rtp":
+                    markWhenPositive("packetsSent", "audio.rtp.sent")
+                case "inbound-rtp":
+                    markWhenPositive("packetsReceived", "audio.rtp.received")
+                    markWhenPositive("totalAudioEnergy", "audio.inbound.energy")
+                default: break
+                }
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        if !Task.isCancelled, !pending.isEmpty {
+            XauXatCallTiming.mark("audio.probe.timeout.missing=\(pending.sorted().joined(separator: ","))")
+        }
+    }
+    #endif
 
     func peerConnection(_ connection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
         logger.debug("connection new gathering state: \(newState.toString() ?? "" + newState.rawValue.description)")
@@ -900,8 +958,9 @@ extension WebRTCClient {
 
     func setSpeakerEnabledAndConfigureSession( _ enabled: Bool, skipExternalDevice: Bool = false) {
         logger.debug("WebRTCClient: configuring session with speaker enabled \(enabled)")
-        audioQueue.async { [weak self] in
+        Self.audioQueue.async { [weak self] in
             guard let self = self else { return }
+            Self.audioSessionOwner = self
             self.rtcAudioSession.lockForConfiguration()
             defer {
                 self.rtcAudioSession.unlockForConfiguration()
@@ -924,7 +983,10 @@ extension WebRTCClient {
                 if hasExternalAudioDevice && !skipExternalDevice {
                     logger.debug("WebRTCClient: configuring session with external device available, skip configuring speaker")
                 }
-                try self.rtcAudioSession.setActive(true)
+                if !self.usesCallKitAudio, !self.activatedAudioSession {
+                    try self.rtcAudioSession.setActive(true)
+                    self.activatedAudioSession = true
+                }
                 logger.debug("WebRTCClient: configuring session with speaker enabled \(enabled) success")
             } catch let error {
                 logger.debug("Error configuring AVAudioSession: \(error)")
@@ -934,17 +996,24 @@ extension WebRTCClient {
 
     func audioSessionToDefaults() {
         logger.debug("WebRTCClient: audioSession to defaults")
-        audioQueue.async { [weak self] in
-            guard let self = self else { return }
+        Self.audioQueue.async {
             self.rtcAudioSession.lockForConfiguration()
             defer {
                 self.rtcAudioSession.unlockForConfiguration()
             }
+            if self.activatedAudioSession {
+                do {
+                    try self.rtcAudioSession.setActive(false)
+                    self.activatedAudioSession = false
+                } catch {
+                    logger.error("Error deactivating call audio: \(error)")
+                }
+            }
+            guard Self.audioSessionOwner === self else { return }
+            Self.audioSessionOwner = nil
             do {
                 try self.rtcAudioSession.setCategory(AVAudioSession.Category.ambient.rawValue)
                 try self.rtcAudioSession.setMode(AVAudioSession.Mode.default.rawValue)
-                try self.rtcAudioSession.overrideOutputAudioPort(.none)
-                try self.rtcAudioSession.setActive(false)
                 logger.debug("WebRTCClient: audioSession to defaults success")
             } catch let error {
                 logger.debug("Error configuring AVAudioSession with defaults: \(error)")

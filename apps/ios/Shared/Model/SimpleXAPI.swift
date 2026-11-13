@@ -2496,31 +2496,31 @@ func rejectContactRequest(_ contactRequestId: Int64, dismissToChatList: Bool = f
 }
 
 func apiSendCallInvitation(_ contact: Contact, _ callType: CallType) async throws {
-    try await sendCommandOkResp(.apiSendCallInvitation(contact: contact, callType: callType))
+    try await sendCallCommand(contact) { .apiSendCallInvitation(contact: $0, callType: callType) }
 }
 
 func apiRejectCall(_ contact: Contact) async throws {
-    try await sendCommandOkResp(.apiRejectCall(contact: contact))
+    try await sendCallCommand(contact) { .apiRejectCall(contact: $0) }
 }
 
 func apiSendCallOffer(_ contact: Contact, _ rtcSession: String, _ rtcIceCandidates: String, media: CallMediaType, capabilities: CallCapabilities) async throws {
     let webRtcSession = WebRTCSession(rtcSession: rtcSession, rtcIceCandidates: rtcIceCandidates)
     let callOffer = WebRTCCallOffer(callType: CallType(media: media, capabilities: capabilities), rtcSession: webRtcSession)
-    try await sendCommandOkResp(.apiSendCallOffer(contact: contact, callOffer: callOffer))
+    try await sendCallCommand(contact) { .apiSendCallOffer(contact: $0, callOffer: callOffer) }
 }
 
 func apiSendCallAnswer(_ contact: Contact, _ rtcSession: String, _ rtcIceCandidates: String) async throws {
     let answer = WebRTCSession(rtcSession: rtcSession, rtcIceCandidates: rtcIceCandidates)
-    try await sendCommandOkResp(.apiSendCallAnswer(contact: contact, answer: answer))
+    try await sendCallCommand(contact) { .apiSendCallAnswer(contact: $0, answer: answer) }
 }
 
 func apiSendCallExtraInfo(_ contact: Contact, _ rtcIceCandidates: String) async throws {
     let extraInfo = WebRTCExtraInfo(rtcIceCandidates: rtcIceCandidates)
-    try await sendCommandOkResp(.apiSendCallExtraInfo(contact: contact, extraInfo: extraInfo))
+    try await sendCallCommand(contact) { .apiSendCallExtraInfo(contact: $0, extraInfo: extraInfo) }
 }
 
 func apiEndCall(_ contact: Contact) async throws {
-    try await sendCommandOkResp(.apiEndCall(contact: contact))
+    try await sendCallCommand(contact) { .apiEndCall(contact: $0) }
 }
 
 func apiGetCallInvitationsSync() throws -> [RcvCallInvitation] {
@@ -2537,10 +2537,17 @@ func apiGetCallInvitations() async throws -> [RcvCallInvitation] {
 
 func apiCallStatus(_ contact: Contact, _ status: String) async throws {
     if let callStatus = WebRTCCallStatus.init(rawValue: status) {
-        try await sendCommandOkResp(.apiCallStatus(contact: contact, callStatus: callStatus))
+        try await sendCallCommand(contact) { .apiCallStatus(contact: $0, callStatus: callStatus) }
     } else {
         logger.debug("apiCallStatus: call status \(status) not used")
     }
+}
+
+private func sendCallCommand(_ contact: Contact, _ command: @escaping (Contact) -> ChatCommand) async throws {
+    #if DEBUG
+    if try await XauXatDirectCallTest.shared.sendIfSelected(contact, command) { return }
+    #endif
+    try await sendCommandOkResp(command(contact))
 }
 
 func markChatRead(_ im: ItemsModel, _ chat: Chat) async {
@@ -3063,6 +3070,9 @@ func startChat(refreshInvitations: Bool = true, onboarding: Bool = false) throws
     }
     ChatReceiver.shared.start()
     m.chatRunning = true
+    #if DEBUG
+    XauXatCallTiming.exportTransportSnapshot()
+    #endif
     reconcileXauXatNotificationRegistration(token: m.deviceToken)
     chatLastStartGroupDefault.set(Date.now)
 }
@@ -3622,15 +3632,17 @@ func processReceivedMsg(_ res: ChatEvent) async {
             await chatItemSimpleUpdate(user, aChatItem)
         }
     case let .callInvitation(invitation):
+        XauXatCallTiming.mark("invitation.received")
         guard xauXatContactInvitePermissions(invitation.contact).calls else {
             logger.info("Ignoring call disallowed by XauXat contact invite policy")
             break
         }
         await MainActor.run {
             m.callInvitations[invitation.contact.id] = invitation
+            activateCall(invitation)
         }
-        activateCall(invitation)
     case let .callOffer(_, contact, callType, offer, sharedKey, _):
+        XauXatCallTiming.mark("offer.received")
         await withCall(contact) { call in
             await MainActor.run {
                 call.callState = .offerReceived
@@ -3649,6 +3661,7 @@ func processReceivedMsg(_ res: ChatEvent) async {
             ))
         }
     case let .callAnswer(_, contact, answer):
+        XauXatCallTiming.mark("answer.received")
         await withCall(contact) { call in
             await MainActor.run {
                 call.callState = .answerReceived
@@ -3660,12 +3673,17 @@ func processReceivedMsg(_ res: ChatEvent) async {
             await m.callCommand.processCommand(.ice(iceCandidates: extraInfo.rtcIceCandidates))
         }
     case let .callEnded(_, contact):
-        if let invitation = await MainActor.run(body: { m.callInvitations.removeValue(forKey: contact.id) }) {
-            CallController.shared.reportCallRemoteEnded(invitation: invitation)
-        }
-        await withCall(contact) { call in
-            await m.callCommand.processCommand(.end)
-            CallController.shared.reportCallRemoteEnded(call: call)
+        XauXatCallTiming.mark("end.received")
+        await MainActor.run {
+            let controller = CallController.shared
+            if let invitation = m.callInvitations.removeValue(forKey: contact.id) {
+                controller.reportCallRemoteEnded(invitation: invitation)
+            } else if controller.activeCallInvitation?.contact.id == contact.id {
+                controller.activeCallInvitation = nil
+            }
+            if let call = m.activeCall, call.contact.apiId == contact.apiId, CallManager.clearActiveCall(call) {
+                controller.reportCallRemoteEnded(call: call)
+            }
         }
     case .chatSuspended:
         chatSuspended()
@@ -3968,8 +3986,11 @@ func refreshCallInvitations() async throws {
     let callInvitations = try await apiGetCallInvitations()
     await MainActor.run {
         m.callInvitations = callsByChat(callInvitations)
+        #if DEBUG
+        XauXatDirectCallTest.shared.restoreIncomingInvitation()
+        #endif
         if let (chatId, ntfAction) = m.ntfCallInvitationAction,
-           let invitation = m.callInvitations.removeValue(forKey: chatId) {
+           let invitation = m.callInvitations[chatId] {
             m.ntfCallInvitationAction = nil
             CallController.shared.callAction(invitation: invitation, action: ntfAction)
         } else if let invitation = callInvitations.last(where: { $0.user.showNotifications }) {
@@ -3982,6 +4003,9 @@ func justRefreshCallInvitations() async throws {
     let callInvitations = try apiGetCallInvitationsSync()
     await MainActor.run {
         ChatModel.shared.callInvitations = callsByChat(callInvitations)
+        #if DEBUG
+        XauXatDirectCallTest.shared.restoreIncomingInvitation()
+        #endif
     }
 }
 
@@ -3991,6 +4015,7 @@ private func callsByChat(_ callInvitations: [RcvCallInvitation]) -> [ChatId: Rcv
     }
 }
 
+@MainActor
 func activateCall(_ callInvitation: RcvCallInvitation) {
     let m = ChatModel.shared
     logger.debug("reportNewIncomingCall activeCallUUID \(String(describing: m.activeCall?.callUUID)) invitationUUID \(String(describing: callInvitation.callUUID))")

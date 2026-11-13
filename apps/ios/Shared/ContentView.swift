@@ -66,7 +66,12 @@ struct ContentView: View {
         // the public opening animation until contentView can render a screen.
         // Database errors and migration screens must remain accessible.
         guard chatModel.chatDbStatus == .ok, chatModel.v3DBMigration.startChat else { return false }
-        return chatModel.ctrlInitInProgress || chatModel.onboardingStage == nil
+        #if DEBUG
+        if XauXatDirectCallTest.shared.canOpenLocalProfile {
+            return chatModel.ctrlInitInProgress || chatModel.onboardingStage == nil
+        }
+        #endif
+        return !tor.hasVerifiedStartupRoute || chatModel.ctrlInitInProgress || chatModel.onboardingStage == nil
     }
 
     private var contentAuthenticationReady: Bool {
@@ -80,7 +85,11 @@ struct ContentView: View {
         // An already prepared local screen can be unlocked offline too. Relay
         // reconnection remains separate from authorization to read local data.
         guard let status = chatModel.chatDbStatus else { return false }
-        return status != .ok || !chatModel.v3DBMigration.startChat || chatModel.onboardingStage != nil
+        #if DEBUG
+        if XauXatDirectCallTest.shared.canOpenLocalProfile, chatModel.onboardingStage != nil { return true }
+        #endif
+        return status != .ok || !chatModel.v3DBMigration.startChat
+            || (tor.hasVerifiedStartupRoute && chatModel.onboardingStage != nil)
     }
 
     var body: some View {
@@ -632,6 +641,16 @@ struct XauXatOpeningView: View {
             && chatModel.networkInfo.online && !isXauXatTorReady()
     }
 
+    private var connectionStatus: LocalizedStringKey {
+        guard chatModel.networkInfo.online else { return "Waiting for Wi-Fi or mobile data…" }
+        switch tor.state {
+        case .stopped, .starting, .bootstrapping: return "Connecting to the Tor network…"
+        case .verifying: return "Checking the connection to a messaging relay…"
+        case .ready: return "Opening XauXat…"
+        case .failed: return "Private connection unavailable."
+        }
+    }
+
     @State private var gazeX: CGFloat = 0
     @State private var gazeY: CGFloat = 0
     @State private var blinking = false
@@ -769,7 +788,7 @@ struct XauXatOpeningView: View {
                         .scaleEffect(0.72)
                         .frame(width: 20, height: 20)
 
-                    Text(loadingMessages[loadingMessageIndex])
+                    Text(loadingMessageIndex == 0 || !chatModel.networkInfo.online ? connectionStatus : loadingMessages[loadingMessageIndex])
                         .font(.system(size: 11.5, weight: .regular))
                         .foregroundStyle(loadingGray)
                         .multilineTextAlignment(.center)

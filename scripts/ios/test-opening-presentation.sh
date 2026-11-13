@@ -170,7 +170,9 @@ checks_source = r'''
         expect(requests == 0, "normal auth waits for an initial screen")
         check(true, "missing initial screen stays covered")
         chatModel.onboardingStage = .complete
-        check(false, "prepared local content dismisses initialization")
+        check(true, "a prepared screen is covered until the first relay verification")
+        expect(!contentAuthenticationReady, "prepared local data does not bypass first verification")
+        tor.hasVerifiedStartupRoute = true
         socksReady = false
         tor.state = .starting
         expect(contentAuthenticationReady, "prepared local screen stays unlockable offline")

@@ -72,7 +72,7 @@ class NtfManager: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
                 chatModel.ntfContactRequest = NTFContactRequest(chatId: chatId)
             }
         } else if let (chatId, ntfAction) = ntfCallAction(content, action) {
-            if let invitation = chatModel.callInvitations.removeValue(forKey: chatId) {
+            if let invitation = chatModel.callInvitations[chatId] {
                 CallController.shared.callAction(invitation: invitation, action: ntfAction)
             } else {
                 chatModel.ntfCallInvitationAction = (chatId, ntfAction)
