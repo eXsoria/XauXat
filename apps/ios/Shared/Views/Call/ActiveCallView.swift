@@ -667,7 +667,7 @@ private struct XauXatRealtimeVoiceMaskingView: View {
                     )) {
                         Text("Off").tag(XauXatCallAmbience.off)
                         Text("Rain").tag(XauXatCallAmbience.rain)
-                        Text("Traffic").tag(XauXatCallAmbience.traffic)
+                        Text("Outside").tag(XauXatCallAmbience.traffic)
                     }
                     .pickerStyle(.menu)
                 } footer: {
