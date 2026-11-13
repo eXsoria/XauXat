@@ -91,6 +91,28 @@ struct CIMetaView: View {
     }
 }
 
+extension ChatItem {
+    var xauXatOutboundStatus: CIStatus? {
+        guard chatDir.sent, !localNote, content.msgContent != nil, meta.itemDeleted == nil,
+              !meta.isLive, !isLiveDummy else { return nil }
+        return meta.itemStatus
+    }
+
+    var xauXatIsSending: Bool {
+        switch xauXatOutboundStatus {
+        case .sndNew, .sndWarning, .sndSent(.partial), .sndRcvd(.ok, .partial): true
+        default: false
+        }
+    }
+
+    var xauXatWasSent: Bool {
+        switch xauXatOutboundStatus {
+        case .sndSent(.complete), .sndRcvd(.ok, .complete): true
+        default: false
+        }
+    }
+}
+
 func xauXatDeliveryStatusText(_ status: CIStatus) -> String? {
     switch status {
     case .sndNew:

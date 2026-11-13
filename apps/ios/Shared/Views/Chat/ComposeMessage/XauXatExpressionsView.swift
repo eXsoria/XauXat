@@ -2,12 +2,14 @@ import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
 import ImageIO
+import PhotosUI
 
 /// Keyboard-sized tray with local pack shortcuts and search. Stickers send on
 /// tap; sounds have separate preview and composer-selection actions.
 @MainActor
 struct XauXatExpressionsView: View {
     @ObservedObject var library: XauXatExpressionLibrary
+    @Binding var kind: XauXatExpressionKind
     let allowStickers: Bool
     let allowSounds: Bool
     var allowPlayback: Bool = true
@@ -15,10 +17,10 @@ struct XauXatExpressionsView: View {
     let close: () -> Void
     let select: (XauXatExpression, Data) -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var kind: XauXatExpressionKind = .sticker
     @State private var pack = "all"
     @State private var query = ""
     @State private var importing = false
+    @State private var pickingStickers = false
     @State private var importTask: Task<Void, Never>?
     @State private var busy = false
     @State private var error: String?
@@ -49,8 +51,10 @@ struct XauXatExpressionsView: View {
                         packButton("mine", "square.stack", "My pack")
                     }
                 }
-                Button { importing = true } label: { Image(systemName: "plus.circle").font(.title3) }
-                    .accessibilityLabel("Import stickers or sounds")
+                Button {
+                    if kind == .sticker { pickingStickers = true } else { importing = true }
+                } label: { Image(systemName: "plus.circle").font(.title3) }
+                    .accessibilityLabel(kind == .sticker ? "Add stickers from Photos" : "Import sounds")
                     .disabled(busy || library.items.count >= XauXatExpressionLibrary.maxItems)
                 Button(action: close) { Image(systemName: "chevron.down").font(.body.weight(.semibold)) }
                     .accessibilityLabel("Close stickers and sounds")
@@ -95,23 +99,32 @@ struct XauXatExpressionsView: View {
             .frame(maxWidth: .infinity).padding(.vertical, 8)
         }
         .background(Color(uiColor: .secondarySystemBackground))
+        .sheet(isPresented: $pickingStickers) {
+            StickerPhotoPicker(limit: max(1, XauXatExpressionLibrary.maxItems - library.items.count)) { providers in
+                pickingStickers = false
+                guard !providers.isEmpty else { return }
+                importMedia {
+                    for provider in providers {
+                        try Task.checkCancellation()
+                        let data = try await Self.loadStickerPhoto(provider)
+                        try Task.checkCancellation()
+                        try await library.importSticker(data)
+                        pack = "mine"
+                    }
+                }
+            }
+        }
         .fileImporter(isPresented: $importing,
-                      allowedContentTypes: kind == .sticker ? [.png, .jpeg, .webP] : [.mpeg4Audio, .mp3, .wav, .aiff, .init(filenameExtension: "caf")!],
+                      allowedContentTypes: [.mpeg4Audio, .mp3, .wav, .aiff, .init(filenameExtension: "caf")!],
                       allowsMultipleSelection: true) { result in
             switch result {
             case let .success(urls):
-                let importKind = kind
-                busy = true
-                stop()
-                importTask = Task {
-                    defer { busy = false; refreshThumbnails() }
-                    do {
-                        for url in urls {
-                            try Task.checkCancellation()
-                            try await library.importFile(url, kind: importKind)
-                        }
+                importMedia {
+                    for url in urls {
+                        try Task.checkCancellation()
+                        try await library.importFile(url, kind: .sound)
                         pack = "mine"
-                    } catch is CancellationError { } catch { self.error = error.localizedDescription }
+                    }
                 }
             case let .failure(error): self.error = error.localizedDescription
             }
@@ -128,6 +141,36 @@ struct XauXatExpressionsView: View {
         .alert("Could not prepare media", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK", role: .cancel) { error = nil }
         } message: { Text(error ?? "") }
+    }
+
+    private func importMedia(_ work: @escaping @MainActor () async throws -> Void) {
+        busy = true
+        stop()
+        importTask = Task {
+            defer { busy = false; refreshThumbnails() }
+            do { try await work() }
+            catch is CancellationError { }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private static func loadStickerPhoto(_ provider: NSItemProvider) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, error in
+                continuation.resume(with: Result {
+                    if let error { throw error }
+                    guard let url else { throw XauXatExpressionError.invalidFile }
+                    let maxBytes = XauXatExpressionLibrary.maxInputBytes
+                    let file = try FileHandle(forReadingFrom: url)
+                    defer { try? file.close() }
+                    guard let data = try file.read(upToCount: maxBytes + 1), !data.isEmpty else {
+                        throw XauXatExpressionError.invalidFile
+                    }
+                    guard data.count <= maxBytes else { throw XauXatExpressionError.tooLarge }
+                    return data
+                })
+            }
+        }
     }
 
     private func packButton(_ value: String, _ icon: String, _ title: LocalizedStringKey) -> some View {
@@ -257,5 +300,34 @@ struct XauXatExpressionsView: View {
         }
         playing = nil
     }
+}
+
+private struct StickerPhotoPicker: UIViewControllerRepresentable {
+    let limit: Int
+    let onPicked: ([NSItemProvider]) -> Void
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let onPicked: ([NSItemProvider]) -> Void
+        init(_ onPicked: @escaping ([NSItemProvider]) -> Void) { self.onPicked = onPicked }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            onPicked(results.map(\.itemProvider))
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPicked) }
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var configuration = PHPickerConfiguration()
+        configuration.filter = .images
+        configuration.selectionLimit = limit
+        configuration.selection = .ordered
+        configuration.preferredAssetRepresentationMode = .current
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ picker: PHPickerViewController, context: Context) {}
 }
 

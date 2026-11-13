@@ -52,9 +52,9 @@ private struct XauXatPalette {
 
     init(_ scheme: ColorScheme) {
         if scheme == .dark {
-            background = Color(red: 0, green: 0, blue: 0)
-            surface = Color(red: 9 / 255, green: 9 / 255, blue: 9 / 255)
-            raised = Color(red: 21 / 255, green: 21 / 255, blue: 21 / 255)
+            background = xauXatDarkBackground
+            surface = Color(0xFF1C1812)
+            raised = Color(0xFF252018)
             ink = Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
             muted = Color(red: 139 / 255, green: 135 / 255, blue: 127 / 255)
             faint = Color(red: 74 / 255, green: 72 / 255, blue: 67 / 255)
@@ -1444,9 +1444,18 @@ private struct XauXatChatDestination: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("xauxat.chat.\(chat.id)")
         .disabled(
-            chatModel.chatRunning != true ||
+            (chatModel.chatRunning != true && !isDirectCallTestContact) ||
             chatModel.deletedChats.contains(chat.id)
         )
+    }
+
+    private var isDirectCallTestContact: Bool {
+        #if DEBUG
+        if case let .direct(contact) = chat.chatInfo {
+            return XauXatDirectCallTest.shared.usesDirectSignaling(for: contact)
+        }
+        #endif
+        return false
     }
 
     private var swipeActions: some View {

@@ -129,6 +129,12 @@ final class VoiceRecordingTests: XCTestCase {
         snapshot("hands-free-dark-accessibility-text")
         mic.tap()
         preview()
+        XCTAssertTrue(app.staticTexts["Paused"].exists)
+        app.buttons["voice.resume"].tap()
+        XCTAssertTrue(app.staticTexts["Phase locked"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["Paused"].exists)
+        mic.tap()
+        preview()
         snapshot("preview-dark-accessibility-text")
     }
     func testBackgroundStopsLockedRecording() {

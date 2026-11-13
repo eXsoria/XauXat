@@ -45,12 +45,16 @@ struct SendMessageView: View {
     @Namespace var namespace
     @Binding var keyboardVisible: Bool
     @Binding var keyboardHiddenDate: Date
+    var composerIconColor = Color.accentColor
+    var editorAccessories: AnyView? = nil
+    var voiceAccessories: AnyView? = nil
+    var listenOnce: Binding<Bool>? = nil
+    var sendVoiceRecording: (() -> Void)? = nil
     var sendButtonColor = Color.accentColor
     @State private var teHeight: CGFloat = NativeTextEditor.minHeight
     @State private var teFont: Font = .body
     @State private var sendButtonSize: CGFloat = 29
     @State private var sendButtonOpacity: CGFloat = 1
-    @ScaledMetric(relativeTo: .caption) private var progressTrailingContentInset: CGFloat = 112
     @State private var showCustomDisappearingMessageDialogue = false
     @State private var showCustomTimePicker = false
     @State private var selectedDisappearingMessageTime: Int? = customDisappearingMessageTimeDefault.get()
@@ -58,69 +62,71 @@ struct SendMessageView: View {
     @UserDefault(DEFAULT_SIGN_MESSAGE_ALERT_SHOWN) private var signMessageAlertShown = false
 
     var body: some View {
-        let composeShape = RoundedRectangle(cornerSize: CGSize(width: 20, height: 20))
-        let trailingContentInset: CGFloat = composeState.progressByTimeout ? progressTrailingContentInset : 32
-        let recordingActionInset: CGFloat = sendLiveMessage != nil && updateLiveMessage != nil && composeState.contextItem == .noContextItem ? 96 : 52
-        ZStack(alignment: .leading) {
-            if voiceInteraction.active {
-                VoiceRecordingStatus(interaction: voiceInteraction, time: voiceRecordingTime, levels: voiceRecordingLevels, color: sendButtonColor, deleteRecording: discardVoiceMessageRecording)
-                    .padding(.leading, 12)
-                    .padding(.trailing, recordingActionInset)
-                    .frame(minHeight: 44)
-            } else if case .voicePreview = composeState.preview {
-                Text("Voice message…")
-                    .font(.callout.italic())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .multilineTextAlignment(.leading)
-                    .foregroundColor(theme.colors.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .padding(.trailing, trailingContentInset)
-                    .frame(maxWidth: .infinity)
-            } else {
-                NativeTextEditor(
-                    text: $composeState.message,
-                    disableEditing: $composeState.inProgress,
-                    height: $teHeight,
-                    focused: $keyboardVisible,
-                    lastUnfocusedDate: $keyboardHiddenDate,
-                    placeholder: Binding(get: { placeholder ?? composeState.placeholder }, set: { _ in }),
-                    selectedRange: $selectedRange,
-                    onImagesAdded: onMediaAdded
-                )
-                .padding(.trailing, trailingContentInset)
-                .allowsTightening(false)
-                .fixedSize(horizontal: false, vertical: true)
+        let showingVoice = voiceInteraction.active || composeState.voicePreview
+        let showsIdleAccessories = composeState.noPreview && composeState.message.isEmpty && !composeState.editing
+            && !composeState.forwarding && composeState.liveMessage == nil && !hideSendButton
+        let holdOrIdle = showsIdleAccessories || voiceInteraction.active
+        let composeShape = RoundedRectangle(cornerRadius: 21)
+
+        HStack(alignment: .bottom, spacing: 4) {
+            ZStack(alignment: .leading) {
+                HStack(alignment: .bottom, spacing: 0) {
+                    // Preserve the native editor and its first responder during a held touch.
+                    NativeTextEditor(
+                        text: $composeState.message,
+                        disableEditing: $composeState.inProgress,
+                        height: $teHeight,
+                        focused: $keyboardVisible,
+                        lastUnfocusedDate: $keyboardHiddenDate,
+                        placeholder: Binding(get: { placeholder ?? composeState.placeholder }, set: { _ in }),
+                        selectedRange: $selectedRange,
+                        onImagesAdded: onMediaAdded,
+                        blocksInput: showingVoice || composeState.progressByTimeout
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                    if let editorAccessories, !composeState.editing && !composeState.forwarding {
+                        editorAccessories
+                            .opacity(showingVoice || composeState.progressByTimeout ? 0 : 1)
+                            .allowsHitTesting(!showingVoice && !composeState.progressByTimeout)
+                            .accessibilityHidden(showingVoice || composeState.progressByTimeout)
+                    }
+                }
+
+                if composeState.progressByTimeout {
+                    Text("Encrypting…").font(.caption.weight(.medium)).foregroundColor(theme.colors.secondary)
+                        .padding(.horizontal, 12)
+                } else if voiceInteraction.active {
+                    VoiceRecordingStatus(interaction: voiceInteraction, time: voiceRecordingTime, levels: voiceRecordingLevels, color: sendButtonColor, deleteRecording: discardVoiceMessageRecording, listenOnce: listenOnce)
+                        .padding(.horizontal, 8)
+                        .frame(minHeight: 44)
+                } else if composeState.voicePreview {
+                    Text("Voice message…").font(.callout.italic()).foregroundColor(theme.colors.secondary)
+                        .padding(.horizontal, 12)
+                }
             }
-        }
-        .frame(minHeight: 44)
-        .overlay(alignment: .topTrailing, content: {
-            if !composeState.progressByTimeout && teHeight > 100 && !composeState.inProgress {
-                deleteTextButton()
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(theme.colors.background, in: composeShape)
+            .overlay(composeShape.strokeBorder(.secondary.opacity(0.35), lineWidth: 0.5).allowsHitTesting(false))
+            .overlay(alignment: .topTrailing) {
+                if !showingVoice && !composeState.progressByTimeout && teHeight > 100 && !composeState.inProgress {
+                    deleteTextButton()
+                }
             }
-        })
-        .overlay(alignment: .bottomTrailing) {
-            if composeState.progressByTimeout {
-                Text("Encrypting…")
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(theme.colors.secondary)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(height: 31, alignment: .center)
-                    .padding([.bottom, .trailing], 4)
-                    .accessibilityLabel("Encrypting message")
-            } else {
+
+            if let voiceAccessories, holdOrIdle {
+                voiceAccessories
+                    .frame(maxWidth: voiceInteraction.active ? 0 : nil)
+                    .opacity(showsIdleAccessories && !voiceInteraction.active ? 1 : 0)
+                    .allowsHitTesting(showsIdleAccessories && !voiceInteraction.active)
+                    .accessibilityHidden(voiceInteraction.active)
+            }
+            if !composeState.progressByTimeout {
                 composeActionButtons()
-                // required for intercepting clicks
-                    .background(.white.opacity(0.000001))
             }
         }
-        .padding(.vertical, 1)
-        .background(theme.colors.background, in: composeShape)
-        .overlay(composeShape.strokeBorder(.secondary, lineWidth: 0.5).opacity(0.7))
         .onChange(of: composeState.message, perform: { text in updateFont(text) })
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
     }
 
     @ViewBuilder private func composeActionButtons() -> some View {
@@ -138,11 +144,27 @@ struct SendMessageView: View {
             && composeState.liveMessage == nil
             && ((composeState.noPreview && vmrs == .noRecording)
                 || voiceInteraction.active) {
-            HStack {
+            HStack(spacing: 2) {
+                if voiceInteraction.phase == .locked, voiceInteraction.ready, let sendVoiceRecording {
+                    Button(action: sendVoiceRecording) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 35))
+                            .frame(width: 42, height: 44)
+                    }
+                    .foregroundColor(sendButtonColor)
+                    .accessibilityLabel("Send recording")
+                } else if editorAccessories == nil, let send = sendLiveMessage,
+                          let update = updateLiveMessage,
+                          case .noContextItem = composeState.contextItem {
+                    startLiveMessageButton(send: send, update: update)
+                        .opacity(voiceInteraction.active ? 0 : 1)
+                        .disabled(voiceInteraction.active)
+                        .accessibilityHidden(voiceInteraction.active)
+                }
                 if voiceMessageAllowed {
                     VoiceRecordingButton(
                         interaction: voiceInteraction,
-                        color: sendButtonColor,
+                        color: composerIconColor,
                         disabled: composeState.inProgress || !isEnabled,
                         begin: { startVoiceMessageRecording?($0) },
                         move: { moveVoiceMessageRecording?($0, $1) },
@@ -154,14 +176,7 @@ struct SendMessageView: View {
                 } else {
                     voiceMessageNotAllowedButton()
                 }
-                if let send = sendLiveMessage,
-                   let update = updateLiveMessage,
-                   case .noContextItem = composeState.contextItem {
-                    startLiveMessageButton(send: send, update: update)
-                        .opacity(voiceInteraction.active ? 0 : 1)
-                        .disabled(voiceInteraction.active)
-                        .accessibilityHidden(voiceInteraction.active)
-                }
+
             }
         } else if vmrs == .recording {
             finishVoiceMessageRecordingButton()
@@ -349,7 +364,7 @@ struct SendMessageView: View {
             Image(systemName: "bolt.fill")
                 .resizable()
                 .scaledToFit()
-                .foregroundColor(isEnabled ? theme.colors.primary : theme.colors.secondary)
+                .foregroundColor(isEnabled ? composerIconColor : theme.colors.secondary)
                 .frame(width: 20, height: 20)
         }
         .frame(width: 29, height: 29)

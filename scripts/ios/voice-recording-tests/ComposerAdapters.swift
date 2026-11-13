@@ -16,6 +16,7 @@ struct NativeTextEditor: View {
     @Binding var placeholder: String
     @Binding var selectedRange: NSRange
     let onImagesAdded: ([UploadContent]) -> Void
+    var blocksInput = false
     var body: some View {
         Text(placeholder)
             .foregroundColor(.secondary)

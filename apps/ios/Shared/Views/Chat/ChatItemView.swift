@@ -74,6 +74,8 @@ struct ChatItemView: View {
         let ci = chatItem
         if chatItem.meta.itemDeleted != nil && (!revealed || chatItem.isDeletedContent) {
             MarkedDeletedItemView(chat: chat, im: im, chatItem: chatItem)
+        } else if xauXatIsOneTimeVoice(ci) {
+            XauXatOneTimeVoiceView(chat: chat, item: ci)
         } else if ci.quotedItem == nil && ci.meta.itemForwarded == nil && ci.meta.itemDeleted == nil && !ci.meta.isLive {
             if let mc = ci.content.msgContent, mc.isText && isShortEmoji(ci.content.text) {
                 EmojiItemView(chat: chat, chatItem: ci)

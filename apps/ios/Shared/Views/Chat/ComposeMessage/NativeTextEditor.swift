@@ -20,16 +20,19 @@ struct NativeTextEditor: UIViewRepresentable {
     @Binding var placeholder: String?
     @Binding var selectedRange: NSRange
     let onImagesAdded: ([UploadContent]) -> Void
+    var blocksInput = false
 
     static let minHeight: CGFloat = 39
 
     func makeUIView(context: Context) -> CustomUITextField {
         let field = CustomUITextField(parent: self, height: _height)
         field.backgroundColor = .clear
+        field.blocksInput = blocksInput
         field.text = text
         field.textAlignment = alignment(text)
         field.autocapitalizationType = .sentences
-        field.setOnTextChangedListener { newText, images in
+        field.setOnTextChangedListener { [weak field] newText, images in
+            guard let field, !field.blocksInput else { return }
             if !disableEditing {
                 text = newText
                 field.textAlignment = alignment(text)
@@ -58,6 +61,7 @@ struct NativeTextEditor: UIViewRepresentable {
     }
     
     func updateUIView(_ field: CustomUITextField, context: Context) {
+        field.blocksInput = blocksInput
         if field.markedTextRange == nil && field.text != text {
             field.text = text
             field.textAlignment = alignment(text)
@@ -95,6 +99,23 @@ class CustomUITextField: UITextView, UITextViewDelegate {
     var newHeight: CGFloat = 0
     var onTextChanged: (String, [UploadContent]) -> Void = { newText, image in }
     var onFocusChanged: (Bool) -> Void = { focused in }
+    var blocksInput = false {
+        didSet {
+            guard oldValue != blocksInput else { return }
+            tintColor = blocksInput ? .clear : nil
+            textColor = blocksInput ? .clear : .label
+            placeholderLabel.isHidden = blocksInput || !text.isEmpty
+            accessibilityElementsHidden = blocksInput
+        }
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        blocksInput ? nil : super.hitTest(point, with: event)
+    }
+
+    func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        !blocksInput
+    }
 
     private let placeholderLabel: UILabel = UILabel()
 
@@ -168,7 +189,7 @@ class CustomUITextField: UITextView, UITextViewDelegate {
     func setPlaceholderView() {
         placeholderLabel.textColor = .lightGray
         placeholderLabel.font = UIFont.preferredFont(forTextStyle: .body)
-        placeholderLabel.isHidden = !text.isEmpty
+        placeholderLabel.isHidden = blocksInput || !text.isEmpty
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(placeholderLabel)
         
@@ -226,7 +247,7 @@ class CustomUITextField: UITextView, UITextViewDelegate {
     }
 
     func textViewDidChange(_ textView: UITextView) {
-        placeholderLabel.isHidden = !text.isEmpty
+        placeholderLabel.isHidden = blocksInput || !text.isEmpty
         if textView.markedTextRange == nil {
             var images: [UploadContent] = []
             var rangeDiff = 0
