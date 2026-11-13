@@ -99,6 +99,7 @@ chatDirectTests = do
     it "connect, fully asynchronous (when clients are never simultaneously online)" $ testFullAsyncFast
   describe "webrtc calls api" $ do
     it "negotiate call" testNegotiateCall
+    it "notify caller when an invitation is rejected" testRejectCall
 #if !defined(dbPostgres)
   describe "maintenance mode" $ do
     it "start/stop/export/import chat" testMaintenanceMode
@@ -1351,6 +1352,18 @@ testNegotiateCall =
     bob #$> ("/_get chat @2 count=100", chat, chatFeatures <> [(0, "incoming call: ended (00:00)")])
     alice <## "call with bob ended"
     alice #$> ("/_get chat @2 count=100", chat, chatFeatures <> [(1, "outgoing call: ended (00:00)")])
+
+testRejectCall :: HasCallStack => TestParams -> IO ()
+testRejectCall =
+  withTestOutput $ testChat2 aliceProfile bobProfile $ \alice bob -> do
+    connectUsers alice bob
+    alice ##> ("/_call invite @2 " <> serialize testCallType)
+    alice <## "ok"
+    bob <## "alice wants to connect with you via WebRTC video call (e2e encrypted)"
+    repeatM_ 3 $ getTermLine bob
+    bob ##> "/_call reject @2"
+    bob <## "ok"
+    alice <## "call with bob ended"
 
 testMaintenanceMode :: HasCallStack => TestParams -> IO ()
 testMaintenanceMode ps = do

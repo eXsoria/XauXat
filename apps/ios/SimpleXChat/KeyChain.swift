@@ -60,6 +60,131 @@ public func setXauXatStorageScope(_ scope: XauXatStorageScope) {
     xauXatStorageScopeLock.unlock()
 }
 
+// Storage roles are independent of their physical directory and Keychain
+// namespace. Promotion changes one Keychain record, keeping the decoy's
+// databases, attachments and all profile-specific secrets together.
+private let XAUXAT_STORAGE_ROLES = "localProfileStorageRoles"
+private let XAUXAT_STORAGE_PROMOTION = "localProfileStoragePromotion"
+private let xauXatStorageRolesLock = NSRecursiveLock()
+private let xauXatStoragePromotionLock = NSRecursiveLock()
+
+private struct XauXatStorageRoles: Codable, Equatable {
+    var primary = "primary"
+    var decoy = "localProfile"
+    var pinGeneration: String? = nil
+
+    var valid: Bool {
+        func validSlot(_ slot: String) -> Bool {
+            slot == "primary" || slot == "localProfile" || UUID(uuidString: slot) != nil
+        }
+        return primary != decoy && validSlot(primary) && validSlot(decoy)
+            && (pinGeneration == nil || UUID(uuidString: pinGeneration!) != nil)
+    }
+}
+
+private struct XauXatStoragePromotion: Codable {
+    let source: XauXatStorageRoles
+    let target: XauXatStorageRoles
+}
+
+private func xauXatReadStorageRoles() -> XauXatStorageRoles? {
+    guard let value = getItemString(forKey: XAUXAT_STORAGE_ROLES) else {
+        return XauXatStorageRoles()
+    }
+    guard let data = value.data(using: .utf8),
+          let roles = try? JSONDecoder().decode(XauXatStorageRoles.self, from: data),
+          roles.valid else { return nil }
+    return roles
+}
+
+func xauXatStorageSlot(_ scope: XauXatStorageScope) -> String {
+    xauXatStorageRolesLock.lock()
+    defer { xauXatStorageRolesLock.unlock() }
+    guard let roles = xauXatReadStorageRoles() else { return "unavailable" }
+    return scope == .primary ? roles.primary : roles.decoy
+}
+
+private func xauXatResolvedKeychainName(_ key: String) -> String? {
+    guard let roles = xauXatReadStorageRoles() else { return nil }
+    if [APP_PASSWORD_ITEM, DECOY_PASSWORD_ITEM, SELF_DESTRUCT_PASSWORD_ITEM].contains(key) {
+        return roles.pinGeneration.map { "\(key).roles.\($0)" } ?? key
+    }
+    let scopedItems = [
+        DATABASE_PASSWORD_ITEM, PRIMARY_CONVERSATION_LOCKS_ITEM, PRIMARY_HIDDEN_CHATS_ITEM,
+        PRIMARY_PROTECTED_PROFILES_ITEM, PRIMARY_PROTECTED_PROFILE_PASSWORDS_ITEM,
+        PRIMARY_CONTACT_INVITE_POLICIES_ITEM, PRIMARY_EXPIRED_CONTACT_INVITE_ENVELOPES_ITEM,
+        PRIMARY_GROUP_ACCESS_POLICIES_ITEM, PRIMARY_ONE_TIME_GROUP_INVITES_ITEM
+    ]
+    func scopedName(_ base: String, _ slot: String) -> String {
+        switch slot {
+        case "primary": return base
+        case "localProfile": return base + ".localProfile"
+        default: return base + ".profile." + slot
+        }
+    }
+    for base in scopedItems {
+        if key == base { return scopedName(base, roles.primary) }
+        if key == base + ".localProfile" { return scopedName(base, roles.decoy) }
+    }
+    for prefix in ["expressionLibrary", CODE_LOCKED_ATTEMPTS_PREFIX, GROUP_ACCESS_ATTEMPTS_PREFIX, GROUP_ACCESS_EXPIRED_PREFIX] {
+        for (name, slot) in [("primary", roles.primary), ("localProfile", roles.decoy)] {
+            let start = prefix + "." + name + "."
+            if key.hasPrefix(start) {
+                return prefix + "." + slot + "." + key.dropFirst(start.count)
+            }
+        }
+    }
+    return key
+}
+
+public func xauXatStoragePromotionPending() -> Bool {
+    getItemString(forKey: XAUXAT_STORAGE_PROMOTION) != nil
+}
+
+/// The caller must stop/close its controller before starting or resuming a
+/// promotion. The journal is persisted before erasure, so an interrupted
+/// Keychain commit can finish on the next launch without erasing the decoy.
+@discardableResult
+public func xauXatPromoteDecoyStorage(appPIN: String, decoyPIN: String) -> Bool {
+    xauXatStoragePromotionLock.lock()
+    defer { xauXatStoragePromotionLock.unlock() }
+    if xauXatStoragePromotionPending() { return xauXatResumeStoragePromotion() }
+    guard !appPIN.isEmpty, !decoyPIN.isEmpty, appPIN != decoyPIN,
+          hasDecoyDatabase(), kcDecoyDatabasePassword.get() != nil,
+          let source = xauXatReadStorageRoles() else { return false }
+    let generation = UUID().uuidString
+    let target = XauXatStorageRoles(primary: source.decoy, decoy: generation, pinGeneration: generation)
+    guard setItemString(appPIN, forKey: APP_PASSWORD_ITEM + ".roles." + generation),
+          setItemString(decoyPIN, forKey: DECOY_PASSWORD_ITEM + ".roles." + generation),
+          let data = try? JSONEncoder().encode(XauXatStoragePromotion(source: source, target: target)),
+          let value = String(data: data, encoding: .utf8),
+          setItemString(value, forKey: XAUXAT_STORAGE_PROMOTION) else { return false }
+    return xauXatResumeStoragePromotion()
+}
+
+@discardableResult
+public func xauXatResumeStoragePromotion() -> Bool {
+    xauXatStoragePromotionLock.lock()
+    defer { xauXatStoragePromotionLock.unlock() }
+    guard let value = getItemString(forKey: XAUXAT_STORAGE_PROMOTION) else { return true }
+    guard let data = value.data(using: .utf8),
+          let plan = try? JSONDecoder().decode(XauXatStoragePromotion.self, from: data),
+          plan.source.valid, plan.target.valid,
+          plan.target.primary == plan.source.decoy,
+          plan.target.decoy != plan.source.primary,
+          let current = xauXatReadStorageRoles() else { return false }
+    if current != plan.target {
+        guard current == plan.source, hasDecoyDatabase(), kcDecoyDatabasePassword.get() != nil,
+              destroyXauXatStorage(.primary),
+              let rolesData = try? JSONEncoder().encode(plan.target),
+              let rolesValue = String(data: rolesData, encoding: .utf8),
+              setItemString(rolesValue, forKey: XAUXAT_STORAGE_ROLES) else { return false }
+    }
+    // A fresh PIN namespace has no duress PIN. Old PINs cannot select the
+    // erased identity, even if interrupted before preference cleanup.
+    return deleteItem(forKey: XAUXAT_STORAGE_PROMOTION)
+}
+
 public let kcPrimaryDatabasePassword = KeyChainItem(forKey: DATABASE_PASSWORD_ITEM)
 
 public let kcDecoyDatabasePassword = KeyChainItem(forKey: DECOY_DATABASE_PASSWORD_ITEM)
@@ -1248,15 +1373,24 @@ public struct KeyChainItem {
     var forKey: String
 
     public func get() -> String? {
-        getItemString(forKey: forKey)
+        xauXatStorageRolesLock.lock()
+        defer { xauXatStorageRolesLock.unlock() }
+        guard let key = xauXatResolvedKeychainName(forKey) else { return nil }
+        return getItemString(forKey: key)
     }
 
     public func set(_ value: String) -> Bool {
-        setItemString(value, forKey: forKey)
+        xauXatStorageRolesLock.lock()
+        defer { xauXatStorageRolesLock.unlock() }
+        guard let key = xauXatResolvedKeychainName(forKey) else { return false }
+        return setItemString(value, forKey: key)
     }
 
     public func remove() -> Bool {
-        deleteItem(forKey: forKey)
+        xauXatStorageRolesLock.lock()
+        defer { xauXatStorageRolesLock.unlock() }
+        guard let key = xauXatResolvedKeychainName(forKey) else { return false }
+        return deleteItem(forKey: key)
     }
 }
 
@@ -1354,12 +1488,10 @@ private func setItemString(_ s: String, forKey key: String) -> Bool {
 
 private func deleteItem(forKey key: String) -> Bool {
     let query = baseItemQuery(forKey: key)
-    if getItemData(forKey: key) != nil {
-        let status = SecItemDelete(query as CFDictionary)
-        if status != errSecSuccess {
-            logger.error("deleteItem: error deleting data for key '\(key)', error: \(status)")
-            return false
-        }
+    let status = SecItemDelete(query as CFDictionary)
+    if status != errSecSuccess && status != errSecItemNotFound {
+        logger.error("deleteItem: error deleting data for key '\(key)', error: \(status)")
+        return false
     }
     return true
 }

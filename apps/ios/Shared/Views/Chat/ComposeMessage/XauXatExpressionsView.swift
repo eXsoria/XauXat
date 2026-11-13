@@ -108,7 +108,7 @@ struct XauXatExpressionsView: View {
                         try Task.checkCancellation()
                         let data = try await Self.loadStickerPhoto(provider)
                         try Task.checkCancellation()
-                        try await library.importSticker(data)
+                        try await library.importStickerPhoto(data)
                         pack = "mine"
                     }
                 }
@@ -322,9 +322,10 @@ private struct StickerPhotoPicker: UIViewControllerRepresentable {
         configuration.filter = .images
         configuration.selectionLimit = limit
         configuration.selection = .ordered
-        configuration.preferredAssetRepresentationMode = .current
+        configuration.preferredAssetRepresentationMode = .compatible
         let picker = PHPickerViewController(configuration: configuration)
         picker.delegate = context.coordinator
+        picker.view.accessibilityIdentifier = "sticker-photo-picker"
         return picker
     }
 

@@ -85,7 +85,7 @@ func apiSendMessages(
 }
 
 func apiActivateChat() throws {
-    chatReopenStore()
+    guard chatReopenStore() else { throw RuntimeError("Local profile changed") }
     let r: APIResult<SEChatResponse> = sendSimpleXCmd(SEChatCommand.apiActivateChat(restoreChat: false))
     if case .result(.cmdOk) = r { return }
     throw r.unexpected

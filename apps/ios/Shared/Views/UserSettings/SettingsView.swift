@@ -95,7 +95,7 @@ let appDefaults: [String: Any] = [
     DEFAULT_LA_NOTICE_SHOWN: false,
     DEFAULT_PERFORM_LA: false,
     DEFAULT_LA_MODE: LAMode.system.rawValue,
-    DEFAULT_LA_LOCK_DELAY: 30,
+    DEFAULT_LA_LOCK_DELAY: 0,
     DEFAULT_LA_SELF_DESTRUCT: false,
     DEFAULT_NOTIFICATION_ALERT_SHOWN: false,
     DEFAULT_WEBRTC_POLICY_RELAY: true,
@@ -217,6 +217,13 @@ let currentThemeDefault = StringDefault(defaults: UserDefaults.standard, forKey:
 let systemDarkThemeDefault = StringDefault(defaults: UserDefaults.standard, forKey: DEFAULT_SYSTEM_DARK_THEME, withDefault: DefaultTheme.DARK.themeName)
 let currentThemeIdsDefault = CodableDefault<[String: String]>(defaults: UserDefaults.standard, forKey: DEFAULT_CURRENT_THEME_IDS, withDefault: [:] )
 let themeOverridesDefault: CodableDefault<[ThemeOverrides]> = CodableDefault(defaults: UserDefaults.standard, forKey: DEFAULT_THEME_OVERRIDES, withDefault: [])
+
+func migrateXauXatAppLockDelay(defaults: UserDefaults = .standard) {
+    // The former shortest delay is now immediate; keep other saved choices.
+    if defaults.integer(forKey: DEFAULT_LA_LOCK_DELAY) == 10 {
+        defaults.set(0, forKey: DEFAULT_LA_LOCK_DELAY)
+    }
+}
 
 func setGroupDefaults() {
     privacyAcceptImagesGroupDefault.set(UserDefaults.standard.bool(forKey: DEFAULT_PRIVACY_ACCEPT_IMAGES))

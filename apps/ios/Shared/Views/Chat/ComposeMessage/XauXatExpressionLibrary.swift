@@ -167,6 +167,25 @@ final class XauXatExpressionLibrary: ObservableObject {
         }
     }
 
+    /// Photos may supply HEIC as well as PNG/JPEG. Decode the selected image
+    /// directly, retaining the same size limits, metadata removal and encryption.
+    func importStickerPhoto(_ data: Data) async throws {
+        try Task.checkCancellation()
+        guard items.count < Self.maxItems else { throw XauXatExpressionError.libraryFull }
+        guard !data.isEmpty else { throw XauXatExpressionError.invalidFile }
+        guard data.count <= Self.maxInputBytes else { throw XauXatExpressionError.tooLarge }
+        let normalized = try await Task.detached(priority: .userInitiated) {
+            try Self.normalizeSticker(data)
+        }.value
+        try Task.checkCancellation()
+        guard items.count < Self.maxItems else { throw XauXatExpressionError.libraryFull }
+        try append(normalized, kind: .sticker, title: NSLocalizedString("Sticker", comment: "photo sticker"))
+        do { try persist(items) } catch {
+            if let item = items.last { try? FileManager.default.removeItem(at: assetURL(item)); items.removeLast() }
+            throw error
+        }
+    }
+
     func data(for item: XauXatExpression) throws -> Data {
         guard items.contains(where: { $0.id == item.id && $0.kind == item.kind }) else { throw XauXatExpressionError.unavailable }
         return try open(Data(contentsOf: assetURL(item)), context: item.id.uuidString)

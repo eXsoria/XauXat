@@ -61,6 +61,13 @@ final class ExpressionUITests: XCTestCase {
         XCTAssertTrue(sticker.exists)
     }
 
+    func testStickerCreationOpensPhotoLibrary() {
+        let app = launch()
+        app.buttons["Add stickers from Photos"].tap()
+        XCTAssertTrue(app.otherElements["sticker-photo-picker"].waitForExistence(timeout: 10), "Image stickers must open the photo library")
+        proof(app, "sticker-photo-library")
+    }
+
     func testSoundPreviewDoesNotSend() {
         let app = launch()
         app.buttons["Soundboard"].tap()
