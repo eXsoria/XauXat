@@ -20,8 +20,11 @@ struct ChatItem: Equatable {
     }
     var id: Int64
     var isRcvNew = false
+    var pendingFile: PendingFile? = nil
     var meta: Meta { Meta(itemId: id) }
+    func autoReceiveFile() -> PendingFile? { pendingFile }
 }
+struct PendingFile: Equatable { var fileId: Int64 }
 struct ChatInfo { var id: String; var chatType = ChatType.direct }
 struct ChatStats { var unreadCount = 0 }
 struct Chat {
@@ -66,6 +69,11 @@ final class ItemsModel {
     var loadChatTask: Task<Void, Never>?
 }
 struct User { var userId: Int64 }
+@MainActor var receivedAttachmentBatches: [[Int64]] = []
+@MainActor
+func autoReceiveAttachments(user: User, fileIds: [Int64], decoyStore: Bool) async {
+    receivedAttachmentBatches.append(fileIds)
+}
 final class ChatModel {
     static var shared = ChatModel()
     var currentUser: User? = User(userId: 1)
@@ -298,6 +306,24 @@ func apiGetChat(chatId: ChatId, scope: GroupChatScope?, contentTag: MsgContentTa
         fetch = { id, _, _ in response(id, [2, 3]) }
         let loaded = await apiLoadMessages("a", im, .last(count: 50))
         expect(loaded && im.reversedChatItems.map(\.id) == [3, 2, 1], "Normal pagination still merges and deduplicates items")
+
+        for pagination: ChatPagination in [.initial(count: 50), .last(count: 50)] {
+            im = reset()
+            receivedAttachmentBatches = []
+            fetch = { id, _, _ in
+                let items = (1...14).map { item in
+                    ChatItem(id: Int64(item), pendingFile: item == 14 ? nil : PendingFile(fileId: Int64(item)))
+                }
+                return (Chat(chatInfo: ChatInfo(id: id), chatItems: items), NavigationInfo())
+            }
+            let loaded = await apiLoadMessages("a", im, pagination)
+            expect(loaded, "The chat must load while pending attachments recover")
+            let deadline = ContinuousClock.now + .seconds(1)
+            while receivedAttachmentBatches.count < 2 && ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            expect(receivedAttachmentBatches == [Array((2...13).reversed()), [1]], "Recover every eligible attachment newest first, in batches of at most 12")
+        }
 
         // P1: the real authorized-open function must not navigate when Face ID
         // completes before UIKit/SwiftUI have restored the active scene.

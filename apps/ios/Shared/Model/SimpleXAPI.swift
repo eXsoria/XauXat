@@ -1001,7 +1001,14 @@ func apiSendMessages(type: ChatType, id: Int64, scope: GroupChatScope?, sendAsGr
         }
     }
     let cmd: ChatCommand = .apiSendMessages(type: type, id: id, scope: scope, sendAsGroup: sendAsGroup, live: live, ttl: ttl, sign: sign, composedMessages: composedMessages)
-    return await processSendMessageCmd(toChatType: type, cmd: cmd)
+    let hasAttachment = composedMessages.contains { $0.fileSource != nil }
+    let start = ProcessInfo.processInfo.systemUptime
+    let items = await processSendMessageCmd(toChatType: type, cmd: cmd)
+    if hasAttachment {
+        let elapsed = Int((ProcessInfo.processInfo.systemUptime - start) * 1000)
+        logger.info("Attachment send command completed in \(elapsed, privacy: .public) ms")
+    }
+    return items
 }
 
 private func processSendMessageCmd(toChatType: ChatType, cmd: ChatCommand) async -> [ChatItem]? {
@@ -2223,6 +2230,35 @@ func standaloneFileInfo(url: String, ctrl: chat_ctrl? = nil) async -> MigrationF
 }
 
 // Spec: spec/services/files.md#receiveFile
+private actor AutomaticAttachmentReceipts {
+    static let shared = AutomaticAttachmentReceipts()
+    private struct Key: Hashable {
+        let decoyStore: Bool
+        let userId: Int64
+        let fileId: Int64
+    }
+    private var attempts: [Key: TimeInterval] = [:]
+
+    func claim(decoyStore: Bool, userId: Int64, fileId: Int64) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        attempts = attempts.filter { now - $0.value < 15 }
+        let key = Key(decoyStore: decoyStore, userId: userId, fileId: fileId)
+        guard attempts[key] == nil else { return false }
+        attempts[key] = now
+        return true
+    }
+}
+
+func autoReceiveAttachments(user: any UserLike, fileIds: [Int64], decoyStore: Bool) async {
+    for fileId in fileIds {
+        guard !Task.isCancelled, (xauXatStorageScope() == .decoy) == decoyStore,
+              privacyAcceptImagesGroupDefault.get() else { return }
+        guard await AutomaticAttachmentReceipts.shared.claim(decoyStore: decoyStore, userId: user.userId, fileId: fileId),
+              (xauXatStorageScope() == .decoy) == decoyStore else { continue }
+        await receiveFile(user: user, fileId: fileId, auto: true)
+    }
+}
+
 func receiveFile(user: any UserLike, fileId: Int64, userApprovedRelays: Bool = false, auto: Bool = false) async {
     await receiveFiles(
         user: user,
@@ -3314,8 +3350,9 @@ func processReceivedMsg(_ res: ChatEvent) async {
                 }
             }
             if let file = cItem.autoReceiveFile() {
+                let decoyStore = xauXatStorageScope() == .decoy
                 Task {
-                    await receiveFile(user: user, fileId: file.fileId, auto: true)
+                    await autoReceiveAttachments(user: user, fileIds: [file.fileId], decoyStore: decoyStore)
                 }
             }
             if cItem.showNotification {
@@ -3540,6 +3577,7 @@ func processReceivedMsg(_ res: ChatEvent) async {
     case let .rcvFileStart(user, aChatItem):
         await chatItemSimpleUpdate(user, aChatItem)
     case let .rcvFileComplete(user, aChatItem):
+        logger.info("Attachment receive completed")
         await chatItemSimpleUpdate(user, aChatItem)
     case let .rcvFileSndCancelled(user, aChatItem, _):
         await chatItemSimpleUpdate(user, aChatItem)
@@ -3572,6 +3610,7 @@ func processReceivedMsg(_ res: ChatEvent) async {
             await chatItemSimpleUpdate(user, aChatItem)
         }
     case let .sndFileCompleteXFTP(user, aChatItem, _):
+        logger.info("Attachment upload completed")
         await chatItemSimpleUpdate(user, aChatItem)
     case let .sndFileError(user, aChatItem, _, _):
         if let aChatItem = aChatItem {
