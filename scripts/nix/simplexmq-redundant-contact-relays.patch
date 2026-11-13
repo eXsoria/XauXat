@@ -1,16 +1,17 @@
 diff --git a/src/Simplex/Messaging/Agent.hs b/src/Simplex/Messaging/Agent.hs
-index b0ce9b62..7b06582d 100644
+index b0ce9b62..6e065c58 100644
 --- a/src/Simplex/Messaging/Agent.hs
 +++ b/src/Simplex/Messaging/Agent.hs
-@@ -58,6 +58,7 @@ module Simplex.Messaging.Agent
+@@ -58,6 +58,8 @@ module Simplex.Messaging.Agent
      acceptContactAsync,
      ackMessageAsync,
      switchConnectionAsync,
 +    addConnectionReceiveQueue,
++    simulateConnectionRelayOutage,
      deleteConnectionAsync,
      deleteConnectionsAsync,
      createConnection,
-@@ -161,7 +162,7 @@ import Data.ByteString.Char8 (ByteString)
+@@ -161,7 +163,7 @@ import Data.ByteString.Char8 (ByteString)
  import qualified Data.ByteString.Char8 as B
  import Data.Composition
  import Data.Either (fromRight, isRight, partitionEithers, rights)
@@ -19,7 +20,7 @@ index b0ce9b62..7b06582d 100644
  import Data.Functor (($>))
  import Data.Functor.Identity
  import Data.Int (Int64)
-@@ -404,6 +405,19 @@ switchConnectionAsync :: AgentClient -> ACorrId -> ConnId -> AE ConnectionStats
+@@ -404,6 +406,32 @@ switchConnectionAsync :: AgentClient -> ACorrId -> ConnId -> AE ConnectionStats
  switchConnectionAsync c = withAgentEnv c .: switchConnectionAsync' c
  {-# INLINE switchConnectionAsync #-}
  
@@ -36,10 +37,23 @@ index b0ce9b62..7b06582d 100644
 +          enqueueCommand c "" connId Nothing $ AClientCommand $ QNEW target
 +      _ -> throwE $ CMD PROHIBITED "adding a receive queue requires a duplex connection"
 +
++-- | Simulate failed sends for 30 seconds on one test connection only.
++simulateConnectionRelayOutage :: AgentClient -> ConnId -> Int -> AE ()
++simulateConnectionRelayOutage c connId count = withAgentEnv c $ do
++  unless (count >= 0 && count <= 2) $ throwE $ CMD PROHIBITED "outage count must be zero, one or two"
++  if count == 0
++    then atomically $ TM.delete connId $ smpTestOutages c
++    else do
++      ConnectionStats {sndQueuesInfo} <- getConnectionServers' c connId
++      let activeServers = [sndServer | SndQueueInfo {sndServer, status = Active} <- sndQueuesInfo]
++      unless (length activeServers > count) $ throwE $ CMD PROHIBITED "keep at least one active relay"
++      expires <- addUTCTime 30 <$> liftIO getCurrentTime
++      atomically $ TM.insert connId (take count activeServers, expires) $ smpTestOutages c
++
  -- | Delete SMP agent connection (DEL command) asynchronously, no synchronous response
  deleteConnectionAsync :: AgentClient -> Bool -> ConnId -> AE ()
  deleteConnectionAsync c waitDelivery = withAgentEnv c . deleteConnectionAsync' c waitDelivery
-@@ -1915,6 +1929,7 @@ runCommandProcessing c@AgentClient {subQ} connId server_ Worker {doWork} = do
+@@ -1915,6 +1943,7 @@ runCommandProcessing c@AgentClient {subQ} connId server_ Worker {doWork} = do
                SomeConn _ conn@(DuplexConnection _ (replaced :| _rqs) _) ->
                  switchDuplexConnection c NRMBackground conn replaced >>= notify . SWITCH QDRcv SPStarted
                _ -> throwE $ CMD PROHIBITED "SWCH: not duplex"
@@ -47,7 +61,7 @@ index b0ce9b62..7b06582d 100644
          DEL -> withServer' . tryCommand $ deleteConnection' c NRMBackground connId >> notify OK
        AInternalCommand cmd -> case cmd of
          ICAckDel rId srvMsgId msgId -> withServer $ \srv ->
-@@ -1958,6 +1973,13 @@ runCommandProcessing c@AgentClient {subQ} connId server_ Worker {doWork} = do
+@@ -1958,6 +1987,13 @@ runCommandProcessing c@AgentClient {subQ} connId server_ Worker {doWork} = do
          ICQSecure rId senderKey ->
            withServer $ \srv -> tryWithLock "ICQSecure" . withDuplexConn $ \(DuplexConnection cData rqs sqs) ->
              case find (sameQueue (srv, rId)) rqs of
@@ -61,7 +75,7 @@ index b0ce9b62..7b06582d 100644
                Just rq'@RcvQueue {server, sndId, status, dbReplaceQueueId = Just replaceQId} ->
                  case find ((replaceQId ==) . dbQId) rqs of
                    Just rq1 -> when (status == Confirmed) $ do
-@@ -2050,10 +2072,7 @@ enqueueMessages' c cData sqs msgFlags aMessage =
+@@ -2050,10 +2086,7 @@ enqueueMessages' c cData sqs msgFlags aMessage =
  {-# INLINE enqueueMessages' #-}
  
  enqueueMessagesB :: Traversable t => AgentClient -> t (Either AgentErrorType (Either AgentErrorType (ConnData, NonEmpty SndQueue), Maybe PQEncryption, MsgFlags, ValueOrRef AMessage)) -> AM' (t (Either AgentErrorType (AgentMsgId, PQEncryption)))
@@ -73,7 +87,7 @@ index b0ce9b62..7b06582d 100644
  
  isActiveSndQ :: SndQueue -> Bool
  isActiveSndQ SndQueue {status} = status == Secured || status == Active
-@@ -2061,50 +2080,49 @@ isActiveSndQ SndQueue {status} = status == Secured || status == Active
+@@ -2061,50 +2094,49 @@ isActiveSndQ SndQueue {status} = status == Secured || status == Active
  
  enqueueMessage :: AgentClient -> ConnData -> SndQueue -> MsgFlags -> AMessage -> AM (AgentMsgId, PQEncryption)
  enqueueMessage c cData sq msgFlags aMessage =
@@ -138,7 +152,7 @@ index b0ce9b62..7b06582d 100644
              let AgentConfig {e2eEncryptVRange} = cfg
              internalTs <- liftIO getCurrentTime
              (internalId, internalSndId, prevMsgHash) <- ExceptT $ updateSndIds db connId
-@@ -2121,8 +2139,9 @@ enqueueMessageB c reqs = do
+@@ -2121,8 +2153,9 @@ enqueueMessageB c reqs = do
                  -- msgBody is empty, because snd_messages record is linked to snd_message_bodies
                  msgData = SndMsgData {internalId, internalSndId, internalTs, msgType, msgFlags, msgBody = "", pqEncryption = pqEnc, internalHash, prevMsgHash, sndMsgPrepData_ = Just SndMsgPrepData {encryptKey = mek, paddedLen, sndMsgBodyId}}
              liftIO $ createSndMsg db connId msgData
@@ -150,7 +164,7 @@ index b0ce9b62..7b06582d 100644
      handleInternal :: E.SomeException -> IO (Either AgentErrorType b)
      handleInternal = pure . Left . INTERNAL . show
  
-@@ -2182,6 +2201,7 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
+@@ -2182,6 +2215,7 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
          atomically $ endAgentOperation c AOMsgDelivery -- this operation begins in submitPendingMsg
          let mId = unId msgId
              ri' = maybe id updateRetryInterval2 msgRetryState ri
@@ -158,7 +172,7 @@ index b0ce9b62..7b06582d 100644
          withRetryLock2 ri' qLock $ \riState loop -> do
            liftIO $ waitWhileSuspended c
            liftIO $ waitForUserNetwork c
-@@ -2209,7 +2229,7 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
+@@ -2209,7 +2243,7 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
                      _ -> do
                        expireTs <- addUTCTime (-quotaExceededTimeout) <$> liftIO getCurrentTime
                        if internalTs < expireTs
@@ -167,7 +181,7 @@ index b0ce9b62..7b06582d 100644
                          else do
                            notify $ MWARN (unId msgId) e
                            retrySndMsg RISlow
-@@ -2226,7 +2246,7 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
+@@ -2226,7 +2260,7 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
                        Just _ -> connError msgId NOT_AVAILABLE
                        -- party joining connection
                        _ -> connError msgId NOT_ACCEPTED
@@ -176,7 +190,7 @@ index b0ce9b62..7b06582d 100644
                      AM_A_RCVD_ -> notifyDel msgId err
                      AM_QCONT_ -> notifyDel msgId err
                      AM_QADD_ -> qError msgId "QADD: AUTH"
-@@ -2241,13 +2261,13 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
+@@ -2241,13 +2275,13 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
                        let msgTimeout = if msgType == AM_HELLO_ then helloTimeout else messageTimeout
                        expireTs <- addUTCTime (-msgTimeout) <$> liftIO getCurrentTime
                        if internalTs < expireTs
@@ -192,7 +206,7 @@ index b0ce9b62..7b06582d 100644
                where
                  retrySndMsg riMode = do
                    withStore' c $ \db -> updatePendingMsgRIState db connId msgId riState
-@@ -2277,7 +2297,9 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
+@@ -2277,7 +2311,9 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
                          notify $ CON pqEncryption
                      -- this branch should never be reached as receive queue is created before the confirmation,
                      _ -> logError "HELLO sent without receive queue"
@@ -203,7 +217,7 @@ index b0ce9b62..7b06582d 100644
                  AM_A_RCVD_ -> pure ()
                  AM_QCONT_ -> pure ()
                  AM_QADD_ -> pure ()
-@@ -2312,30 +2334,37 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
+@@ -2312,30 +2348,37 @@ runSmpQueueMsgDelivery c@AgentClient {subQ} sq@SndQueue {userId, connId, server,
                                cStats <- connectionStats c conn'
                                pure $ Just ("", connId, AEvt SAEConn $ SWITCH QDSnd SPCompleted cStats)
                              _ -> internalErr msgId "sent QTEST: there is only one queue in connection"
@@ -255,7 +269,7 @@ index b0ce9b62..7b06582d 100644
      notify :: forall e. AEntityI e => AEvent e -> AM ()
      notify cmd = atomically $ writeTBQueue subQ ("", connId, AEvt (sAEntity @e) cmd)
      notifyDel :: AEntityI e => InternalId -> AEvent e -> AM ()
-@@ -2441,6 +2470,37 @@ switchDuplexConnection c nm (DuplexConnection cData@ConnData {connId, userId} rq
+@@ -2441,6 +2484,37 @@ switchDuplexConnection c nm (DuplexConnection cData@ConnData {connId, userId} rq
    let rqs' = updatedQs rq1 rqs <> [rq'']
    connectionStats c $ DuplexConnection cData rqs' sqs
  
@@ -293,7 +307,7 @@ index b0ce9b62..7b06582d 100644
  abortConnectionSwitch' :: AgentClient -> ConnId -> AM ConnectionStats
  abortConnectionSwitch' c connId =
    withConnLock c connId "abortConnectionSwitch" $
-@@ -3228,9 +3288,14 @@ processSMPTransmissions c@AgentClient {subQ} (tSess@(userId, srv, _), THandlePar
+@@ -3228,9 +3302,14 @@ processSMPTransmissions c@AgentClient {subQ} (tSess@(userId, srv, _), THandlePar
                                QADD qs -> qDuplexAckDel conn'' "QADD" $ qAddMsg srvMsgId qs
                                QKEY qs -> qDuplexAckDel conn'' "QKEY" $ qKeyMsg srvMsgId qs
                                QUSE qs -> qDuplexAckDel conn'' "QUSE" $ qUseMsg srvMsgId qs
@@ -311,7 +325,7 @@ index b0ce9b62..7b06582d 100644
                                EREADY _ -> qDuplexAckDel conn'' "EREADY" $ ereadyMsg rcPrev
                              where
                                qDuplexAckDel :: Connection c -> String -> (Connection 'CDuplex -> AM ()) -> AM ACKd
-@@ -3248,7 +3313,7 @@ processSMPTransmissions c@AgentClient {subQ} (tSess@(userId, srv, _), THandlePar
+@@ -3248,7 +3327,7 @@ processSMPTransmissions c@AgentClient {subQ} (tSess@(userId, srv, _), THandlePar
                            Right Nothing -> prohibited "msg: bad agent msg" >> ack
                            Left e@(AGENT A_DUPLICATE {}) -> do
                              atomically $ incSMPServerStat c userId srv recvDuplicates
@@ -320,7 +334,7 @@ index b0ce9b62..7b06582d 100644
                                Just RcvMsg {internalId, msgMeta, msgBody = agentMsgBody, userAck}
                                  | userAck -> ackDel internalId
                                  | otherwise -> do
-@@ -3528,7 +3593,21 @@ processSMPTransmissions c@AgentClient {subQ} (tSess@(userId, srv, _), THandlePar
+@@ -3528,7 +3607,21 @@ processSMPTransmissions c@AgentClient {subQ} (tSess@(userId, srv, _), THandlePar
  
            -- processed by queue sender
            qAddMsg :: SMP.MsgId -> NonEmpty (SMPQueueUri, Maybe SndQAddr) -> Connection 'CDuplex -> AM ()
@@ -343,7 +357,7 @@ index b0ce9b62..7b06582d 100644
            qAddMsg srvMsgId ((qUri, Just addr) :| _) (DuplexConnection cData' rqs sqs) = do
              when (ratchetSyncSendProhibited cData') $ throwE $ AGENT (A_QUEUE "ratchet is not synchronized")
              clientVRange <- asks $ smpClientVRange . config
-@@ -3564,9 +3643,17 @@ processSMPTransmissions c@AgentClient {subQ} (tSess@(userId, srv, _), THandlePar
+@@ -3564,9 +3657,17 @@ processSMPTransmissions c@AgentClient {subQ} (tSess@(userId, srv, _), THandlePar
              clientVRange <- asks $ smpClientVRange . config
              unless (qInfo `isCompatible` clientVRange) . throwE $ AGENT A_VERSION
              case findRQ (smpServer, senderId) rqs of
@@ -362,7 +376,7 @@ index b0ce9b62..7b06582d 100644
                      logServer "<--" c srv rId $ "MSG <QKEY>:" <> logSecret' srvMsgId <> " " <> logSecret senderId
                      let dhSecret = C.dh' dhPublicKey dhPrivKey
                      withStore' c $ \db -> setRcvQueueConfirmedE2E db rq' dhSecret $ min cVer cVer'
-@@ -3581,8 +3668,17 @@ processSMPTransmissions c@AgentClient {subQ} (tSess@(userId, srv, _), THandlePar
+@@ -3581,8 +3682,17 @@ processSMPTransmissions c@AgentClient {subQ} (tSess@(userId, srv, _), THandlePar
            -- processed by queue sender
            -- mark queue as Secured and to start sending messages to it
            qUseMsg :: SMP.MsgId -> NonEmpty ((SMPServer, SMP.SenderId), Bool) -> Connection 'CDuplex -> AM ()
@@ -382,7 +396,7 @@ index b0ce9b62..7b06582d 100644
              case findQ addr sqs of
                Just sq'@SndQueue {dbReplaceQueueId = Just replaceQId} -> do
 diff --git a/src/Simplex/Messaging/Agent/Client.hs b/src/Simplex/Messaging/Agent/Client.hs
-index bb4f1a95..ef75ea65 100644
+index bb4f1a95..fe628d35 100644
 --- a/src/Simplex/Messaging/Agent/Client.hs
 +++ b/src/Simplex/Messaging/Agent/Client.hs
 @@ -170,6 +170,10 @@ module Simplex.Messaging.Agent.Client
@@ -396,6 +410,45 @@ index bb4f1a95..ef75ea65 100644
      withNextSrv,
      incSMPServerStat,
      incSMPServerStat',
+@@ -365,6 +369,7 @@ data AgentClient = AgentClient
+     clientNoticesLock :: TMVar (),
+     workerSeq :: TVar Int,
+     smpDeliveryWorkers :: TMap SndQAddr (Worker, TMVar ()),
++    smpTestOutages :: TMap ConnId ([SMPServer], UTCTime),
+     asyncCmdWorkers :: TMap (ConnId, Maybe SMPServer) Worker,
+     ntfNetworkOp :: TVar AgentOpState,
+     rcvNetworkOp :: TVar AgentOpState,
+@@ -535,6 +540,7 @@ newAgentClient clientId InitialAgentServers {smp, ntf, xftp, netCfg, useServices
+   clientNoticesLock <- newTMVarIO ()
+   workerSeq <- newTVarIO 0
+   smpDeliveryWorkers <- TM.emptyIO
++  smpTestOutages <- TM.emptyIO
+   asyncCmdWorkers <- TM.emptyIO
+   ntfNetworkOp <- newTVarIO $ AgentOpState False 0
+   rcvNetworkOp <- newTVarIO $ AgentOpState False 0
+@@ -577,6 +583,7 @@ newAgentClient clientId InitialAgentServers {smp, ntf, xftp, netCfg, useServices
+         clientNoticesLock,
+         workerSeq,
+         smpDeliveryWorkers,
++        smpTestOutages,
+         asyncCmdWorkers,
+         ntfNetworkOp,
+         rcvNetworkOp,
+@@ -2090,6 +2097,14 @@ deleteQueues c nm = sendTSessionBatches "DEL" mkSMPTSession deleteQueues_ c nm
+ -- This is only used in background
+ sendAgentMessage :: AgentClient -> SndQueue -> MsgFlags -> ByteString -> AM (Maybe SMPServer)
+ sendAgentMessage c sq@SndQueue {userId, server, connId, sndId, sndPrivateKey} msgFlags agentMsg = do
++  outage <- liftIO $ TM.lookupIO connId $ smpTestOutages c
++  forM_ outage $ \(blocked, expires) -> do
++    now <- liftIO getCurrentTime
++    if now < expires
++      then when (server `elem` blocked) $ throwE $ BROKER "local SMP outage test" TIMEOUT
++      else atomically $ do
++        current <- TM.lookup connId $ smpTestOutages c
++        when (current == outage) $ TM.delete connId $ smpTestOutages c
+   let clientMsg = SMP.ClientMessage SMP.PHEmpty agentMsg
+   msg <- agentCbEncrypt sq Nothing $ smpEncode clientMsg
+   sendOrProxySMPMessage c NRMBackground userId server connId "<MSG>" (Just sndPrivateKey) sndId msgFlags msg
 diff --git a/src/Simplex/Messaging/Agent/Protocol.hs b/src/Simplex/Messaging/Agent/Protocol.hs
 index c4310414..65402e62 100644
 --- a/src/Simplex/Messaging/Agent/Protocol.hs
@@ -581,21 +634,22 @@ index 918e320e..f76afe5e 100644
    where
      getRcptAndBodyId :: IO (Maybe (Maybe MsgReceiptStatus, Maybe Int64))
 diff --git a/tests/AgentTests/FunctionalAPITests.hs b/tests/AgentTests/FunctionalAPITests.hs
-index 7b95c71b..44c24acc 100644
+index 7b95c71b..e7893b11 100644
 --- a/tests/AgentTests/FunctionalAPITests.hs
 +++ b/tests/AgentTests/FunctionalAPITests.hs
-@@ -497,6 +497,10 @@ functionalAPITests ps = do
+@@ -497,6 +497,11 @@ functionalAPITests ps = do
      it "should recover when service ID changes on reconnect" $ testServiceIdChangeOnReconnect ps
      it "should handle service unavailable on startup" $ testServiceUnavailableOnStartup ps
      it "migrate connections to and from service" $ testMigrateConnectionsToService ps
 +  describe "Redundant receive queue" $ do
 +    it "delivers once with the primary relay offline" $ testRedundantReceiveQueue ps
 +    it "delivers once with both relays online" $ withSmpServers2 ps $ testRedundantBothRelays
++    it "simulates and clears a primary outage for one connection" $ withSmpServers2 ps $ testSimulatedRelayOutage
 +    it "delivers once with three relays and two offline" $ testThreeReceiveQueues ps
    describe "Connection switch" $ do
      describe "should switch delivery to the new queue" $
        testServerMatrix2 ps testSwitchConnection
-@@ -3225,6 +3229,72 @@ testUsersNoServer ps = withAgentClientsCfg2 aCfg agentCfg $ \a b -> do
+@@ -3225,6 +3230,82 @@ testUsersNoServer ps = withAgentClientsCfg2 aCfg agentCfg $ \a b -> do
    where
      aCfg = agentCfg {initialCleanupDelay = 10000, cleanupInterval = 10000, deleteErrorCount = 3}
  
@@ -614,6 +668,16 @@ index 7b95c71b..44c24acc 100644
 +    (aId, bId) <- prepareRedundantQueues a b
 +    assertSingleDelivery a bId b aId "both online A"
 +    assertSingleDelivery b aId a bId "both online B"
++
++testSimulatedRelayOutage :: IO ()
++testSimulatedRelayOutage =
++  withAgentClientsCfgServers2 agentCfg agentCfg initAgentServers $ \a b -> runRight_ $ do
++    (aId, bId) <- prepareRedundantQueues a b
++    simulateConnectionRelayOutage a bId 1
++    assertSingleDelivery a bId b aId "simulated outage A"
++    assertSingleDelivery b aId a bId "other direction B"
++    simulateConnectionRelayOutage a bId 0
++    assertSingleDelivery a bId b aId "outage cleared A"
 +
 +prepareRedundantQueues :: AgentClient -> AgentClient -> ExceptT AgentErrorType IO (ConnId, ConnId)
 +prepareRedundantQueues a b = do

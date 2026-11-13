@@ -65,7 +65,6 @@
               ./scripts/nix/simplexmq-smp-proxy-failover.patch
               ./scripts/nix/simplexmq-redundant-contact-relays.patch
             ];
-            packages.simplex-chat.flags.xauxat_redundant_queues = true;
           }
 
           ({ pkgs,lib, ... }: lib.mkIf (pkgs.stdenv.hostPlatform.isAndroid) {
@@ -606,6 +605,7 @@
                 extra-modules = [{
                   packages.simplex-chat.flags.swift = true;
                   packages.simplexmq.flags.swift = true;
+                  packages.simplex-chat.flags.xauxat_redundant_queues = true;
                   packages.direct-sqlcipher.flags.commoncrypto = true;
                   packages.simplexmq.flags.commoncrypto = true;
                   packages.entropy.flags.DoNotGetEntropy = true;
@@ -643,6 +643,7 @@
                 extra-modules = [{
                   packages.simplex-chat.flags.swift = true;
                   packages.simplexmq.flags.swift = true;
+                  packages.simplex-chat.flags.xauxat_redundant_queues = true;
                   packages.direct-sqlcipher.flags.commoncrypto = true;
                   packages.simplexmq.flags.commoncrypto = true;
                   packages.entropy.flags.DoNotGetEntropy = true;

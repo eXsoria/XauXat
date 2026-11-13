@@ -497,6 +497,7 @@ data ChatCommand
 #ifdef xauxatRedundantQueues
   | APIAddContactReceiveQueues ContactId Int
   | AddContactReceiveQueues ContactName Int
+  | APITestContactRelayOutage ContactId Int
 #endif
   | APISwitchContact ContactId
   | APISwitchGroupMember GroupId GroupMemberId

@@ -1930,6 +1930,13 @@ processChatCommand cxt nm = \case
         withAgent $ \a -> addConnectionReceiveQueue a connId count
         ok user
       Nothing -> throwChatError $ CEContactNotActive ct
+  APITestContactRelayOutage contactId count -> withUser $ \user -> do
+    ct <- withFastStore $ \db -> getContact db cxt user contactId
+    case contactConnId ct of
+      Just connId -> do
+        withAgent $ \a -> simulateConnectionRelayOutage a connId count
+        ok user
+      Nothing -> throwChatError $ CEContactNotActive ct
   AddContactReceiveQueues name count -> withContactName name $ \contactId -> APIAddContactReceiveQueues contactId count
 #endif
   APISwitchContact contactId -> withUser $ \user -> do
@@ -5586,6 +5593,7 @@ chatCommandP =
       ("/queue info " <|> "/qi ") *> char_ '@' *> (ContactQueueInfo <$> displayNameP),
       "/_switch #" *> (APISwitchGroupMember <$> A.decimal <* A.space <*> A.decimal),
 #ifdef xauxatRedundantQueues
+      "/_xauxat relay-outage @" *> (APITestContactRelayOutage <$> A.decimal <* A.space <*> A.decimal),
       "/_xauxat queues @" *> (APIAddContactReceiveQueues <$> A.decimal <* A.space <*> A.decimal),
       "/xauxat queues " *> (flip AddContactReceiveQueues <$> A.decimal <* A.space <* char_ '@' <*> displayNameP),
 #endif
