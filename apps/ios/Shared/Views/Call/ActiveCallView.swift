@@ -267,7 +267,7 @@ struct ActiveCallView: View {
 
     @MainActor
     private func showSignalingError(for call: Call) {
-        guard CallManager.clearActiveCall(call) else { return }
+        guard CallController.shared.endCallAfterSignalingFailure(call) else { return }
         AlertManager.shared.showAlertMsg(title: "Call failed", message: "The call could not be established. Please try again.")
     }
 
