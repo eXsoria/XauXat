@@ -1922,6 +1922,16 @@ processChatCommand cxt nm = \case
     case activeConn of
       Just conn -> getConnQueueInfo user conn
       Nothing -> throwChatError CEGroupMemberNotActive
+#ifdef xauxatRedundantQueues
+  APIAddContactReceiveQueues contactId count -> withUser $ \user -> do
+    ct <- withFastStore $ \db -> getContact db cxt user contactId
+    case contactConnId ct of
+      Just connId -> do
+        withAgent $ \a -> addConnectionReceiveQueue a connId count
+        ok user
+      Nothing -> throwChatError $ CEContactNotActive ct
+  AddContactReceiveQueues name count -> withContactName name $ \contactId -> APIAddContactReceiveQueues contactId count
+#endif
   APISwitchContact contactId -> withUser $ \user -> do
     ct <- withFastStore $ \db -> getContact db cxt user contactId
     case contactConnId ct of
@@ -5575,6 +5585,10 @@ chatCommandP =
       ("/queue info #" <|> "/qi #") *> (GroupMemberQueueInfo <$> displayNameP <* A.space <* char_ '@' <*> displayNameP),
       ("/queue info " <|> "/qi ") *> char_ '@' *> (ContactQueueInfo <$> displayNameP),
       "/_switch #" *> (APISwitchGroupMember <$> A.decimal <* A.space <*> A.decimal),
+#ifdef xauxatRedundantQueues
+      "/_xauxat queues @" *> (APIAddContactReceiveQueues <$> A.decimal <* A.space <*> A.decimal),
+      "/xauxat queues " *> (flip AddContactReceiveQueues <$> A.decimal <* A.space <* char_ '@' <*> displayNameP),
+#endif
       "/_switch @" *> (APISwitchContact <$> A.decimal),
       "/_abort switch #" *> (APIAbortSwitchGroupMember <$> A.decimal <* A.space <*> A.decimal),
       "/_abort switch @" *> (APIAbortSwitchContact <$> A.decimal),

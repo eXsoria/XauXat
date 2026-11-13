@@ -19,6 +19,11 @@ extra-source-files:
     PRIVACY.md
     cabal.project
 
+flag xauxat_redundant_queues
+  description: Enable the XauXat redundant queues command with the patched agent
+  default: False
+  manual: True
+
 flag swift
   description: Enable swift JSON format
   manual: True
@@ -371,6 +376,9 @@ library
   default-language: Haskell2010
   if flag(swift)
     cpp-options: -DswiftJSON
+
+  if flag(xauxat_redundant_queues)
+    cpp-options: -DxauxatRedundantQueues
   if flag(client_postgres)
     build-depends:
         postgresql-libpq >=0.10.0.0
