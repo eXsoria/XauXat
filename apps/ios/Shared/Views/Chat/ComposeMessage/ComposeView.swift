@@ -1531,7 +1531,7 @@ struct ComposeView: View {
                     Picker("Background sound", selection: $voiceNoteAmbience) {
                         Text("Off").tag(XauXatCallAmbience.off)
                         Text("Rain").tag(XauXatCallAmbience.rain)
-                        Text("Traffic").tag(XauXatCallAmbience.traffic)
+                        Text("Outside").tag(XauXatCallAmbience.traffic)
                     }
                 }
             }
