@@ -314,7 +314,7 @@ struct ServersSummaryView: View {
     }
 
     private var sessionActiveColor: Color {
-        isXauXatTorReady() ? .indigo : .accentColor
+        isXauXatTorReady() ? .brown : .accentColor
     }
 
     private func xftpServersListView(
@@ -449,7 +449,7 @@ func subscriptionStatusInfo(online: Bool, usesProxy: Bool, subs: SMPServerSubs, 
         : (n * 4).rounded() / 4
     }
 
-    let activeColor: Color = usesProxy ? .indigo : primaryColor
+    let activeColor: Color = usesProxy ? .brown : primaryColor
     let noConnColorAndPercent: (Color, Double, Double) = (Color(uiColor: .tertiaryLabel), 1, 1)
     let activeSubsRounded = roundedToQuarter(subs.shareOfActive)
 

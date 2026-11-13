@@ -20,7 +20,7 @@ struct ChatInfoToolbar: View {
         let cInfo = chat.chatInfo
         return HStack {
             if (cInfo.incognito) {
-                Image(systemName: "theatermasks").frame(maxWidth: 24, maxHeight: 24, alignment: .center).foregroundColor(.indigo)
+                Image(systemName: "theatermasks").frame(maxWidth: 24, maxHeight: 24, alignment: .center).foregroundColor(.brown)
                 Spacer().frame(width: 16)
             }
             ZStack(alignment: .bottomTrailing) {

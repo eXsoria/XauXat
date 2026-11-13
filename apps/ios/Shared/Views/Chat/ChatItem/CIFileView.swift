@@ -17,6 +17,7 @@ struct CIFileView: View {
     @EnvironmentObject var m: ChatModel
     @EnvironmentObject var theme: AppTheme
     @Environment(\.showTimestamp) var showTimestamp: Bool
+    @Environment(\.separateMessageMetadata) private var separateMessageMetadata
     @AppStorage(DEFAULT_SHOW_SENT_VIA_RPOXY) private var showSentViaProxy = false
     @AppStorage(DEFAULT_PRIVACY_SHOW_SIGNATURE) private var showSignature = true
     @AppStorage(DEFAULT_PRIVACY_SHOW_FILE_ENCRYPTION) private var showFileEncryption = true
@@ -58,7 +59,7 @@ struct CIFileView: View {
         } else {
             // reserve exact space for the overlaid meta (timestamp + all icons), rendered transparently - matches MsgContentView
             let encrypted: Bool? = if let fileSource = file?.fileSource { fileSource.cryptoArgs != nil } else { nil }
-            let metaReserve = Text(verbatim: "   ") + ciMetaText(meta, chatTTL: chat.chatInfo.timedMessagesTTL, encrypted: encrypted, colorMode: .transparent, showViaProxy: showSentViaProxy, showTimesamp: showTimestamp, signedFileVerified: file?.loaded, showSignature: showSignature, showFileEncryption: showFileEncryption)
+            let metaReserve = separateMessageMetadata ? Text("") : Text(verbatim: "   ") + ciMetaText(meta, chatTTL: chat.chatInfo.timedMessagesTTL, encrypted: encrypted, colorMode: .transparent, showViaProxy: showSentViaProxy, showTimesamp: showTimestamp, signedFileVerified: file?.loaded, showSignature: showSignature, showFileEncryption: showFileEncryption)
             HStack(alignment: .bottom, spacing: 6) {
                 fileIndicator()
                     .padding(.top, 5)
@@ -581,6 +582,7 @@ private struct XauXatUnlockedFileView: View {
 }
 
 private struct XauXatProtectedFileRow: View {
+    @Environment(\.separateMessageMetadata) private var separateMessageMetadata
     @EnvironmentObject private var theme: AppTheme
     @AppStorage(DEFAULT_SHOW_SENT_VIA_RPOXY) private var showSentViaProxy = false
     @Environment(\.showTimestamp) private var showTimestamp: Bool
@@ -616,7 +618,7 @@ private struct XauXatProtectedFileRow: View {
                 title
                     .lineLimit(1)
                     .foregroundColor(theme.colors.onBackground)
-                (detail + metaReserve)
+                (detail + (separateMessageMetadata ? Text("") : metaReserve))
                     .font(.caption)
                     .lineLimit(1)
                     .foregroundColor(theme.colors.secondary)

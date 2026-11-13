@@ -723,7 +723,7 @@ struct UserAddressSettingsView: View {
     private func acceptIncognitoToggle() -> some View {
         settingsRow(
             settings.autoAcceptIncognito ? "theatermasks.fill" : "theatermasks",
-            color: settings.autoAcceptIncognito ? .indigo : theme.colors.secondary
+            color: settings.autoAcceptIncognito ? .brown : theme.colors.secondary
         ) {
             Toggle("Accept incognito", isOn: $settings.autoAcceptIncognito)
         }

@@ -240,7 +240,7 @@ struct GroupMentionsView: View {
             MemberProfileImage(member, size: 38)
                 .padding(.trailing, 2)
             VStack(alignment: .leading) {
-                let t = Text(member.localAliasAndFullName).foregroundColor(member.memberIncognito ? .indigo : theme.colors.onBackground)
+                let t = Text(member.localAliasAndFullName).foregroundColor(member.memberIncognito ? .brown : theme.colors.onBackground)
                 (member.verified ? memberVerifiedShield() + t : t)
                     .lineLimit(1)
             }

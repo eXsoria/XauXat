@@ -264,7 +264,7 @@ struct ChatInfoView: View {
                                 Text("Your random profile")
                                 Spacer()
                                 Text(customUserProfile.chatViewName)
-                                    .foregroundStyle(.indigo)
+                                    .foregroundStyle(.brown)
                             }
                         }
                     }
