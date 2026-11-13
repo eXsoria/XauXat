@@ -19,7 +19,7 @@ enum AppDelegate {
     static func keepScreenOn(_ value: Bool) { UIApplication.shared.isIdleTimerDisabled = value }
 }
 enum VoiceMessageRecordingState { case noRecording, recording, finished }
-enum VoiceMaskingState: Equatable { case unavailable, available, processing, applied(XauXatVoiceMaskPreset), ambienceApplied }
+enum VoiceMaskingState: Equatable { case unavailable, available, processing, applied(XauXatVoiceMaskPreset) }
 enum XauXatVoiceMaskPreset: String {
     case veil
     var name: String { "Veil" }

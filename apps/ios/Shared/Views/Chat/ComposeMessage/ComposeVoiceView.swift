@@ -81,7 +81,7 @@ struct ComposeVoiceView: View {
 
     @ViewBuilder private func maskingMode() -> some View {
         switch maskingState {
-        case .unavailable, .ambienceApplied:
+        case .unavailable:
             EmptyView()
         case .available:
             Button { showMaskPicker = true } label: {
