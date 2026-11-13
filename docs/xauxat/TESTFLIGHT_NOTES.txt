@@ -1,13 +1,15 @@
-This build focuses on private-connection startup and recovery on real iPhones.
+This build brings together the reviewed messaging, voice, photo and privacy updates.
 
 What to test:
-- Open XauXat repeatedly on Wi-Fi and on mobile data. Confirm the existing profile and chats open after Tor becomes ready.
-- Send and receive text, photos and voice messages in both directions between two devices.
-- Briefly tap the microphone and confirm no voice draft remains. Interrupt a short hold before recording starts and confirm it leaves no draft. Hold until recording begins, release to preview, then resume and send; audio should only be sent when you press Send.
-- Stay on the chat list with no conversation selected and no outgoing messages. Confirm incoming delivery continues after a temporary connection failure.
-- Leave the app, lock the phone, then return without force-closing XauXat. Confirm the same session resumes and both sending and receiving recover.
-- Switch Wi-Fi/mobile data and briefly enable airplane mode, then restore connectivity. Check recovery while the app is open and after returning to it.
-- Repeat with app authentication and protected profiles. After backgrounding, enter the correct PIN for the same profile and confirm both receiving and sending resume. Recovery should respect the selected profile and unlock state.
-- If opening stalls, try Refresh Tor connection and record its exact error. If Settings is accessible, use Private connection > Copy connection diagnostics before force-closing the app; the session journal resets when the process exits.
+- Exchange text, photos, files and voice messages in both directions between two devices on Wi-Fi and mobile data. Check arrival time, attachment playback readiness, duplicate items and send status after a connection interruption.
+- Open a chat with several pending attachments and confirm automatic receiving continues through the whole batch.
+- Record, pause, resume, preview and send voice notes. Try Voice Mask with Rain or Outside, then turn Voice Mask off and confirm the saved background sound is not applied.
+- Import stickers using Photos, switch between Stickers and Soundboard, and check search, favorites and recent items.
+- Decline an incoming call and confirm the caller stops ringing. Check call cleanup after a failed connection.
+- Background and reopen the app with authentication enabled. Confirm immediate locking, correct profile selection and recovery of the same conversation session.
+- Switch between Wi-Fi and mobile data, briefly enable airplane mode, then restore connectivity. Verify incoming and outgoing delivery recover without force-closing the app.
+- If startup or delivery stalls, use Private connection > Copy connection diagnostics and include the time, network type and affected media in the report.
 
-Automated validation covers startup retries with the existing database, foreground/session recovery, native subscription events without an open conversation, network/profile/store/authentication gates, and real Tor control-socket behavior. Physical iPhone acceptance is still required to confirm the reported intermittent incident.
+Known limitation: when redundant relay queues are enabled, a full relay can make a contact appear inactive even when another relay is delivering receipts. Please report this status along with the diagnostics.
+
+Physical iPhone acceptance is still needed for delivery latency, real audio playback and call/notification behavior. Automated relay tests are not a latency guarantee.
