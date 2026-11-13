@@ -233,6 +233,7 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     private var ownsAudioSession = false
     private var recordingFileName: String?
     private var segmentFileName: String?
+    private var pendingCapture: URL?
     private var pendingSegments: [URL] = []
     private var segmentOffset: TimeInterval = 0
     private(set) var duration: TimeInterval = 0
@@ -246,7 +247,7 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     // ownership here until the canonical, playable file is ready.
     private static var pendingRecorders: [String: AudioRecorder] = [:]
     static func pending(_ fileName: String) -> AudioRecorder? { pendingRecorders[fileName] }
-    var canResume: Bool { !cancelled && recordingFileName != nil && finalizationTask == nil && pendingSegments.isEmpty && duration < MAX_VOICE_MESSAGE_LENGTH }
+    var canResume: Bool { !cancelled && recordingFileName != nil && finalizationTask == nil && pendingCapture == nil && pendingSegments.isEmpty && duration < MAX_VOICE_MESSAGE_LENGTH }
 
     init(onTimer: @escaping (TimeInterval) -> Void, onFinishRecording: @escaping () -> Void, onLevel: ((CGFloat) -> Void)? = nil, onFinishing: (() -> Void)? = nil) {
         self.onTimer = onTimer
@@ -288,24 +289,27 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         ownsAudioSession = true
         try av.setActive(true)
         let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: 16000,
-            AVEncoderBitRateKey: 32000,
-            AVEncoderBitRateStrategyKey: AVAudioBitRateStrategy_VariableConstrained,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
             AVNumberOfChannelsKey: 1
         ]
         segmentFileName = fileName
         segmentOffset = duration
-        let recorder = try AVAudioRecorder(url: getAppFilePath(fileName), settings: settings)
+        let capture = getAppFilePath(fileName + ".caf")
+        let recorder = try AVAudioRecorder(url: capture, settings: settings)
         audioRecorder = recorder
+        guard recorder.prepareToRecord() else { throw RecordingError.unavailable }
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: capture.path)
+        _ = excludeFromSystemBackup(capture)
         recorder.delegate = self
         recorder.isMeteringEnabled = true
         guard recorder.record(forDuration: MAX_VOICE_MESSAGE_LENGTH - duration) else { throw RecordingError.unavailable }
         startTimer()
     }
 
-    // Closing AAC writes its container header. AVAudioRecorder.pause() leaves
-    // an unfinished M4A that AVAudioPlayer cannot preview.
+    // Finalize capture before encoding the compressed preview or attachment.
     func pause() -> Task<Void, Error> {
         if let finalizationTask { return finalizationTask }
         closeSegment()
@@ -318,6 +322,7 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         let task = Task { @MainActor [self] in
             defer { finalizationTask = nil }
             do {
+                try await encodeCapture(fileName: fileName, request: request)
                 try await joinSegments(fileName: fileName, request: request)
                 guard operation == request, !cancelled else { throw CancellationError() }
                 if Self.pendingRecorders[fileName] === self { Self.pendingRecorders[fileName] = nil }
@@ -335,6 +340,48 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         return task
     }
 
+    private func encodeCapture(fileName: String, request: UUID) async throws {
+        guard let input = pendingCapture else { return }
+        let output = input.deletingPathExtension()
+        let duration = self.duration - segmentOffset
+        try await Task.detached(priority: .userInitiated) {
+            try Self.encodeCapture(input: input, output: output, expectedDuration: duration)
+        }.value
+        guard operation == request, !cancelled else {
+            removeRecordingFile(output)
+            throw CancellationError()
+        }
+        removeRecordingFile(input)
+        pendingCapture = nil
+        if output != getAppFilePath(fileName) { pendingSegments.append(output) }
+    }
+
+    private nonisolated static func encodeCapture(input: URL, output: URL, expectedDuration: TimeInterval) throws {
+        let source = try AVAudioFile(forReading: input)
+        let format = source.processingFormat
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: format.sampleRate,
+            AVEncoderBitRateKey: 32000,
+            AVNumberOfChannelsKey: format.channelCount
+        ]
+        let temp = output.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: temp) }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096) else { throw RecordingError.unavailable }
+        var encoded: AVAudioFile? = try AVAudioFile(forWriting: temp, settings: settings)
+        while source.framePosition < source.length {
+            try source.read(into: buffer)
+            guard buffer.frameLength > 0 else { throw RecordingError.unavailable }
+            try encoded?.write(from: buffer)
+        }
+        if #available(iOS 18, *) { encoded?.close() }
+        encoded = nil
+        guard let player = try? AVAudioPlayer(contentsOf: temp), player.duration > 0,
+              player.duration >= max(0, expectedDuration - 0.5) else { throw RecordingError.unavailable }
+        try Data(contentsOf: temp).write(to: output, options: [.atomic, .completeFileProtection])
+        _ = excludeFromSystemBackup(output)
+    }
+
     func resume() -> Bool {
         guard canResume, audioRecorder == nil else { return false }
         let part = generateNewFileName("voice-part-\(UUID().uuidString)", "m4a")
@@ -343,10 +390,8 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
             return true
         } catch {
             closeSegment()
-            if let url = pendingSegments.last, url == getAppFilePath(part) {
-                pendingSegments.removeLast()
-            }
-            removeRecordingFile(getAppFilePath(part))
+            removeRecordingFile(getAppFilePath(part + ".caf"))
+            pendingCapture = nil
             return false
         }
     }
@@ -392,6 +437,8 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
                     }
                 }
                 guard operation == request, !cancelled else { throw CancellationError() }
+                guard let player = try? AVAudioPlayer(contentsOf: output),
+                      player.duration >= max(0.001, position.seconds - 0.128) else { throw RecordingError.unavailable }
                 // Commit through an atomic write, retaining the existing playable
                 // draft if replacing it fails (for example, when storage is full).
                 try Data(contentsOf: output).write(to: canonical, options: .atomic)
@@ -460,9 +507,7 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
             recorder.delegate = nil
             recorder.stop()
             audioRecorder = nil
-            if let name = segmentFileName, name != recordingFileName {
-                pendingSegments.append(getAppFilePath(name))
-            }
+            if let name = segmentFileName { pendingCapture = getAppFilePath(name + ".caf") }
         }
         segmentFileName = nil
         let wasRecording = recordingTimer != nil
@@ -480,6 +525,8 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         closeSegment()
         if let name = recordingFileName, Self.pendingRecorders[name] === self { Self.pendingRecorders[name] = nil }
         recordingFileName = nil
+        if let pendingCapture { removeRecordingFile(pendingCapture) }
+        pendingCapture = nil
         for part in pendingSegments { removeRecordingFile(part) }
         pendingSegments.removeAll()
     }
