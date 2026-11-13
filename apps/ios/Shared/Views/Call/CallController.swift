@@ -360,6 +360,21 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
     }
 
     @MainActor
+    func endCallAfterSignalingFailure(_ call: Call) -> Bool {
+        guard ChatModel.shared.activeCall === call else { return false }
+        if CallController.useCallKit(), let callUUID = call.callUUID, let uuid = UUID(uuidString: callUUID) {
+            if let action = fulfillOnConnect, action.callUUID == uuid {
+                action.fail()
+                fulfillOnConnect = nil
+            }
+            provider.reportCall(with: uuid, endedAt: nil, reason: .failed)
+        }
+        let cleared = CallManager.clearActiveCall(call)
+        suspendOnEndCall()
+        return cleared
+    }
+
+    @MainActor
     func startCall(_ contact: Contact, _ media: CallMediaType) {
         logger.debug("CallController.startCall")
         guard xauXatContactInvitePermissions(contact).calls else {
