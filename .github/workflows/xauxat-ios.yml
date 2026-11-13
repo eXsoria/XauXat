@@ -190,7 +190,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
-      runner: ${{ steps.native-core-cache.outputs.cache-hit == 'true' && 'ubuntu-24.04' || 'macos-26' }}
+      runner: ${{ steps.native-core-cache.outputs.cache-hit == 'true' && 'ubuntu-24.04' || 'macos-15' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -358,7 +358,9 @@ jobs:
 
   simulator:
     name: Latest iOS Simulator (arm64 launch)
-    runs-on: macos-26
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     timeout-minutes: 75
     needs: native-core
 
