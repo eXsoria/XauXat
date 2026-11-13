@@ -765,7 +765,7 @@ index e77582b9..967d8a18 100644
    FOREIGN KEY(conn_id, internal_id) REFERENCES messages
    ON DELETE CASCADE
 diff --git a/tests/AgentTests/FunctionalAPITests.hs b/tests/AgentTests/FunctionalAPITests.hs
-index 7b95c71b..8265b3cd 100644
+index 7b95c71b..aacfba23 100644
 --- a/tests/AgentTests/FunctionalAPITests.hs
 +++ b/tests/AgentTests/FunctionalAPITests.hs
 @@ -88,8 +88,8 @@ import Simplex.Messaging.Agent.Client (ProtocolTestFailure (..), ProtocolTestSte
@@ -792,7 +792,7 @@ index 7b95c71b..8265b3cd 100644
    describe "Connection switch" $ do
      describe "should switch delivery to the new queue" $
        testServerMatrix2 ps testSwitchConnection
-@@ -3225,6 +3231,102 @@ testUsersNoServer ps = withAgentClientsCfg2 aCfg agentCfg $ \a b -> do
+@@ -3225,6 +3231,115 @@ testUsersNoServer ps = withAgentClientsCfg2 aCfg agentCfg $ \a b -> do
    where
      aCfg = agentCfg {initialCleanupDelay = 10000, cleanupInterval = 10000, deleteErrorCount = 3}
 
@@ -865,13 +865,26 @@ index 7b95c71b..8265b3cd 100644
 +  addQueue b aId a bId
 +  where
 +    addQueue receiver connId sender peerConnId = do
++      ConnectionStats {sndQueuesInfo} <- getConnectionServers sender peerConnId
 +      liftIO $ setProtocolServers receiver 1 $ fmap noAuthSrvCfg servers
 +      addConnectionReceiveQueue receiver connId $ length servers
-+      phaseSnd sender peerConnId SPConfirmed (replicate (length servers) Nothing)
-+      phaseSnd sender peerConnId SPCompleted (replicate (length servers) Nothing)
++      -- QKEY is delivered on each existing queue. Its confirmations can race
++      -- with QTEST completing on the new queue, so validate the full set.
++      phases <- replicateM (length sndQueuesInfo + 1) $ senderPhase sender peerConnId
++      liftIO $ phases `shouldMatchList` (SPCompleted : replicate (length sndQueuesInfo) SPConfirmed)
 +      phaseRcv receiver connId SPCompleted (replicate (length servers) Nothing)
 +      ConnectionStats {rcvQueuesInfo} <- getConnectionServers receiver connId
 +      liftIO $ map rcvServer rcvQueuesInfo `shouldMatchList` foldr (:) [] servers
++    senderPhase sender peerConnId =
++      get sender >>= \(_, connId, event) -> case event of
++        ERR (AGENT A_DUPLICATE {}) -> senderPhase sender peerConnId
++        SWITCH direction phase' stats -> do
++          liftIO $ do
++            connId `shouldBe` peerConnId
++            direction `shouldBe` QDSnd
++            sndSwchStatuses' stats `shouldMatchList` replicate (length servers) Nothing
++          pure phase'
++        _ -> error $ "unexpected redundant queue event " <> show event
 +
 +assertSingleDelivery :: AgentClient -> ConnId -> AgentClient -> ConnId -> MsgBody -> ExceptT AgentErrorType IO ()
 +assertSingleDelivery sender connId receiver peerConnId body = do
