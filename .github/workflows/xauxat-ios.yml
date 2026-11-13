@@ -160,6 +160,31 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  redundant-relays:
+    name: Redundant SMP relay delivery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Prepare the pinned messaging engine
+        run: |
+          set -euo pipefail
+          ref=$(awk '/location: https:\/\/github.com\/simplex-chat\/simplexmq.git/ {getline; print $2; exit}' cabal.project)
+          test "${#ref}" -eq 40
+          git clone --filter=blob:none --no-checkout https://github.com/simplex-chat/simplexmq.git "$RUNNER_TEMP/simplexmq"
+          git -C "$RUNNER_TEMP/simplexmq" checkout --detach "$ref"
+          git -C "$RUNNER_TEMP/simplexmq" submodule update --init --recursive
+          git -C "$RUNNER_TEMP/simplexmq" apply "$GITHUB_WORKSPACE/scripts/nix/simplexmq-smp-proxy-failover.patch" "$GITHUB_WORKSPACE/scripts/nix/simplexmq-redundant-contact-relays.patch"
+      - name: Run relay outage and deduplication tests
+        run: |
+          set -euo pipefail
+          docker build -f "$RUNNER_TEMP/simplexmq/Dockerfile.build" -t xauxat-smp-tests "$RUNNER_TEMP/simplexmq"
+          docker run --rm -v "$RUNNER_TEMP/simplexmq:/project" xauxat-smp-tests sh -euc '
+            git config --global --add safe.directory /project
+            cabal update
+            cabal test simplexmq-test --jobs=2 --test-show-details=direct --test-option=--match --test-option="Redundant receive queue"
+          '
+
   native-core-runner:
     name: Select native core runner
     runs-on: ubuntu-24.04

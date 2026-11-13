@@ -494,6 +494,11 @@ data ChatCommand
   | APIGroupMemberInfo GroupId GroupMemberId
   | APIContactQueueInfo ContactId
   | APIGroupMemberQueueInfo GroupId GroupMemberId
+#ifdef xauxatRedundantQueues
+  | APIAddContactReceiveQueues ContactId Int
+  | AddContactReceiveQueues ContactName Int
+  | APITestContactRelayOutage ContactId Int
+#endif
   | APISwitchContact ContactId
   | APISwitchGroupMember GroupId GroupMemberId
   | APIAbortSwitchContact ContactId
