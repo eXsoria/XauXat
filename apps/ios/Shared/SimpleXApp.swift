@@ -30,6 +30,7 @@ struct SimpleXApp: App {
 //            hs_init(0, nil)
         }
         UserDefaults.standard.register(defaults: appDefaults)
+        migrateXauXatAppLockDelay()
         setGroupDefaults()
         registerGroupDefaults()
         if xauXatStoragePromotionPending() {
