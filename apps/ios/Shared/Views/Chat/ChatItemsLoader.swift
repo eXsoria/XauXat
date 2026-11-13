@@ -180,7 +180,12 @@ func apiLoadMessages(
         let pending = chat.chatItems.reversed().compactMap { $0.autoReceiveFile()?.fileId }
         if !pending.isEmpty {
             Task {
-                await autoReceiveAttachments(user: user, fileIds: Array(pending.prefix(12)), decoyStore: alternateStore)
+                for start in stride(from: 0, to: pending.count, by: 12) {
+                    guard chatModel.currentUser?.userId == user.userId,
+                          (xauXatStorageScope() == .decoy) == alternateStore else { return }
+                    let batch = Array(pending[start...].prefix(12))
+                    await autoReceiveAttachments(user: user, fileIds: batch, decoyStore: alternateStore)
+                }
             }
         }
     }
