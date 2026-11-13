@@ -3663,11 +3663,12 @@ public struct ChatItem: Identifiable, Decodable, Hashable {
 
     public func autoReceiveFile() -> CIFile? {
         if let file = file,
+           !chatDir.sent, file.fileStatus == .rcvInvitation,
            let mc = content.msgContent,
            privacyAcceptImagesGroupDefault.get(),
            (mc.isImage && file.fileSize <= MAX_IMAGE_SIZE_AUTO_RCV)
             || (mc.isVideo && file.fileSize <= MAX_VIDEO_SIZE_AUTO_RCV)
-            || (mc.isVoice && file.fileSize <= MAX_VOICE_SIZE_AUTO_RCV && file.fileStatus != .rcvAccepted) {
+            || (mc.isVoice && file.fileSize <= MAX_VOICE_SIZE_AUTO_RCV) {
             return file
         }
         return nil

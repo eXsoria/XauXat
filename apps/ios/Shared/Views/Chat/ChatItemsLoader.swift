@@ -174,7 +174,17 @@ func apiLoadMessages(
             im.chatState.unreadAfterNewestLoaded = 0
         }
     }
-    return isCurrent()
+    guard isCurrent() else { return false }
+    if (paginationIsInitial || paginationIsLast), im.secondaryIMFilter == nil,
+       let user = chatModel.currentUser {
+        let pending = chat.chatItems.reversed().compactMap { $0.autoReceiveFile()?.fileId }
+        if !pending.isEmpty {
+            Task {
+                await autoReceiveAttachments(user: user, fileIds: Array(pending.prefix(12)), decoyStore: alternateStore)
+            }
+        }
+    }
+    return true
 }
 
 
