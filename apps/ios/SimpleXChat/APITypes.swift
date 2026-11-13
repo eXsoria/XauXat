@@ -284,8 +284,9 @@ public struct NetCfg: Codable, Equatable {
     )
 
     static let proxyDefaults: NetCfg = NetCfg(
-        tcpConnectTimeout: NetworkTimeout(backgroundTimeout: 60_000_000, interactiveTimeout: 30_000_000),
-        tcpTimeout: NetworkTimeout(backgroundTimeout: 40_000_000, interactiveTimeout: 20_000_000),
+        // SimpleXMQ applies a 1.5x multiplier on cellular, including to SUB.
+        tcpConnectTimeout: NetworkTimeout(backgroundTimeout: 20_000_000, interactiveTimeout: 20_000_000),
+        tcpTimeout: NetworkTimeout(backgroundTimeout: 25_000_000, interactiveTimeout: 20_000_000),
         tcpTimeoutPerKb: 15_000,
         rcvConcurrency: 8,
         smpPingInterval: 1200_000_000

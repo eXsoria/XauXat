@@ -58,7 +58,7 @@ final class ChatModel {
             if let summary = self.summary { return try await summary() }
             if let health = self.health {
                 return health.filter { $0.value.needsRecovery }.mapValues {
-                    $0.recoveryGrace(connectingBudget: self.connectingGrace)
+                    $0.recoveryGrace(connectingBudget: self.connectingGrace, commandBudget: 0)
                 }
             }
             return Dictionary(uniqueKeysWithValues: self.failed.map { ($0, self.connectingGrace) })
@@ -115,6 +115,8 @@ final class ChatModel {
         try await obsoleteGlobalReconnectFailuresDoNotScheduleRetries()
         try await selectedReconnectFailureDoesNotWidenToGlobalRetry()
         try await subscriptionEventsRecoverWithoutAnOpenChat()
+        try await subscriptionRecoveryChecksAtTheNativeDeadline()
+        try await networkRecoveryChecksFromReconnectTime()
         try await healthyAndUnrelatedSubscriptionEventsDoNotResetTor()
         try await subscriptionEventsSurviveTemporaryInactivity()
         try await globalAcknowledgementsRetainFailedSubscriptions()
@@ -447,6 +449,56 @@ final class ChatModel {
         f.manager.pause()
     }
 
+    static func subscriptionRecoveryChecksAtTheNativeDeadline() async throws {
+        let f = RecoveryFixture()
+        f.connectingGrace = 70
+        f.failed = [f.first]
+        var firstSample: TimeInterval?
+        var repairedAt: TimeInterval?
+        f.summary = {
+            if firstSample == nil { firstSample = f.clock }
+            return f.failed.isEmpty ? [:] : [f.first: f.connectingGrace]
+        }
+        f.onReconnect = { _ in
+            repairedAt = f.clock
+            f.failed = []
+        }
+        f.sleep = { delay in
+            f.clock += delay
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        f.manager.configurationApplied()
+        f.manager.subscriptionsNeedRecovery()
+        try await until { f.manager.state == .idle && repairedAt != nil }
+        require(firstSample == 115, "Check subscriptions when the global reconnect cooldown expires")
+        require(repairedAt == 185, "Repair at the native connection deadline instead of waiting for the 90-second backoff")
+        require(f.commands == [.relays([f.first])] && f.forces == [false], "Repair only the stalled relay without forcing Tor to restart")
+    }
+
+    static func networkRecoveryChecksFromReconnectTime() async throws {
+        let f = RecoveryFixture()
+        f.connectingGrace = 70
+        f.failed = [f.first]
+        var globalAt: TimeInterval?
+        var selectiveAt: TimeInterval?
+        f.onReconnect = { scope in
+            if scope == .all {
+                globalAt = f.clock
+            } else {
+                selectiveAt = f.clock
+                f.failed = []
+            }
+        }
+        f.sleep = { delay in
+            f.clock += delay
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        f.manager.networkChanged(online: true, network: .cellular)
+        try await until { selectiveAt != nil && f.manager.state == .idle }
+        require(abs(selectiveAt! - globalAt! - 70) < 0.01, "Count the relay budget from the network reconnect, even without a native subscription event")
+        require(f.commands == [.all, .relays([f.first])], "Recheck after reconnect and repair only the stalled relay")
+    }
+
     static func subscriptionEventsSurviveTemporaryInactivity() async throws {
         for suspended in [false, true] {
             let f = RecoveryFixture()
@@ -637,6 +689,15 @@ final class ChatModel {
     }
 
     static func relayHealthSelection() {
+        let waitingForTransport = Recovery.RelayHealth(connected: 0, connecting: 1, errors: 0, pendingSubscriptions: 1)
+        require(waitingForTransport.recoveryGrace(connectingBudget: 30, commandBudget: 37.5) == 30,
+                "An unconnected relay gets time to connect without also waiting for an SMP reply")
+        let waitingForReply = Recovery.RelayHealth(connected: 1, connecting: 1, errors: 0, pendingSubscriptions: 1)
+        require(waitingForReply.recoveryGrace(connectingBudget: 30, commandBudget: 37.5) == 67.5,
+                "A shared relay still gets time for in-flight SMP commands")
+        let idle = Recovery.RelayHealth(connected: 0, connecting: 0, errors: 0, pendingSubscriptions: 1)
+        require(idle.recoveryGrace(connectingBudget: 30, commandBudget: 37.5) == 0,
+                "An idle relay with pending subscriptions can recover immediately")
         require(Recovery.RelayHealth(connected: 1, connecting: 0, errors: 1, pendingSubscriptions: 0).needsRecovery,
                 "A connected session must not hide another currently failed session on the same server")
         require(!Recovery.RelayHealth(connected: 1, connecting: 0, errors: 0, pendingSubscriptions: 0).needsRecovery,
@@ -906,7 +967,7 @@ final class ChatModel {
         f.ensure = { if f.forces.count == 1 { throw RecoveryFixture.Failure.synthetic } }
         f.manager.networkChanged(online: true, network: .cellular)
         try await until { f.commands == [.all] }
-        require(delays.first == 0.04 && delays.contains(2), "Cellular handover must settle before a separately backed-off route retry")
+        require(delays.first == 0.02 && delays.contains(2), "Cellular handover must settle before a separately backed-off route retry")
         require(f.forces == [true, true] && f.summaryCount == 0, "An unavailable incoming route needs fresh verification even with an empty outbox")
         require(f.resumeCount == 1 && f.applyCount == 1, "Only the successful retry may resume messaging")
         require(f.manager.diagnosticText.contains("network=cellular") && f.manager.diagnosticText.contains("route_retry=false"), "Safe diagnostics must identify cellular handover and resolved retry demand")

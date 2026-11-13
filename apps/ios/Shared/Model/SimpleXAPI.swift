@@ -153,20 +153,30 @@ extension XauXatConnectionRecoveryManager {
             return Route(port: port, replaced: previousPort != port)
         },
         invalidateTor: { EmbeddedTorManager.shared.invalidateReadiness() },
-        refreshStartup: { await EmbeddedTorManager.shared.refreshPendingStartup() },
+        updateTorNetwork: { EmbeddedTorManager.shared.networkAvailabilityChanged(online: $0) },
+        refreshStartup: { EmbeddedTorManager.shared.refreshPendingStartup() },
         applyTor: { try applyXauXatRecoveryConfiguration() },
         failedRelays: {
             let userId = try currentUserId("connectionRecovery")
             let summary = try getAgentServersSummary()
             let cfg = getNetCfg()
-            let connectingGrace = TimeInterval(cfg.tcpConnectTimeout.backgroundTimeout + cfg.tcpTimeout.backgroundTimeout) / 1_000_000
+            let totals = summary.currentUserSMP.smpTotals
+            #if DEBUG
+            logger.notice("XauXat SMP: snapshot connecting=\(totals.sessions.ssConnecting, privacy: .public) errors=\(totals.sessions.ssErrors, privacy: .public) active=\(totals.subs.ssActive, privacy: .public) pending=\(totals.subs.ssPending, privacy: .public) sub_attempts=\(totals.stats._connSubAttempts, privacy: .public) sub_errors=\(totals.stats._connSubErrs, privacy: .public)")
+            #endif
+            let network = ChatModel.shared.networkInfo.networkType
+            // Match the native core's cellular timeout policy before repairing
+            // a connection it may still be establishing.
+            let multiplier: TimeInterval = network == .cellular || network == .none ? 1.5 : 1
+            let connectingBudget = TimeInterval(cfg.tcpConnectTimeout.backgroundTimeout) / 1_000_000 * multiplier
+            let commandBudget = TimeInterval(cfg.tcpTimeout.backgroundTimeout) / 1_000_000 * multiplier
             var failed: [Relay: TimeInterval] = [:]
             for server in summary.currentUserSMP.currentlyUsedSMPServers {
                 let sessions = server.sessionsOrNew
                 let health = RelayHealth(connected: sessions.ssConnected, connecting: sessions.ssConnecting,
                                          errors: sessions.ssErrors, pendingSubscriptions: server.subsOrNew.ssPending)
                 guard health.needsRecovery else { continue }
-                failed[Relay(userId: userId, server: server.smpServer)] = health.recoveryGrace(connectingBudget: connectingGrace)
+                failed[Relay(userId: userId, server: server.smpServer)] = health.recoveryGrace(connectingBudget: connectingBudget, commandBudget: commandBudget)
             }
             return failed
         },
@@ -680,7 +690,7 @@ func apiStopChat() async throws {
 // Spec: spec/architecture.md#apiActivateChat
 @discardableResult
 func apiActivateChat() -> Bool {
-    guard chatReopenStore() else { return false }
+    guard isChatStoreOpen() || chatReopenStore() else { return false }
     do {
         try sendCommandOkRespSync(.apiActivateChat(restoreChat: true))
         return true
@@ -883,14 +893,15 @@ func loadChat(chatId: ChatId, im: ItemsModel, contentTag: MsgContentTag? = nil, 
     }
     for attempt in 0..<3 {
         guard isCurrent() else { return false }
-        // Opening a conversation can race foreground/NSE store activation.
-        // Reuse the existing guarded recovery; never reopen a stopped or locked
-        // profile or require a network connection for an already open store.
         if attempt == 0 && !isChatStoreOpen() {
-            do {
-                try await XauXatConnectionRecoveryManager.shared.reconnect(.all, reason: .foreground)
-            } catch {
-                logger.error("Chat history session is unavailable")
+            if reopenChatStoreForHistory() {
+                XauXatConnectionRecoveryManager.shared.sessionUnavailable()
+            } else {
+                do {
+                    try await XauXatConnectionRecoveryManager.shared.reconnect(.all, reason: .foreground)
+                } catch {
+                    logger.error("Chat history session is unavailable")
+                }
             }
         }
         guard isCurrent() else { return false }
@@ -3120,28 +3131,33 @@ private func getUserChatDataAsync(keepingChatId: String?) async throws {
 
 // Spec: spec/architecture.md#ChatReceiver
 class ChatReceiver {
+    private let receiveLock = NSLock()
     private var receiveLoop: Task<Void, Never>?
-    private var receiveMessages = true
+    private var receiveMessages = false
     private var _lastMsgTime = Date.now
 
     var messagesChannel: ((APIResult<ChatEvent>) -> Void)? = nil
 
     static let shared = ChatReceiver()
 
-    var lastMsgTime: Date { get { _lastMsgTime } }
+    var lastMsgTime: Date { receiveLock.withLock { _lastMsgTime } }
 
     func start() {
         logger.debug("ChatReceiver.start")
-        receiveMessages = true
-        _lastMsgTime = .now
-        if receiveLoop != nil { return }
-        receiveLoop = Task { await receiveMsgLoop() }
+        receiveLock.withLock {
+            receiveMessages = true
+            _lastMsgTime = .now
+            if receiveLoop == nil { receiveLoop = Task { await receiveMsgLoop() } }
+        }
     }
 
-    func receiveMsgLoop() async {
-        while self.receiveMessages {
+    private func receiveMsgLoop() async {
+        while receiveLock.withLock({
+            if !receiveMessages { receiveLoop = nil }
+            return receiveMessages
+        }) {
             if let msg = await chatRecvMsg() {
-                self._lastMsgTime = .now
+                receiveLock.withLock { _lastMsgTime = .now }
                 Task { await TerminalItems.shared.addResult(msg) }
                 switch msg {
                 case let .result(evt): await processReceivedMsg(evt)
@@ -3158,9 +3174,9 @@ class ChatReceiver {
 
     func stop() {
         logger.debug("ChatReceiver.stop")
-        receiveMessages = false
-        receiveLoop?.cancel()
-        receiveLoop = nil
+        // A native read can remain in flight after stop. A quick restart
+        // reuses that reader so events are still processed in order.
+        receiveLock.withLock { receiveMessages = false }
     }
 }
 
@@ -3262,8 +3278,14 @@ func processReceivedMsg(_ res: ChatEvent) async {
         await MainActor.run {
             if !connections.isEmpty {
                 switch status {
-                case .active: break
+                case .active:
+                    #if DEBUG
+                    logger.notice("XauXat SMP: subscription active count=\(connections.count, privacy: .public)")
+                    #endif
                 case .pending, .removed, .noSub:
+                    #if DEBUG
+                    logger.notice("XauXat SMP: subscription unavailable count=\(connections.count, privacy: .public)")
+                    #endif
                     XauXatConnectionRecoveryManager.shared.subscriptionsNeedRecovery()
                 }
             }

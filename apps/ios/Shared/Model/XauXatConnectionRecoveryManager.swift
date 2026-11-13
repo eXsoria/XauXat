@@ -27,10 +27,14 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             pendingSubscriptions > 0 || errors > 0 || connecting > 0
         }
 
-        func recoveryGrace(connectingBudget: TimeInterval) -> TimeInterval {
+        func recoveryGrace(connectingBudget: TimeInterval, commandBudget: TimeInterval) -> TimeInterval {
             // Do not interrupt a still-connecting session just because another
             // session on this server has already failed.
-            errors > 0 && connecting == 0 ? 0 : connectingBudget
+            if connected == 0 && pendingSubscriptions > 0 {
+                // A relay without a connected session cannot be waiting for an SMP reply yet.
+                return connecting == 0 ? 0 : connectingBudget
+            }
+            return errors > 0 && connecting == 0 ? 0 : connectingBudget + commandBudget
         }
     }
 
@@ -93,7 +97,8 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         var context: () -> Context
         var ensureTor: (_ force: Bool) async throws -> Route
         var invalidateTor: () -> Void
-        var refreshStartup: () async -> Void = { }
+        var updateTorNetwork: ((Bool) -> Void)? = nil
+        var refreshStartup: () -> Void = { }
         // The pinned core reconnects all sessions itself when config changes.
         var applyTor: () throws -> Bool
         // Relay -> minimum observed stall duration. Explicit failed sessions
@@ -126,7 +131,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     private var epoch = 0
     private var outboundPending = false
     private var subscriptionPending = false
-    private var subscriptionScan: (id: UUID, epoch: Int, userId: Int64, alternateStore: Bool)?
+    private var subscriptionScan: (id: UUID, epoch: Int, userId: Int64, alternateStore: Bool, reconnectStartedAt: TimeInterval?)?
     private var loop: Task<Void, Never>?
     private var loopId: UUID?
     private var networkTask: Task<Void, Never>?
@@ -148,10 +153,11 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     private var lastGlobal: (epoch: Int, context: Context, time: TimeInterval)?
     private var relayAttempts: [Relay: TimeInterval] = [:]
     private var firstObserved: [Relay: TimeInterval] = [:]
+    private var nextRelayCheck: TimeInterval?
     private var events: [String] = []
     private let startedAt: TimeInterval
 
-    init(dependencies: Dependencies, cooldown: TimeInterval = 15, networkSettleDelay: TimeInterval = 1) {
+    init(dependencies: Dependencies, cooldown: TimeInterval = 15, networkSettleDelay: TimeInterval = 0.5) {
         self.dependencies = dependencies
         self.cooldown = cooldown
         self.networkSettleDelay = networkSettleDelay
@@ -177,6 +183,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
             if reason != .manual, dependencies.sessionState() == .running,
                let lastGlobal, lastGlobal.epoch == epoch,
                lastGlobal.context == context, dependencies.now() - lastGlobal.time < cooldown {
+                if scope == .automatic { nextRelayCheck = lastGlobal.time + cooldown }
                 record(reason, "coalesced_recent_global")
                 return
             }
@@ -284,14 +291,21 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 var waitingForBudget = 0
                 var coolingDown = 0
                 for (relay, grace) in failed where relay.userId == context.userId {
-                    if firstObserved[relay] == nil { firstObserved[relay] = now }
-                    if now - firstObserved[relay]! < max(0, grace) {
+                    if firstObserved[relay] == nil {
+                        firstObserved[relay] = needsSubscriptionScan ? subscriptionScan?.reconnectStartedAt ?? now : now
+                    }
+                    let budgetEnds = firstObserved[relay]! + max(0, grace)
+                    let cooldownEnds = (relayAttempts[relay] ?? -.infinity) + cooldown
+                    if now < budgetEnds {
                         waitingForBudget += 1
-                    } else if now - (relayAttempts[relay] ?? -.infinity) < cooldown {
+                    } else if now < cooldownEnds {
                         coolingDown += 1
                     } else {
                         targets.insert(relay)
+                        continue
                     }
+                    let eligibleAt = max(budgetEnds, cooldownEnds)
+                    nextRelayCheck = min(nextRelayCheck ?? eligibleAt, eligibleAt)
                 }
                 record(reason, "relay_candidates", count: failed.keys.filter { $0.userId == context.userId }.count)
                 if waitingForBudget > 0 { record(reason, "relay_connect_budget", count: waitingForBudget) }
@@ -320,6 +334,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 throw error
             }
             try requireCurrent(context, operationEpoch, reason: reason)
+            record(reason, "route_verified")
             // A replaced listener invalidates every old core session. This is
             // a reason to widen a relay repair to all servers.
             if route.replaced { scope = .all; record(reason, "endpoint_replaced") }
@@ -392,6 +407,9 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 // can satisfy the event demand, even for this same generation.
                 lastGlobal = (operationEpoch, context, dependencies.now())
                 firstObserved.removeAll()
+                if reason == .networkChange {
+                    requestSubscriptionScan(reconnectStartedAt: lastGlobal?.time)
+                }
             }
             state = .monitoring
             record(reason, "command_accepted")
@@ -423,9 +441,14 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     /// or justify resetting Tor. Preserve the signal across temporary inactive
     /// scenes, while updateLoop still gates every command on foreground/unlock.
     func subscriptionsNeedRecovery() {
+        requestSubscriptionScan()
+    }
+
+    private func requestSubscriptionScan(reconnectStartedAt: TimeInterval? = nil) {
         let context = dependencies.context()
         guard let userId = context.userId, dependencies.sessionState().canRecover else { return }
-        subscriptionScan = (UUID(), epoch, userId, context.alternateStore)
+        let startedAt = reconnectStartedAt ?? (needsSubscriptionScan ? subscriptionScan?.reconnectStartedAt : nil)
+        subscriptionScan = (UUID(), epoch, userId, context.alternateStore, startedAt)
         record(.pendingWork, "subscription_scan_requested")
         updateLoop()
     }
@@ -514,9 +537,14 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 }
                 self.state = attempt == 0 ? .waiting : .monitoring
                 let retryingSession = self.needsSessionRetry
-                let delay = self.needsRouteRetry || retryingSession
+                let retryingRoute = self.needsRouteRetry
+                var delay = retryingRoute || retryingSession
                     ? Self.routeRetryDelay(attempt: attempt, jitter: self.dependencies.retryJitter())
                     : XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: attempt)
+                if !retryingRoute, !retryingSession, let nextRelayCheck = self.nextRelayCheck {
+                    // Respect the native connect budget without sleeping past its end.
+                    delay = min(delay, max(1, nextRelayCheck - self.dependencies.now()))
+                }
                 if self.needsRouteRetry { self.record(.routeRetry, "backoff", count: Int(delay.rounded(.up))) }
                 else if retryingSession { self.record(.sessionRetry, "backoff", count: Int(delay.rounded(.up))) }
                 do { try await self.dependencies.sleep(delay) }
@@ -527,7 +555,10 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 do {
                     if self.needsRouteRetry { try await self.reconnect(.all, reason: .routeRetry) }
                     else if self.needsSessionRetry { try await self.reconnect(.all, reason: .sessionRetry) }
-                    else { try await self.reconnect(.automatic, reason: .pendingWork) }
+                    else {
+                        self.nextRelayCheck = nil
+                        try await self.reconnect(.automatic, reason: .pendingWork)
+                    }
                 }
                 catch { /* bounded retry; the core retains pending messages */ }
                 attempt += 1
@@ -540,6 +571,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     }
 
     private func stopLoop() {
+        nextRelayCheck = nil
         loop?.cancel()
         loop = nil
         loopId = nil
@@ -553,11 +585,16 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     /// settled generation may reconfigure/reconnect the core.
     func networkChanged(online: Bool, network: Network = .unknown) {
         epoch += 1
+        nextRelayCheck = nil
         subscriptionScan = nil
         self.network = network
         routeRetry = nil
         sessionRetry = nil
-        dependencies.invalidateTor()
+        if let updateTorNetwork = dependencies.updateTorNetwork {
+            updateTorNetwork(online)
+        } else {
+            dependencies.invalidateTor()
+        }
         // ensureReady detaches cancelled waiters without cancelling other Tor
         // clients. A new path can now check immediately after settling.
         flight?.task.cancel()
@@ -571,16 +608,14 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         let expectedEpoch = epoch
         networkTask = Task { [weak self] in
             guard let self else { return }
-            let settle = network == .cellular ? self.networkSettleDelay * 2 : self.networkSettleDelay
-            do { try await self.dependencies.sleep(settle) } catch { return }
+            do { try await self.dependencies.sleep(self.networkSettleDelay) } catch { return }
             guard self.epoch == expectedEpoch, !Task.isCancelled else { return }
             self.networkSettling = false
             do { try self.requireForegroundNetwork(self.dependencies.context(), reason: .networkChange) }
             catch { return }
             // The very first Tor bootstrap precedes any profile or database.
             // Refresh only its existing callers; this opens no store/core.
-            await self.dependencies.refreshStartup()
-            guard self.epoch == expectedEpoch, !Task.isCancelled else { return }
+            self.dependencies.refreshStartup()
             do { try self.requireAvailable(self.dependencies.context(), reason: .networkChange) }
             catch { return }
             do { try await self.reconnect(.all, reason: .networkChange) } catch { }
@@ -624,7 +659,11 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     // interpolate errors, server addresses, user IDs or message/contact data.
     private func record(_ reason: Reason, _ stage: String, count: Int? = nil) {
         let elapsed = Int(max(0, dependencies.now() - startedAt))
-        events.append("+\(elapsed)s \(reason.rawValue) \(stage)\(count.map { " count=\($0)" } ?? "")")
+        let entry = "+\(elapsed)s \(reason.rawValue) \(stage)\(count.map { " count=\($0)" } ?? "")"
+        events.append(entry)
+        #if DEBUG
+        logger.notice("XauXat SMP: \(entry, privacy: .public)")
+        #endif
         if events.count > 80 { events.removeFirst(events.count - 80) }
     }
 

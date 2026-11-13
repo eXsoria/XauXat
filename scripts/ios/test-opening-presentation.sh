@@ -52,7 +52,10 @@ final class AppSheetState {
     var scenePhaseActive = true
 }
 enum TorState { case starting, ready(UInt16) }
-final class Tor { var state: TorState = .starting }
+final class Tor {
+    var state: TorState = .starting
+    var hasVerifiedStartupRoute = false
+}
 var socksReady = false
 func isXauXatTorReady() -> Bool { socksReady }
 final class Key {
@@ -167,6 +170,9 @@ checks_source = r'''
         expect(requests == 0, "normal auth waits for an initial screen")
         check(true, "missing initial screen stays covered")
         chatModel.onboardingStage = .complete
+        check(true, "a prepared screen is covered until the first relay verification")
+        expect(!contentAuthenticationReady, "prepared local data does not bypass first verification")
+        tor.hasVerifiedStartupRoute = true
         socksReady = false
         tor.state = .starting
         expect(contentAuthenticationReady, "prepared local screen stays unlockable offline")
@@ -281,8 +287,10 @@ checks_source = r'''
 ui = 'import SwiftUI\n' + declaration(sheet, 'class AppSheetState: ObservableObject')
 ui += '''
 @MainActor final class EmbeddedTorManager: ObservableObject {
+    enum State { case stopped, starting, bootstrapping(Int), verifying, ready(UInt16), failed(String) }
     static let shared = EmbeddedTorManager()
     @Published var refreshingConnection = false
+    @Published var state: State = .stopped
 }
 struct NetworkInfo { var online = true }
 @MainActor final class ChatModel: ObservableObject {
