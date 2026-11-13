@@ -19,8 +19,16 @@ xcodebuild -list -json -project "$temp/project/ExpressionsHarness.xcodeproj" > "
 xcodebuild -project "$temp/project/ExpressionsHarness.xcodeproj" -scheme ExpressionsHarness \
   -destination 'generic/platform=iOS Simulator' -derivedDataPath "$temp/build" \
   build-for-testing CODE_SIGNING_ALLOWED=NO "ARCHS=$(uname -m)" ONLY_ACTIVE_ARCH=YES 2>&1 | tee "$out/build.log"
-runtime=$(xcrun simctl list runtimes available --json | python3 -c 'import json,sys; r=[r for r in json.load(sys.stdin)["runtimes"] if r["name"].startswith("iOS")]; print(max(r,key=lambda x:tuple(map(int,x["version"].split("."))))["identifier"])')
-type=$(xcrun simctl list devicetypes --json | python3 -c 'import json,sys; print(next(d["identifier"] for d in json.load(sys.stdin)["devicetypes"] if d["name"]=="iPhone 14 Pro"))')
+read -r runtime type < <(xcrun simctl list runtimes available --json | python3 -c '
+import json, sys
+runtimes = [r for r in json.load(sys.stdin)["runtimes"] if r["name"].startswith("iOS")]
+for runtime in sorted(runtimes, key=lambda r: tuple(map(int, r["version"].split("."))), reverse=True):
+    for device in runtime.get("supportedDeviceTypes", []):
+        if device["name"] == "iPhone 14 Pro":
+            print(runtime["identifier"], device["identifier"])
+            sys.exit()
+sys.exit("No installed iOS runtime supports the iPhone 14 Pro test fixture")
+')
 udid=$(xcrun simctl create XauXat-Expressions "$type" "$runtime")
 xcrun simctl boot "$udid"
 xcrun simctl bootstatus "$udid" -b

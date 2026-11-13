@@ -116,6 +116,7 @@ final class ChatModel {
         try await selectedReconnectFailureDoesNotWidenToGlobalRetry()
         try await subscriptionEventsRecoverWithoutAnOpenChat()
         try await subscriptionRecoveryChecksAtTheNativeDeadline()
+        try await selectiveRecoveryChecksAgainAtTheNativeDeadline()
         try await networkRecoveryChecksFromReconnectTime()
         try await healthyAndUnrelatedSubscriptionEventsDoNotResetTor()
         try await subscriptionEventsSurviveTemporaryInactivity()
@@ -471,8 +472,26 @@ final class ChatModel {
         f.manager.subscriptionsNeedRecovery()
         try await until { f.manager.state == .idle && repairedAt != nil }
         require(firstSample == 115, "Check subscriptions when the global reconnect cooldown expires")
-        require(repairedAt == 185, "Repair at the native connection deadline instead of waiting for the 90-second backoff")
+        require(repairedAt == 170, "Count the native connection deadline from the foreground configuration reconnect")
         require(f.commands == [.relays([f.first])] && f.forces == [false], "Repair only the stalled relay without forcing Tor to restart")
+    }
+
+    static func selectiveRecoveryChecksAgainAtTheNativeDeadline() async throws {
+        let f = RecoveryFixture()
+        f.connectingGrace = 20
+        f.failed = [f.first]
+        var repairs: [TimeInterval] = []
+        f.onReconnect = { _ in
+            repairs.append(f.clock)
+            if repairs.count == 2 { f.failed = [] }
+        }
+        f.sleep = { delay in
+            f.clock += delay
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        f.manager.subscriptionsNeedRecovery()
+        try await until { repairs.count == 2 && f.manager.state == .idle }
+        require(repairs[1] - repairs[0] == 20, "A selected reconnect schedules a check at its own deadline")
     }
 
     static func networkRecoveryChecksFromReconnectTime() async throws {
