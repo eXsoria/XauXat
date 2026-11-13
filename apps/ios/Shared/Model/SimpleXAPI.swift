@@ -3360,6 +3360,11 @@ func processReceivedMsg(_ res: ChatEvent) async {
                 }
             }
             if let file = cItem.autoReceiveFile() {
+                #if DEBUG
+                if file.fileProtocol == .xftp {
+                    logger.notice("XFTP invitation received file=\(file.fileId, privacy: .private(mask: .hash))")
+                }
+                #endif
                 let decoyStore = xauXatStorageScope() == .decoy
                 Task {
                     await autoReceiveAttachments(user: user, fileIds: [file.fileId], decoyStore: decoyStore)
@@ -3586,13 +3591,27 @@ func processReceivedMsg(_ res: ChatEvent) async {
 //        Task { cleanupFile(aChatItem) }
     case let .rcvFileStart(user, aChatItem):
         await chatItemSimpleUpdate(user, aChatItem)
+    case let .rcvFileDescrReady(_, aChatItem):
+        #if DEBUG
+        if let file = aChatItem.chatItem.file {
+            logger.notice("XFTP description received file=\(file.fileId, privacy: .private(mask: .hash))")
+        }
+        #endif
     case let .rcvFileComplete(user, aChatItem):
         logger.info("Attachment receive completed")
+        #if DEBUG
+        if let file = aChatItem.chatItem.file, file.fileProtocol == .xftp {
+            logger.notice("XFTP playable file=\(file.fileId, privacy: .private(mask: .hash))")
+        }
+        #endif
         await chatItemSimpleUpdate(user, aChatItem)
     case let .rcvFileSndCancelled(user, aChatItem, _):
         await chatItemSimpleUpdate(user, aChatItem)
         Task { cleanupFile(aChatItem) }
-    case let .rcvFileProgressXFTP(user, aChatItem, _, _, _):
+    case let .rcvFileProgressXFTP(user, aChatItem, receivedSize, totalSize, transfer):
+        #if DEBUG
+        logger.notice("XFTP progress file=\(transfer.fileId, privacy: .private(mask: .hash)) bytes=\(receivedSize, privacy: .public)/\(totalSize, privacy: .public)")
+        #endif
         if let aChatItem = aChatItem {
             await chatItemSimpleUpdate(user, aChatItem)
         }
