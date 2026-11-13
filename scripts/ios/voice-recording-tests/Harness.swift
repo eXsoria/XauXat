@@ -5,6 +5,7 @@ import OSLog
 let MAX_VOICE_MESSAGE_LENGTH: TimeInterval = CommandLine.arguments.contains("short-limit") ? 6 : 120
 let logger = Logger(subsystem: "pt.exsoria.voice-harness", category: "recording")
 func getAppFilePath(_ name: String) -> URL { FileManager.default.temporaryDirectory.appendingPathComponent(name) }
+func excludeFromSystemBackup(_ url: URL) -> Bool { true }
 func generateNewFileName(_ prefix: String, _ suffix: String) -> String { prefix + "." + suffix }
 func removeFile(_ name: String) { try? FileManager.default.removeItem(at: getAppFilePath(name)) }
 func fileSize(_ url: URL) -> Int64? { (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) }
@@ -19,7 +20,12 @@ enum AppDelegate {
 }
 enum VoiceMessageRecordingState { case noRecording, recording, finished }
 enum VoiceMaskingState: Equatable { case unavailable, available, processing, applied(XauXatVoiceMaskPreset), ambienceApplied }
-enum XauXatVoiceMaskPreset: String { case veil; var name: String { "Veil" }; static let defaultPreferenceKey = "voice-mask" }
+enum XauXatVoiceMaskPreset: String {
+    case veil
+    var name: String { "Veil" }
+    var requiresPlus: Bool { false }
+    static let defaultPreferenceKey = "voice-mask"
+}
 enum Feature { case voice, advancedVoiceMasking }
 class XauXatPlusEntitlements: ObservableObject {
     static let shared = XauXatPlusEntitlements()

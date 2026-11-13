@@ -290,7 +290,7 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         try av.setActive(true)
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: 16000,
+            AVSampleRateKey: av.sampleRate,
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false,
             AVNumberOfChannelsKey: 1
@@ -359,20 +359,44 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     private nonisolated static func encodeCapture(input: URL, output: URL, expectedDuration: TimeInterval) throws {
         let source = try AVAudioFile(forReading: input)
         let format = source.processingFormat
+        guard let target = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1),
+              let converter = AVAudioConverter(from: format, to: target),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096),
+              let converted = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 4096) else { throw RecordingError.unavailable }
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: format.sampleRate,
+            AVSampleRateKey: target.sampleRate,
             AVEncoderBitRateKey: 32000,
-            AVNumberOfChannelsKey: format.channelCount
+            AVNumberOfChannelsKey: target.channelCount
         ]
         let temp = output.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).m4a")
         defer { try? FileManager.default.removeItem(at: temp) }
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096) else { throw RecordingError.unavailable }
         var encoded: AVAudioFile? = try AVAudioFile(forWriting: temp, settings: settings)
-        while source.framePosition < source.length {
-            try source.read(into: buffer)
-            guard buffer.frameLength > 0 else { throw RecordingError.unavailable }
-            try encoded?.write(from: buffer)
+        let sourceFrames = source.length
+        while true {
+            var readError: Error?
+            var conversionError: NSError?
+            let status = converter.convert(to: converted, error: &conversionError) { frames, inputStatus in
+                let remaining = sourceFrames - source.framePosition
+                guard remaining > 0 else {
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+                do {
+                    try source.read(into: buffer, frameCount: AVAudioFrameCount(min(Int64(min(frames, buffer.frameCapacity)), remaining)))
+                    inputStatus.pointee = buffer.frameLength == 0 ? .endOfStream : .haveData
+                    return buffer.frameLength == 0 ? nil : buffer
+                } catch {
+                    readError = error
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+            }
+            if let readError { throw readError }
+            if let conversionError { throw conversionError }
+            if converted.frameLength > 0 { try encoded?.write(from: converted) }
+            if status == .endOfStream { break }
+            guard status == .haveData, converted.frameLength > 0 else { throw RecordingError.unavailable }
         }
         if #available(iOS 18, *) { encoded?.close() }
         encoded = nil
