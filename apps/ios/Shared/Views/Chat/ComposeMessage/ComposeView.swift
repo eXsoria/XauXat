@@ -39,7 +39,6 @@ enum VoiceMaskingState: Equatable {
     case available
     case processing
     case applied(XauXatVoiceMaskPreset)
-    case ambienceApplied
 }
 
 // Spec: spec/client/compose.md#LiveMessage
@@ -732,7 +731,7 @@ struct ComposeView: View {
                     ContextMemberContactActionsView(contact: ct, groupDirectInv: groupDirectInv)
                 } else if !voiceRecordingPaused {
                     HStack (alignment: .center) {
-                        attachmentAndCommandsButtons()
+                        attachmentAndCommandsButtons(showVoiceMask: true)
                         sendMessageView(
                             disableSendButton,
                             placeholder: chat.chatInfo.groupInfo.map { gi in
@@ -1411,7 +1410,7 @@ struct ComposeView: View {
                 keyboardHiddenDate: $keyboardHiddenDate,
                 composerIconColor: composerIconColor,
                 editorAccessories: sendToConnect == nil ? AnyView(expressionButtons) : nil,
-                voiceAccessories: sendToConnect == nil ? AnyView(voiceComposerButtons) : nil,
+                voiceAccessories: sendToConnect == nil ? AnyView(cameraComposerButton) : nil,
                 listenOnce: canSetVoiceListenOnce ? $composeState.voiceListenOnce : nil,
                 sendVoiceRecording: {
                     voiceSendOnFinish = true
@@ -1430,7 +1429,7 @@ struct ComposeView: View {
         }
     }
 
-    @ViewBuilder private func attachmentAndCommandsButtons() -> some View {
+    @ViewBuilder private func attachmentAndCommandsButtons(showVoiceMask: Bool = false) -> some View {
         let msg = composeState.message.trimmingCharacters(in: .whitespaces)
         let showAttachment = chat.chatInfo.contact?.profile.peerType != .bot || chat.chatInfo.featureEnabled(.files)
         let showCommands = chat.chatInfo.useCommands && (!showAttachment || msg.isEmpty || msg.starts(with: "/"))
@@ -1442,6 +1441,9 @@ struct ComposeView: View {
                 .padding(.trailing, 3)
                 .disabled(voiceInteraction.active || composeState.voicePreview)
                 .if(showCommands) { v in v.padding(.leading, 3) }
+        }
+        if showVoiceMask && showsVoiceMaskButton {
+            voiceMaskComposerButton
         }
         if canConfigureCodeLockedText && (codeLockCode != nil || !showAttachment) {
             codeLockButton()
@@ -1476,30 +1478,36 @@ struct ComposeView: View {
         .foregroundColor(composerIconColor)
     }
 
-    @ViewBuilder private var voiceComposerButtons: some View {
-        HStack(spacing: 0) {
-            if chat.chatInfo.featureEnabled(.voice) && codeLockCode == nil {
-                Button { showVoiceSettings = true } label: {
-                    Image("xauxat-mask")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 24, height: 24)
-                        .frame(width: 38, height: 44)
-                }
-                .foregroundColor(voiceNoteMaskEnabled || voiceNoteAmbience != .off ? composerIconColor : theme.colors.secondary.opacity(0.8))
-                .accessibilityLabel("Voice effects")
-                .accessibilityValue(voiceNoteMaskEnabled ? "Voice Mask on" : "Voice Mask off")
-            }
-            if UIImagePickerController.isSourceTypeAvailable(.camera) && expressionsAllowStickers && codeLockCode == nil {
-                Button { showTakePhoto = true } label: {
-                    Image(systemName: "camera").font(.title3).frame(width: 40, height: 44)
-                }
-                .foregroundColor(composerIconColor)
-                .accessibilityLabel("Camera")
-            }
+    private var showsVoiceMaskButton: Bool {
+        chat.chatInfo.featureEnabled(.voice) && codeLockCode == nil && !voiceInteraction.active
+            && composeState.noPreview && composeState.message.isEmpty && !composeState.editing
+            && !composeState.forwarding && composeState.liveMessage == nil && !chat.chatInfo.nextConnect
+    }
+
+    private var voiceMaskComposerButton: some View {
+        Button { showVoiceSettings = true } label: {
+            Image("xauxat-mask")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 24, height: 24)
+                .frame(width: 38, height: 44)
         }
-        .disabled(composeState.attachmentDisabled)
+        .disabled(composeState.attachmentDisabled || !chat.chatInfo.sendMsgEnabled || expressionSending)
+        .foregroundColor(voiceNoteMaskEnabled ? composerIconColor : theme.colors.secondary.opacity(0.8))
+        .accessibilityLabel("Voice effects")
+        .accessibilityValue(voiceNoteMaskEnabled ? "Voice Mask on" : "Voice Mask off")
+    }
+
+    @ViewBuilder private var cameraComposerButton: some View {
+        if UIImagePickerController.isSourceTypeAvailable(.camera) && expressionsAllowStickers && codeLockCode == nil {
+            Button { showTakePhoto = true } label: {
+                Image(systemName: "camera").font(.title3).frame(width: 40, height: 44)
+            }
+            .disabled(composeState.attachmentDisabled)
+            .foregroundColor(composerIconColor)
+            .accessibilityLabel("Camera")
+        }
     }
 
     private var canSetVoiceListenOnce: Bool {
@@ -1511,6 +1519,7 @@ struct ComposeView: View {
         NavigationView {
             Form {
                 Toggle("xauxat voice mask", isOn: $voiceNoteMaskEnabled)
+                    .tint(xauXatChampagne(.light))
                 if voiceNoteMaskEnabled {
                     Picker("Voice filter", selection: $voiceNotePreset) {
                         ForEach(XauXatVoiceMaskPreset.allCases.filter {
@@ -1519,11 +1528,11 @@ struct ComposeView: View {
                             Text(preset.name).tag(preset)
                         }
                     }
-                }
-                Picker("Background sound", selection: $voiceNoteAmbience) {
-                    Text("Off").tag(XauXatCallAmbience.off)
-                    Text("Rain").tag(XauXatCallAmbience.rain)
-                    Text("Traffic").tag(XauXatCallAmbience.traffic)
+                    Picker("Background sound", selection: $voiceNoteAmbience) {
+                        Text("Off").tag(XauXatCallAmbience.off)
+                        Text("Rain").tag(XauXatCallAmbience.rain)
+                        Text("Traffic").tag(XauXatCallAmbience.traffic)
+                    }
                 }
             }
             .navigationTitle("Voice effects")
@@ -2135,13 +2144,13 @@ struct ComposeView: View {
         if composeState.voicePreview, !composeState.editing {
             switch composeState.voiceMaskingState {
             case .processing: return
-            case .available, .ambienceApplied:
+            case .available:
                 guard composeState.voiceMessageRecordingState == .finished, !composeState.inProgress,
                       let fileName = composeState.voiceMessageRecordingFileName else { return }
                 if voiceNoteMaskEnabled {
                     let preset = voiceNotePreset.requiresPlus && !plusEntitlements.isAuthorized(for: .advancedVoiceMasking)
                         ? XauXatVoiceMaskPreset.veil : voiceNotePreset
-                    prepareVoiceEffects(preset, ambience: composeState.voiceMaskingState == .ambienceApplied ? .off : voiceNoteAmbience) {
+                    prepareVoiceEffects(preset, ambience: voiceNoteAmbience) {
                         performSendMessage(ttl: ttl, sign: sign)
                     }
                 } else {
@@ -2155,14 +2164,8 @@ struct ComposeView: View {
                                   chatModel.currentUser?.userId == userID, xauXatStorageScope() == scope,
                                   composeState.voiceMessageRecordingFileName == fileName,
                                   !voiceNoteMaskEnabled, !composeState.inProgress,
-                                  composeState.voiceMaskingState == .available || composeState.voiceMaskingState == .ambienceApplied else { return }
-                            if voiceNoteAmbience != .off && composeState.voiceMaskingState == .available {
-                                prepareVoiceEffects(nil, ambience: voiceNoteAmbience) {
-                                    performSendMessage(ttl: ttl, sign: sign)
-                                }
-                            } else {
-                                performSendMessage(ttl: ttl, sign: sign)
-                            }
+                                  composeState.voiceMaskingState == .available else { return }
+                            performSendMessage(ttl: ttl, sign: sign)
                         },
                         secondaryButton: .cancel(Text("Keep draft"))
                     ))
@@ -2879,9 +2882,9 @@ struct ComposeView: View {
         }
     }
 
-    private func prepareVoiceEffects(_ preset: XauXatVoiceMaskPreset?, ambience: XauXatCallAmbience, onSuccess: @escaping () -> Void) {
+    private func prepareVoiceEffects(_ preset: XauXatVoiceMaskPreset, ambience: XauXatCallAmbience, onSuccess: @escaping () -> Void) {
         let previousState = composeState.voiceMaskingState
-        guard previousState == .available || previousState == .ambienceApplied,
+        guard previousState == .available,
               case let .voicePreview(fileName, duration) = composeState.preview else { return }
         let userID = chatModel.currentUser?.userId
         let scope = xauXatStorageScope()
@@ -2897,8 +2900,7 @@ struct ComposeView: View {
                 try await Task.detached(priority: .userInitiated) {
                     try XauXatVoiceMask.apply(to: recordingURL, preset: preset, ambience: ambience, declaredDuration: TimeInterval(duration))
                 }.value
-                let state = preset.map(VoiceMaskingState.applied) ?? .ambienceApplied
-                guard completeProcessing(state) else { return }
+                guard completeProcessing(.applied(preset)) else { return }
                 if voiceRecordingViewVisible && scenePhase == .active && chatModel.chatId == chat.chatInfo.id {
                     onSuccess()
                 }
