@@ -60,6 +60,8 @@
             packages.direct-sqlcipher.patches = [ ./scripts/nix/direct-sqlcipher-2.3.27.patch ];
           })
 
+          { packages.simplexmq.patches = [ ./scripts/nix/simplexmq-smp-proxy-failover.patch ]; }
+
           ({ pkgs,lib, ... }: lib.mkIf (pkgs.stdenv.hostPlatform.isAndroid) {
             packages.simplex-chat.components.library.ghcOptions = [ "-pie" ];
           })] ++ extra-modules;
