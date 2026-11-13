@@ -135,6 +135,32 @@ let logger = Logger()
         require(xauXatRecoverySessionState() == .unlockRequired, "Decoy store selection must still wait for unlock")
 
         reset()
+        chatCloseStore()
+        torReady = false
+        require(reopenChatStoreForHistory() && isChatStoreOpen(), "An authorized foreground history can reopen locally while Tor is unavailable")
+        require(activations == 0 && ChatReceiver.shared.starts == 0 && AppChatState.shared.value == .activating,
+                "Reopening for history claims the stores without activating networking")
+        torReady = true
+        reopenSucceeds = false
+        startChatAndActivate {}
+        require(AppChatState.shared.value == .active && activations == 1, "Activation reuses the stores already reopened for history")
+
+        for blocker in 0..<4 {
+            reset()
+            chatCloseStore()
+            switch blocker {
+            case 0: UIApplication.shared.applicationState = .background
+            case 1: nseStateGroupDefault.value = .active
+            case 2: setAppState(.stopped)
+            default:
+                kcDecoyPassword.value = "TEST_PIN"
+                ChatModel.shared.contentViewAccessAuthenticated = false
+            }
+            require(!reopenChatStoreForHistory() && !isChatStoreOpen() && activations == 0,
+                    "Local history must honor lifecycle, extension ownership and store authorization")
+        }
+
+        reset()
         var completions = 0
         startChatAndActivate(ifAllowed: { false }) { completions += 1 }
         require(activations == 0 && ChatReceiver.shared.starts == 0 && completions == 1, "An invalid operation must not start the receiver and must finish its waiter")

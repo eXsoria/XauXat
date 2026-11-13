@@ -69,13 +69,6 @@ public final class TorController {
         isConnected = false
     }
     public func disconnect() { fatalError("The pinned framework disconnect() shuts down Tor; never use it for socket recovery") }
-    public func authenticate(with cookie: Data, completion: @escaping (Bool, Error?) -> Void) {
-        if TorTestState.holdAuthentication {
-            TorTestState.pendingAuthentication = { completion(true, nil) }
-            return
-        }
-        DispatchQueue.main.async { completion(true, nil) }
-    }
     public func addObserver(forStatusEvents observer: @escaping (String, String, String, [String: String]?) -> Bool) -> Any {
         let token = UUID()
         TorTestState.statusObservers[token] = observer
@@ -92,8 +85,15 @@ public final class TorController {
         if let token = observer as? UUID { TorTestState.statusObservers.removeValue(forKey: token) }
     }
     public func sendCommand(_ command: String, arguments: [String]?, data: Data?, observer: @escaping ([NSNumber], [Data], UnsafeMutablePointer<ObjCBool>) -> Bool) {
-        let text = ([command] + (arguments ?? [])).joined(separator: " ")
+        let text = command == "AUTHENTICATE" ? command : ([command] + (arguments ?? [])).joined(separator: " ")
         TorTestState.commands.append(text)
+        if command == "AUTHENTICATE", TorTestState.holdAuthentication {
+            TorTestState.pendingAuthentication = {
+                var stop: ObjCBool = false
+                _ = observer([250], [Data("OK".utf8)], &stop)
+            }
+            return
+        }
         if let drop = TorTestState.dropCommandContaining, text.contains(drop) {
             TorTestState.dropCommandContaining = nil
             return

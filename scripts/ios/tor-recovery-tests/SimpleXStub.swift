@@ -1,4 +1,9 @@
 public struct NetCfg { public init() {} }
+public struct TestSMPPortDefault {
+    public enum Mode { case preset, off }
+    public func get() -> Mode { .preset }
+}
+public let networkSMPWebPortServersDefault = TestSMPPortDefault()
 public var publishedTorPort: UInt16?
 public var publishedPorts: [UInt16] = []
 public func getNetCfg() -> NetCfg { NetCfg() }

@@ -36,6 +36,8 @@ observer = (root / "apps/ios/Shared/Model/NetworkObserver.swift").read_text(enco
 assert "guard monitor == nil" in observer and "restartMonitor" not in api, "Opening the core must not synthesize another path change"
 text = "import Foundation\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "startChatAndActivate")
 text += "\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "activateChat")
+text += "\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "xauXatAppIsForeground")
+text += "\n@MainActor\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "reopenChatStoreForHistory")
 text += "\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", "apiActivateChat")
 for name in ["chatCloseStore", "chatReopenStore", "isChatStoreOpen", "setChatStoreOpen"]:
     text += "\n" + function("apps/ios/SimpleXChat/API.swift", name)
@@ -45,7 +47,7 @@ Path(sys.argv[2]).write_text(text, encoding="utf-8")
 
 # Post-unlock integration uses the real success callback, coordinator, native
 # activation and store functions. The UI result adapter itself contains no policy.
-unlock = text + "\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "xauXatAppIsForeground")
+unlock = text
 unlock += "\n@MainActor @discardableResult\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", "recoverXauXatSessionAfterAuthentication")
 success = function("apps/ios/Shared/ContentView.swift", "authenticateContentViewAccess").split("case .success:", 1)[1].split("case .failed:", 1)[0]
 unlock += "\n@MainActor final class AuthSuccessHarness {\nlet chatModel = ChatModel.shared\n"

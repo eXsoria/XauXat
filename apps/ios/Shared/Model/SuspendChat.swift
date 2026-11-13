@@ -128,6 +128,25 @@ func setAppState(_ appState: AppState) {
     }
 }
 
+@MainActor
+func reopenChatStoreForHistory() -> Bool {
+    suspendLockQueue.sync {
+        let model = ChatModel.shared
+        let state = AppChatState.shared.value
+        guard xauXatAppIsForeground(), model.currentUser != nil,
+              !model.ctrlInitInProgress, model.chatRunning == true, hasChatCtrl(),
+              (kcDecoyPassword.get() == nil || model.contentViewAccessAuthenticated),
+              state == .suspended || state == .active else { return false }
+        if isChatStoreOpen() { return true }
+        guard nseStateGroupDefault.get().inactive else { return false }
+        // Claim the stores for the foreground app without activating networking.
+        AppChatState.shared.set(.activating)
+        if nseStateGroupDefault.get().inactive, chatReopenStore() { return true }
+        AppChatState.shared.set(.suspended)
+        return false
+    }
+}
+
 @discardableResult
 func activateChat(appState: AppState = .active) -> Bool {
     logger.debug("DEBUGGING: activateChat")

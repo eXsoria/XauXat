@@ -93,6 +93,11 @@ final class AppSheetState {
 }
 var storeOpen = true
 func isChatStoreOpen() -> Bool { storeOpen }
+var localReopenSucceeds = false
+func reopenChatStoreForHistory() -> Bool {
+    if localReopenSucceeds { storeOpen = true }
+    return localReopenSucceeds
+}
 struct Logger { func error(_ message: String) {} }
 let logger = Logger()
 func responseError(_ error: Error) -> String { "synthetic store failure" }
@@ -104,7 +109,9 @@ final class XauXatConnectionRecoveryManager {
     enum Reason { case foreground }
     static var shared = XauXatConnectionRecoveryManager()
     var attempts = 0
+    var sessionRecoveryRequests = 0
     var recover: () async throws -> Void = { storeOpen = true }
+    func sessionUnavailable() { sessionRecoveryRequests += 1 }
     func reconnect(_ scope: Scope, reason: Reason) async throws {
         attempts += 1
         try await recover()
@@ -178,6 +185,15 @@ func apiGetChat(chatId: ChatId, scope: GroupChatScope?, contentTag: MsgContentTa
         XauXatConnectionRecoveryManager.shared.recover = { throw TestError.unavailable }
         await loadChat(chatId: "a", im: im)
         expect(XauXatConnectionRecoveryManager.shared.attempts == 1, "Open local history never requires relay/network recovery")
+
+        im = reset(); storeOpen = false; localReopenSucceeds = true
+        XauXatConnectionRecoveryManager.shared.recover = { throw TestError.unavailable }
+        await loadChat(chatId: "a", im: im)
+        expect(im.reversedChatItems.first?.id == 4 && XauXatConnectionRecoveryManager.shared.attempts == 0,
+               "Local history can load while network recovery is unavailable")
+        expect(XauXatConnectionRecoveryManager.shared.sessionRecoveryRequests == 1,
+               "Reopening for local reads still requests recovery for incoming traffic")
+        localReopenSucceeds = false
 
         im = reset(); storeOpen = false; attempts = 0
         XauXatConnectionRecoveryManager.shared.recover = { throw TestError.unavailable }

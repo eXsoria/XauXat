@@ -52,6 +52,7 @@ import Tor
         try await manualCheckCannotVerifyAnOldPath()
         try await mobileHandoverCancelsOnlyObsoleteRecovery()
         try await coldStartupFollowsTheFirstMobilePath()
+        try await offlineStartupResumesOnMobile()
         try await transientColdStartupRetriesKeepItsCompletion()
         try await coldStartupRetriesStopAtTheirBudgetAndAvailabilityGate()
         try await bootstrapStallGetsOneEarlyRepair()
@@ -59,6 +60,7 @@ import Tor
         try await repeatedBootstrapEventsCannotHideAStall()
         try await persistentBootstrapStallDoesNotResetRepeatedly()
         try await bootstrapWatchDoesNotInterruptRouteVerification()
+        try await completedBootstrapStartsRelayCheck()
         try await recoveryRebindsAndPublishesOnlyVerifiedPort()
         try await recoveryFailureIsBounded()
         try await interruptedRepairDoesNotStrandNextRetry()
@@ -66,6 +68,7 @@ import Tor
         try await staleControlChannelIsReopened()
         try await unresponsiveControlIsClosedBeforeReopening()
         try await authenticationTimeoutCannotPublishLateSuccess()
+        try await slowFirstAuthenticationKeepsItsSocket()
         try await missingStatusReplyDiscardsTheChannel()
         try await rejectedStatusReplyIsNotATimeout()
         try await refusedControlConnectionsDoNotPoisonRetry()
@@ -258,7 +261,7 @@ import Tor
             try await until { held != nil }
             manager.invalidateReadiness()
             if success { held!.resume(returning: true) }
-            else { held!.resume(throwing: TorSOCKSProbeError.failed(.response)) }
+            else { held!.resume(throwing: TorSOCKSProbeError.failed(.destination)) }
             do { _ = try await manual.value; fatalError("An old-path diagnostic cannot verify a new path") } catch { }
             require(publishedTorPort == 19050, "Old diagnostic completion must not withdraw the current Tor endpoint")
             probe.handler = { _ in true }
@@ -306,7 +309,7 @@ import Tor
             context: { .init(userId: nil, online: true, active: true) },
             ensureTor: { _ in fatalError("Uninitialized chat must not invoke messaging recovery") },
             invalidateTor: { tor.invalidateReadiness() },
-            refreshStartup: { await tor.refreshPendingStartup() },
+            refreshStartup: { tor.refreshPendingStartup() },
             applyTor: { coreCommands += 1; return false },
             failedRelays: { fatalError("No core summary exists during cold start") },
             reconnect: { _ in coreCommands += 1 }, sessionState: { .uninitialized }
@@ -318,6 +321,25 @@ import Tor
         require(coreCommands == 0 && TorTestState.threadStarts == 1, "Cold path refresh must never activate a store or create another Tor runtime")
         oldProbe!.resume(returning: true)
         recovery.pause()
+    }
+
+    static func offlineStartupResumesOnMobile() async throws {
+        reset()
+        let probe = ScriptedProbe(), tor = probe.manager()
+        tor.networkAvailabilityChanged(online: false)
+        var startup: Result<UInt16, Error>?
+        tor.start { startup = $0 }
+        tor.refreshPendingStartup()
+        require(TorTestState.threadStarts == 0 && startup == nil && !tor.hasVerifiedStartupRoute,
+                "An offline launch must wait without starting Tor or opening the startup gate")
+        tor.networkAvailabilityChanged(online: true)
+        tor.refreshPendingStartup()
+        try await until { startup != nil }
+        require(try startup!.get() == 19050 && tor.hasVerifiedStartupRoute && probe.calls == 1,
+                "Mobile availability must resume the original startup and verify the relay before opening")
+        tor.networkAvailabilityChanged(online: false)
+        require(publishedTorPort == nil && tor.hasVerifiedStartupRoute,
+                "Losing the network must revoke the route without re-locking already opened local screens")
     }
 
     static func transientColdStartupRetriesKeepItsCompletion() async throws {
@@ -517,7 +539,8 @@ import Tor
 
     static func controlManager(_ probe: ScriptedProbe) -> EmbeddedTorManager {
         EmbeddedTorManager(routeProbe: { port, _ in try await probe.run(port) }, retryDelay: 0,
-                           startupTimeout: 3_000_000_000, controlReplyTimeout: 0.2, controlPollDelay: 1_000_000)
+                           startupTimeout: 3_000_000_000, controlReplyTimeout: 0.2, initialAuthenticationTimeout: 0.2,
+                           controlPollDelay: 1_000_000)
     }
 
     static func unresponsiveControlIsClosedBeforeReopening() async throws {
@@ -551,6 +574,21 @@ import Tor
                 "Late authentication from a discarded channel cannot publish readiness or close the new channel")
     }
 
+    static func slowFirstAuthenticationKeepsItsSocket() async throws {
+        reset()
+        TorTestState.holdAuthentication = true
+        let manager = EmbeddedTorManager(routeProbe: { _, _ in true }, controlReplyTimeout: 0.05,
+                                         initialAuthenticationTimeout: 1, controlPollDelay: 1_000_000)
+        let operation = Task { try await manager.ensureReady() }
+        try await until { TorTestState.pendingAuthentication != nil }
+        try await Task.sleep(nanoseconds: 150_000_000)
+        require(TorTestState.closedControllers == 0 && publishedTorPort == nil,
+                "The first socket must survive the normal command deadline without publishing readiness")
+        TorTestState.pendingAuthentication?()
+        let port = try await operation.value
+        require(port == 19050 && TorTestState.controllers == 1, "A late initial reply must complete on the original socket")
+    }
+
     static func missingStatusReplyDiscardsTheChannel() async throws {
         reset()
         let probe = ScriptedProbe(), manager = controlManager(probe)
@@ -572,12 +610,23 @@ import Tor
         do { _ = try await manager.ensureReady(); fatalError("Refused socket must fail") } catch { }
         require(manager.diagnosticText.contains("last_failure=control_socket_refused"),
                 "An existing endpoint that refuses connections is different from a missing port file")
-        require(TorTestState.controllers == 100 && TorTestState.closedControllers == 100 && publishedTorPort == nil,
+        require(TorTestState.controllers == 200 && TorTestState.closedControllers == 200 && publishedTorPort == nil,
                 "Every failed control connection must be disposed and retries must be bounded")
         TorTestState.refuseConnections = false
         _ = try await manager.ensureReady()
         require(TorTestState.threadStarts == 1 && publishedTorPort == 19050,
                 "Temporary local connection refusal must not poison the next retry or spawn C-Tor again")
+    }
+
+    static func completedBootstrapStartsRelayCheck() async throws {
+        reset()
+        TorTestState.circuitEstablished = false
+        let probe = ScriptedProbe(), manager = probe.manager()
+        let operation = Task { try await manager.ensureReady() }
+        try await until { TorTestState.completedCommands.contains("GETINFO status/circuit-established") }
+        TorTestState.emitProgress(100)
+        let port = try await operation.value
+        require(port == 19050 && probe.calls == 1, "Bootstrap completion can start the relay check without another circuit event")
     }
 
     static func rejectedStatusReplyIsNotATimeout() async throws {
@@ -649,7 +698,7 @@ import Tor
         try await until { held != nil }
         probe.handler = { _ in true }
         _ = try await manager.ensureReady()
-        held!.resume(throwing: TorSOCKSProbeError.failed(.response))
+        held!.resume(throwing: TorSOCKSProbeError.failed(.destination))
         do { _ = try await manual.value; fatalError("Old manual check should fail") } catch { }
         require(publishedTorPort == 19050, "An old failed probe must not invalidate a newer verified route on the same port")
     }
@@ -694,17 +743,21 @@ import Tor
     }
 
     static func realSOCKSProbeCases() async throws {
-        let fragmented = try await SOCKSFixture.open(.fragmentedHTTP)
+        let fragmented = try await SOCKSFixture.open(.fragmentedReply)
         defer { fragmented.close() }
-        require(try await TorSOCKSProbe.run(port: fragmented.port, timeout: 3), "A fragmented HTTP status line must pass through a real local SOCKS socket")
+        require(try await TorSOCKSProbe.run(port: fragmented.port, timeout: 3), "A fragmented SOCKS reply must confirm the tunnel to the relay")
+        let beganRace = Date()
+        require(try await TorSOCKSProbe.firstReachable(["unavailable.invalid", SOCKSFixture.relay], port: 443, through: fragmented.port, timeout: 3),
+                "A reachable relay must win even when the other relay never replies")
+        require(Date().timeIntervalSince(beganRace) < 2, "The winning probe must cancel the slow socket")
         let rejected = try await SOCKSFixture.open(.rejectDestination)
         defer { rejected.close() }
-        do { _ = try await TorSOCKSProbe.run(port: rejected.port, timeout: 3); fatalError("SOCKS refusal must fail") }
+        do { _ = try await TorSOCKSProbe.run(port: rejected.port, timeout: 3, host: SOCKSFixture.relay, relayPort: 443); fatalError("SOCKS refusal must fail") }
         catch { require(error as? TorSOCKSProbeError == .rejected(4), "Preserve the SOCKS destination reply separately from a dead local proxy") }
-        let malformed = try await SOCKSFixture.open(.malformedHTTP)
+        let malformed = try await SOCKSFixture.open(.malformedReply)
         defer { malformed.close() }
-        do { _ = try await TorSOCKSProbe.run(port: malformed.port, timeout: 3); fatalError("Malformed HTTP must fail") }
-        catch { require(error as? TorSOCKSProbeError == .failed(.response), "Malformed HTTP must identify the response stage") }
+        do { _ = try await TorSOCKSProbe.run(port: malformed.port, timeout: 3, host: SOCKSFixture.relay, relayPort: 443); fatalError("Malformed SOCKS reply must fail") }
+        catch { require(error as? TorSOCKSProbeError == .failed(.destination), "A malformed destination reply must fail closed") }
         let hanging = try await SOCKSFixture.open(.hangHandshake)
         defer { hanging.close() }
         let began = Date()
@@ -721,7 +774,8 @@ import Tor
 
 // Loopback-only SOCKS peer. It never forwards or contacts Tor/relays/the Internet.
 final class SOCKSFixture {
-    enum Mode { case fragmentedHTTP, rejectDestination, malformedHTTP, hangHandshake }
+    static let relay = "beccx4yfxxbvyhqypaavemqurytl6hozr47wfc7uuecacjqdvwpw2xid.onion"
+    enum Mode { case fragmentedReply, rejectDestination, malformedReply, hangHandshake }
     let listener: NWListener
     let mode: Mode
     private let lock = NSLock()
@@ -769,21 +823,18 @@ final class SOCKSFixture {
         let header = try await read(connection, count: 5)
         guard header[3] == 3 else { fatalError("Probe must send the destination hostname through SOCKS") }
         let address = try await read(connection, count: Int(header[4]) + 2)
-        guard String(data: address.dropLast(2), encoding: .utf8) == "check.torproject.org" else { fatalError("Unexpected destination") }
-        try await send(connection, Data([5, mode == .rejectDestination ? 4 : 0, 0, 1, 0, 0, 0, 0, 0, 0]))
-        if mode == .rejectDestination { return }
-        var request = Data()
-        while request.range(of: Data([13, 10, 13, 10])) == nil {
-            request.append(try await read(connection, count: 1))
-            guard request.count < 1024 else { fatalError("Unexpected route-check request") }
+        let host = String(data: address.dropLast(2), encoding: .utf8)
+        guard address.suffix(2).elementsEqual([0x01, 0xbb]) else { fatalError("Unexpected relay port") }
+        if host != Self.relay {
+            guard mode == .fragmentedReply else { return }
+            // Leave the alternate destination pending so the test exercises
+            // first-success cancellation. In other modes both preset hosts fail.
+            return
         }
-        guard String(data: request, encoding: .utf8)?.hasPrefix("HEAD / HTTP/1.1\r\n") == true else {
-            fatalError("The probe must request headers only, never the exit-IP API")
-        }
-        if mode == .malformedHTTP { try await send(connection, Data("NOT HTTP\r\n".utf8)); return }
-        try await send(connection, Data("H".utf8))
+        try await send(connection, Data([5, mode == .rejectDestination ? 4 : 0, mode == .malformedReply ? 1 : 0, 1]))
+        if mode != .fragmentedReply { return }
         try await Task.sleep(nanoseconds: 30_000_000)
-        try await send(connection, Data("TTP/1.1 200 OK\r\n\r\n{}".utf8))
+        try await send(connection, Data(repeating: 0, count: 6))
     }
     func read(_ connection: NWConnection, count: Int) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
