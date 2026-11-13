@@ -1474,12 +1474,13 @@ processChatCommand cxt nm = \case
     processChatCommand cxt nm $ APISendCallInvitation contactId callType
   APIRejectCall contactId ->
     -- party accepting call
-    withCurrentCall contactId $ \user ct Call {chatItemId, callState} -> case callState of
+    withCurrentCall contactId $ \user ct Call {callId, chatItemId, callState} -> case callState of
       CallInvitationReceived {} -> do
         let aciContent = ACIContent SMDRcv $ CIRcvCall CISCallRejected 0
+        (SndMessage {msgId}, _) <- sendDirectContactMessage user ct (XCallEnd callId)
         withFastStore' $ \db -> setDirectChatItemRead db user contactId chatItemId
         timed_ <- contactCITimed ct
-        updateDirectChatItemView user ct chatItemId aciContent False False timed_ Nothing
+        updateDirectChatItemView user ct chatItemId aciContent False False timed_ (Just msgId)
         forM_ (timed_ >>= timedDeleteAt') $
           startProximateTimedItemThread user (ChatRef CTDirect contactId Nothing, chatItemId)
         pure Nothing
