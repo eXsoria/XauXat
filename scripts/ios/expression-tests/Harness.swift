@@ -166,6 +166,17 @@ func privacyChecks() async throws -> Int {
     try check(lib.items.last?.title == "PRIVATE_TITLE", "local import")
     let sealedManifest = try Data(contentsOf: root.appendingPathComponent("pack.sealed"))
     try check(sealedManifest.range(of: Data("PRIVATE_TITLE".utf8)) == nil, "import title encrypted")
+    try await lib.importStickerPhoto(tagged as Data)
+    let photoSticker = lib.items.last!
+    try check(photoSticker.kind == .sticker && !photoSticker.builtin && !photoSticker.favorite, "photo added to my pack")
+    let photoData = try lib.data(for: photoSticker)
+    let photoSource = CGImageSourceCreateWithData(photoData as CFData, nil)!
+    let photoProps = CGImageSourceCopyPropertiesAtIndex(photoSource, 0, nil)! as NSDictionary
+    try check(CGImageSourceGetType(photoSource)! as String == UTType.png.identifier, "photo stored as PNG")
+    try check(photoProps[kCGImagePropertyGPSDictionary] == nil
+              && (photoProps[kCGImagePropertyExifDictionary] as? NSDictionary)?[kCGImagePropertyExifUserComment] == nil, "photo metadata stripped")
+    let photoReopened = try XauXatExpressionLibrary(directory: root, key: key)
+    try check(photoReopened.items.last?.id == photoSticker.id, "photo sticker survives relaunch")
     let count = lib.items.count
     var remoteRejected = false
     do { try await lib.importFile(URL(string: "https://example.invalid/sticker.png")!, kind: .sticker) }
@@ -184,6 +195,11 @@ func privacyChecks() async throws -> Int {
     var cancellationRejected = false
     do { try await cancelled.value } catch { cancellationRejected = true }
     try check(cancellationRejected && lib.items.count == count, "cancelled import not committed")
+    let cancelledPhoto = Task { try await lib.importStickerPhoto(tagged as Data) }
+    cancelledPhoto.cancel()
+    var photoCancellationRejected = false
+    do { try await cancelledPhoto.value } catch { photoCancellationRejected = true }
+    try check(photoCancellationRejected && lib.items.count == count, "cancelled photo import not committed")
     let longURL = root.appendingPathComponent("long.caf")
     do {
         let format = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)!
