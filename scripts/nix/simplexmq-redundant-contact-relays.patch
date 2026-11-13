@@ -765,7 +765,7 @@ index e77582b9..967d8a18 100644
    FOREIGN KEY(conn_id, internal_id) REFERENCES messages
    ON DELETE CASCADE
 diff --git a/tests/AgentTests/FunctionalAPITests.hs b/tests/AgentTests/FunctionalAPITests.hs
-index 7b95c71b..0ab10a2d 100644
+index 7b95c71b..274ef22d 100644
 --- a/tests/AgentTests/FunctionalAPITests.hs
 +++ b/tests/AgentTests/FunctionalAPITests.hs
 @@ -88,8 +88,8 @@ import Simplex.Messaging.Agent.Client (ProtocolTestFailure (..), ProtocolTestSte
@@ -792,7 +792,7 @@ index 7b95c71b..0ab10a2d 100644
    describe "Connection switch" $ do
      describe "should switch delivery to the new queue" $
        testServerMatrix2 ps testSwitchConnection
-@@ -3225,6 +3231,99 @@ testUsersNoServer ps = withAgentClientsCfg2 aCfg agentCfg $ \a b -> do
+@@ -3225,6 +3231,98 @@ testUsersNoServer ps = withAgentClientsCfg2 aCfg agentCfg $ \a b -> do
    where
      aCfg = agentCfg {initialCleanupDelay = 10000, cleanupInterval = 10000, deleteErrorCount = 3}
 
@@ -864,9 +864,8 @@ index 7b95c71b..0ab10a2d 100644
 +  forM_ [(a, bId, b, aId), (b, aId, a, bId)] $ \(receiver, connId, sender, peerConnId) -> do
 +    liftIO $ setProtocolServers receiver 1 $ fmap noAuthSrvCfg servers
 +    addConnectionReceiveQueue receiver connId $ length servers
-+    let statuses = replicate (length servers) Nothing
-+    phaseSnd sender peerConnId SPCompleted statuses
-+    phaseRcv receiver connId SPCompleted statuses
++    phaseSnd sender peerConnId SPCompleted (replicate (length servers) Nothing)
++    phaseRcv receiver connId SPCompleted (replicate (length servers) Nothing)
 +    ConnectionStats {rcvQueuesInfo} <- getConnectionServers receiver connId
 +    liftIO $ map rcvServer rcvQueuesInfo `shouldMatchList` foldr (:) [] servers
 +
@@ -885,7 +884,7 @@ index 7b95c71b..0ab10a2d 100644
 +  liftIO $ (connId', sentId) `shouldBe` (connId, msgId)
 +  liftIO $ (peerId, received) `shouldBe` (peerConnId, body)
 +  ackMessage receiver peerConnId rcvId Nothing
-+  forM_ [sender, receiver] $ \client -> do
++  forM_ ([sender, receiver] :: [AgentClient]) $ \client -> do
 +    extra <- timeout 250000 $ messageEvents client
 +    liftIO $ extra `shouldSatisfy` isNothing
 +
