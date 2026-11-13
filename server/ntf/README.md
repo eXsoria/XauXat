@@ -42,3 +42,18 @@ If the service is unavailable, XauXat exposes the registration error and retries
 The SimpleX notification protocol gives the notification service a device token and independent notifier subscription identifiers. It does not receive the sender, contact, message body, or the recipient's SMP queue address. The APNs payload contains encrypted notification metadata for the device, not message content. The operator can still observe service timing, total notification volume, device-token lifecycle and the number of notifier subscriptions associated with a token; these operational metadata must be covered by the XauXat privacy policy and retention policy.
 
 Before release, complete the physical-device matrix in issue #79 with a signed Release build and verify both sandbox and production APNs paths.
+
+## Calls while Tor is unavailable
+
+The current NTF container sends the existing SimpleX notification payload. The iOS extension still uses Tor to retrieve and classify that payload. A successful notification deployment therefore does not validate incoming calls while Tor is unavailable.
+
+For the dedicated call channel, use the same VPS and APNs provider identity with a separate call notification path. The call service needs a device registration for that channel, bound to the recipient's authenticated call identity and revoked on sign-out or token invalidation. It must wake the device only for an authenticated, pending call invitation. Keep the APNs payload to an opaque call ID and expiry. Send the initial wake-up with the `voip` push type, the official bundle's `.voip` topic and a zero or short expiration. Retrieve and validate the encrypted invitation on the dedicated SMP channel. Send answer, cancellation and hang-up over SMP.
+
+Before enabling this path in production:
+
+1. Verify the signed app and extensions with `scripts/ios/verify-notification-configuration.py --app APP --require-configured --signed --production`.
+2. Validate token registration, the official topic and the provider response against a real signed iPhone. Keep tokens and payloads out of server logs.
+3. With Tor unavailable, test a call in each direction over mobile data. On the iPhone, test with the app open, in the background and with the screen locked. Verify CallKit reports the invitation, the call connects, and a cancelled or expired invitation clears without ringing again.
+4. Confirm ordinary messages still use the Tor path and catch up after reconnecting.
+
+The USB pairing in the current Debug build is a local test fixture. Release needs authenticated provisioning of dedicated call queues and the device registration and wake-up handlers above. The existing notification container has no call-specific trigger.
