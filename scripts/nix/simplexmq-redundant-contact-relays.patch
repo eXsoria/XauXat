@@ -1,5 +1,5 @@
 diff --git a/src/Simplex/Messaging/Agent.hs b/src/Simplex/Messaging/Agent.hs
-index b0ce9b62..1084e995 100644
+index b0ce9b62..91a2c950 100644
 --- a/src/Simplex/Messaging/Agent.hs
 +++ b/src/Simplex/Messaging/Agent.hs
 @@ -58,6 +58,8 @@ module Simplex.Messaging.Agent
@@ -109,7 +109,7 @@ index b0ce9b62..1084e995 100644
 -    pure ((msgId, pqSecr), if null sqs' then Nothing else Just (sqs', msgId))
 +  forME reqMids $ \(queues, InternalId msgId, pqSecr) -> do
 +    mapM_ (submitPendingMsg c) queues
-+    pure (msgId, pqSecr)
++    pure $ Right (msgId, pqSecr)
    where
      storeSentMsg ::
        DB.Connection ->
@@ -360,7 +360,7 @@ index b0ce9b62..1084e995 100644
 +                | otherwise -> do
 +                    (sq@SndQueue {sndPrivateKey}, dhPublicKey) <- lift $ newSndQueue userId connId qInfo Nothing
 +                    void $ withStore c $ \db -> addConnSndQueue db connId (sq :: NewSndQueue) {primary = False}
-+                    let sqInfo' = sqInfo {queueAddress = queueAddress {dhPublicKey}}
++                    let sqInfo' = (sqInfo :: SMPQueueInfo) {queueAddress = queueAddress {dhPublicKey}}
 +                    void . enqueueMessages c cData' sqs SMP.noMsgFlags $ QKEY [(sqInfo', C.toPublic sndPrivateKey)]
 +              Nothing -> throwE $ AGENT A_VERSION
            qAddMsg srvMsgId ((qUri, Just addr) :| _) (DuplexConnection cData' rqs sqs) = do
