@@ -40,3 +40,27 @@
      newProxyClient :: SMPTransportSession -> Maybe SMP.BasicAuth -> UTCTime -> SMPClientVar -> AM (SMPConnectedClient, Either AgentErrorType ProxiedRelay)
      newProxyClient tSess auth ts v = do
        prs <- liftIO TM.emptyIO
+@@ -718,7 +735,9 @@
+           atomically $ do
+             unless (serverHostError e) $ do
+               removeSessVar rv destSrv prs
+-              TM.delete destSess smpProxiedRelays
++              TM.lookup destSess smpProxiedRelays >>= \case
++                Just (ProtoServerWithAuth currentSrv _) | currentSrv == protocolClientServer' smp -> TM.delete destSess smpProxiedRelays
++                _ -> pure ()
+             putTMVar (sessionVar rv) (Left e)
+             pure $ Left e
+     waitForProxiedRelay :: SMPTransportSession -> ProxiedRelayVar -> AM (Either AgentErrorType ProxiedRelay)
+@@ -777,7 +796,11 @@
+               cs = nubOrd $ map qConnId qs
+           -- this removes proxied relays that this client created sessions to
+           destSrvs <- M.keys <$> readTVar prs
+-          forM_ destSrvs $ \destSrv -> TM.delete (userId, destSrv, cId) smpProxiedRelays
++          forM_ destSrvs $ \destSrv -> do
++            let destSess = (userId, destSrv, cId)
++            TM.lookup destSess smpProxiedRelays >>= \case
++              Just (ProtoServerWithAuth currentSrv _) | currentSrv == srv -> TM.delete destSess smpProxiedRelays
++              _ -> pure ()
+           pure (qs, cs, serviceSub_)
+ 
+     serverDown :: ([RcvQueueSub], [ConnId], Maybe ServiceSub) -> IO ()
