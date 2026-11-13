@@ -10,7 +10,22 @@
 import SwiftUI
 import SimpleXChat
 
-let uiLinkColor = UIColor(red: 0, green: 0.533, blue: 1, alpha: 1)
+extension EnvironmentValues {
+    private struct SeparateMessageMetadata: EnvironmentKey {
+        static let defaultValue = false
+    }
+
+    var separateMessageMetadata: Bool {
+        get { self[SeparateMessageMetadata.self] }
+        set { self[SeparateMessageMetadata.self] = newValue }
+    }
+}
+
+let uiLinkColor = UIColor { traits in
+    traits.userInterfaceStyle == .dark
+        ? UIColor(red: 222 / 255, green: 206 / 255, blue: 175 / 255, alpha: 1)
+        : UIColor(red: 146 / 255, green: 113 / 255, blue: 65 / 255, alpha: 1)
+}
 
 private func typing(_ theme: AppTheme, _ descr: UIFontDescriptor, _ ws: [UIFont.Weight]) -> NSMutableAttributedString {
     let res = NSMutableAttributedString()
@@ -25,9 +40,22 @@ private func typing(_ theme: AppTheme, _ descr: UIFontDescriptor, _ ws: [UIFont.
 }
 
 // Spec: spec/client/chat-view.md#MsgContentView
+private struct MessageForegroundKey: EnvironmentKey {
+    static let defaultValue = UIColor.black
+}
+
+extension EnvironmentValues {
+    var messageForeground: UIColor {
+        get { self[MessageForegroundKey.self] }
+        set { self[MessageForegroundKey.self] = newValue }
+    }
+}
+
 struct MsgContentView: View {
+    @Environment(\.messageForeground) private var messageForeground
     @ObservedObject var chat: Chat
     @Environment(\.showTimestamp) var showTimestamp: Bool
+    @Environment(\.separateMessageMetadata) private var separateMessageMetadata
     @Environment(\.containerBackground) var containerBackground: UIColor
     @EnvironmentObject var theme: AppTheme
     var text: String
@@ -128,6 +156,7 @@ struct MsgContentView: View {
             showSecrets: showSecrets,
             commands: chat.chatInfo.useCommands && chat.chatInfo.sndReady,
             backgroundColor: containerBackground,
+            foregroundColor: messageForeground,
             prefix: prefix,
             stripLink: stripLink
         )
@@ -137,7 +166,7 @@ struct MsgContentView: View {
             if mt.isLive {
                 s.append(typingIndicator(mt.recent))
             }
-            t = Text(AttributedString(s)) + reserveSpaceForMeta(mt)
+            t = separateMessageMetadata ? Text(AttributedString(s)) : Text(AttributedString(s)) + reserveSpaceForMeta(mt)
         } else {
             t = Text(AttributedString(s))
         }
@@ -160,6 +189,7 @@ struct MsgContentView: View {
 private struct XauXatCodeLockedTextView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.showTimestamp) private var showTimestamp
+    @Environment(\.separateMessageMetadata) private var separateMessageMetadata
     @EnvironmentObject private var theme: AppTheme
     @ObservedObject var chat: Chat
     @StateObject private var session: XauXatCodeLockedSession
@@ -247,7 +277,7 @@ private struct XauXatCodeLockedTextView: View {
 
     private func protectedLabel(_ label: LocalizedStringKey) -> some View {
         var value = Text(Image(systemName: "lock.fill")) + Text(" ") + Text(label)
-        if let meta {
+        if let meta, !separateMessageMetadata {
             value = value + (rightToLeft ? textNewLine : Text(verbatim: "   "))
                 + ciMetaText(
                     meta,
@@ -597,6 +627,7 @@ func messageText(
     showSecrets: Set<Int>?,
     commands: Bool = false,
     backgroundColor: UIColor,
+    foregroundColor: UIColor = .black,
     prefix: NSAttributedString? = nil,
     stripLink: String? = nil
 ) -> MsgTextResult {
@@ -607,7 +638,7 @@ func messageText(
     let font = UIFont.preferredFont(forTextStyle: textStyle)
     let plain: [NSAttributedString.Key: Any] = [
         .font: font,
-        .foregroundColor: UIColor.black
+        .foregroundColor: foregroundColor
     ]
     let secretColor = backgroundColor.withAlphaComponent(1)
     var link: [NSAttributedString.Key: Any]?
@@ -724,7 +755,7 @@ func messageText(
                             ref.displayName
                         }
                         if m.memberId == userMemberId {
-                            attrs[.foregroundColor] = UIColor.tintColor
+                            attrs[.foregroundColor] = uiLinkColor
                         }
                         t = mentionText(name)
                     } else {

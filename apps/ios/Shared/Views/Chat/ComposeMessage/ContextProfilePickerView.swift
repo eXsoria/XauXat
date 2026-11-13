@@ -289,7 +289,7 @@ struct ContextProfilePickerView: View {
             .resizable()
             .scaledToFit()
             .frame(width: 38)
-            .foregroundColor(.indigo)
+            .foregroundColor(.brown)
     }
 
     private func showCantChangeProfileAlert() {

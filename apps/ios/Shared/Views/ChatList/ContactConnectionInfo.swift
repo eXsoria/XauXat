@@ -176,7 +176,7 @@ struct ContactConnectionInfo: View {
             ZStack(alignment: .leading) {
                 Image(systemName: "theatermasks.fill")
                     .frame(maxWidth: 24, maxHeight: 24, alignment: .center)
-                    .foregroundColor(Color.indigo)
+                    .foregroundColor(Color.brown)
                     .font(.system(size: 14))
                 HStack(spacing: 6) {
                     Text("Incognito")

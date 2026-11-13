@@ -792,7 +792,7 @@ private func incognitoProfileImage() -> some View {
         .resizable()
         .scaledToFit()
         .frame(width: 30)
-        .foregroundColor(.indigo)
+        .foregroundColor(.brown)
 }
 
 private struct InviteView: View {
@@ -1610,7 +1610,7 @@ struct IncognitoToggle: View {
         ZStack(alignment: .leading) {
             Image(systemName: incognitoEnabled ? "theatermasks.fill" : "theatermasks")
                 .frame(maxWidth: 24, maxHeight: 24, alignment: .center)
-                .foregroundColor(incognitoEnabled ? Color.indigo : theme.colors.secondary)
+                .foregroundColor(incognitoEnabled ? Color.brown : theme.colors.secondary)
                 .font(.system(size: 14))
             Toggle(isOn: $incognitoEnabled) {
                 HStack(spacing: 6) {

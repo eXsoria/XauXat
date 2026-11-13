@@ -144,7 +144,7 @@ struct ChatListNavLink: View {
                                 } label: {
                                     SwipeLabel(NSLocalizedString("Accept incognito", comment: "swipe action"), systemImage: "theatermasks.fill", inverted: oneHandUI)
                                 }
-                                .tint(.indigo)
+                                .tint(.brown)
                             }
                             Button {
                                 AlertManager.shared.showAlert(rejectContactRequestAlert(contactRequestId))
@@ -326,7 +326,7 @@ struct ChatListNavLink: View {
         } label: {
             SwipeLabel(NSLocalizedString("Join", comment: "swipe action"), systemImage: chat.chatInfo.incognito ? "theatermasks" : "ipad.and.arrow.forward", inverted: oneHandUI)
         }
-        .tint(chat.chatInfo.incognito ? .indigo : theme.colors.primary)
+        .tint(chat.chatInfo.incognito ? .brown : theme.colors.primary)
     }
 
     // Spec: spec/client/chat-list.md#markReadButton
@@ -506,7 +506,7 @@ struct ChatListNavLink: View {
                 } label: {
                     SwipeLabel(NSLocalizedString("Accept incognito", comment: "swipe action"), systemImage: "theatermasks.fill", inverted: oneHandUI)
                 }
-                .tint(.indigo)
+                .tint(.brown)
             }
             Button {
                 AlertManager.shared.showAlert(rejectContactRequestAlert(contactRequest.apiId))

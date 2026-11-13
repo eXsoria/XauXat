@@ -181,7 +181,7 @@ struct ChatPreviewView: View {
                 theme.colors.secondary
             } else {
                 switch (groupInfo.membership.memberStatus) {
-                case .memInvited: chat.chatInfo.incognito ? .indigo : theme.colors.primary
+                case .memInvited: chat.chatInfo.incognito ? .brown : theme.colors.primary
                 case .memAccepted, .memRejected: theme.colors.secondary
                 default: groupInfo.nextConnectPrepared ? theme.colors.primary : nil
                 }

@@ -25,6 +25,11 @@ struct EmojiItemView: View {
                 .padding(.bottom, 8)
                 .padding(.horizontal, 12)
         }
+        .background {
+            if chatItem.xauXatIsSending || chatItem.xauXatWasSent {
+                chatItemFrameColor(chatItem, theme).modifier(ChatTailPadding())
+            }
+        }
     }
 }
 
