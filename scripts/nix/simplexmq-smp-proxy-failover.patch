@@ -24,7 +24,7 @@
 +        case L.nonEmpty $ L.filter (isUnusedServer usedHosts) servers of
 +          Nothing -> throwE e
 +          Just alternatives -> do
-+            next <- pickServer alternatives
++            (_, next) <- getNextServer_ alternatives (usedOperatorsHosts servers [destSrv])
 +            retrySrv <- atomically $ do
 +              current <- TM.lookup destSess smpProxiedRelays
 +              case current of
