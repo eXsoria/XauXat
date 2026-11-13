@@ -16,6 +16,24 @@ enum LAResult {
     case unavailable(authError: String?)
 }
 
+@MainActor
+func xauXatPrepareLocalStorageChange() async throws {
+    AppChatState.shared.set(.activating)
+    if !nseStateGroupDefault.get().inactive {
+        let suspended = await withCheckedContinuation { continuation in
+            waitNSESuspended(timeout: nseSuspendTimeout) { continuation.resume(returning: $0) }
+        }
+        guard suspended else { throw RuntimeError("Notification store is still in use") }
+    }
+    AppChatState.shared.set(.active)
+}
+
+func xauXatClearDuressSettings() {
+    UserDefaults.standard.set(false, forKey: DEFAULT_LA_SELF_DESTRUCT)
+    UserDefaults.standard.removeObject(forKey: DEFAULT_LA_SELF_DESTRUCT_DISPLAY_NAME)
+    UserDefaults.standard.removeObject(forKey: DEFAULT_LA_DURESS_SCOPE)
+}
+
 func xauXatRequiresUnlockBeforeInitialization() -> Bool {
     kcAppPassword.get() != nil &&
         (kcSelfDestructPassword.get() != nil || kcDecoyPassword.get() != nil)

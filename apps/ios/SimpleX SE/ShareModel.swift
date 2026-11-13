@@ -174,6 +174,11 @@ class ShareModel: ObservableObject {
 
     private func initChat(with dbKey: String? = nil) -> ErrorAlert? {
         do {
+            if xauXatStoragePromotionPending() { return migrationError(.errorKeychain) }
+            if hasChatCtrl() && !chatControllerMatchesCurrentStorage() {
+                chatCloseStore()
+                resetChatCtrl()
+            }
             if hasChatCtrl() && dbKey == nil {
                 try apiActivateChat()
             } else {
