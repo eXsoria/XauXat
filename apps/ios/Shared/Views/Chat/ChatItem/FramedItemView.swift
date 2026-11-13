@@ -14,6 +14,7 @@ import SimpleXChat
 struct FramedItemView: View {
     @EnvironmentObject var m: ChatModel
     @EnvironmentObject var theme: AppTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var chat: Chat
     @ObservedObject var im: ItemsModel
     var chatItem: ChatItem
@@ -30,6 +31,8 @@ struct FramedItemView: View {
     @State private var showFullscreenGallery: Bool = false
 
     var body: some View {
+        let separateMetadata = chatItem.chatDir.sent && !chatItem.localNote
+            && chatItem.content.msgContent != nil && !onlyImageOrVideo(chatItem)
         let v = ZStack(alignment: .bottomTrailing) {
             VStack(alignment: .leading, spacing: 0) {
                 if chatItem.isReport {
@@ -81,21 +84,23 @@ struct FramedItemView: View {
                 ChatItemContentView(chat: chat, im: im, chatItem: chatItem, msgContentView: framedMsgContentView)
                     .padding(chatItem.content.msgContent != nil ? 0 : 4)
                     .overlay(DetermineWidth())
+                if separateMetadata {
+                    metadataView()
+                        .frame(minWidth: msgWidth, alignment: .trailing)
+                }
             }
 
-            if let content = chatItem.content.msgContent {
-                CIMetaView(
-                    chat: chat,
-                    chatItem: chatItem,
-                    metaColor: theme.colors.secondary,
-                    invertedMaterial: useWhiteMetaColor
-                )
-                .padding(.horizontal, 12)
-                .padding(.bottom, 6)
-                .overlay(DetermineWidth())
+            if !separateMetadata, chatItem.content.msgContent != nil {
+                metadataView()
             }
         }
-            .background { chatItemFrameColorMaybeImageOrVideo(chatItem, theme).modifier(ChatTailPadding()) }
+            .environment(\.separateMessageMetadata, separateMetadata)
+            .environment(\.messageForeground, theme.colors.isLight ? .black : .white)
+            .background {
+                chatItemFrameColorMaybeImageOrVideo(chatItem, theme)
+                    .modifier(ChatTailPadding())
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: chatItem.xauXatWasSent)
+            }
             .onPreferenceChange(DetermineWidth.Key.self) { msgWidth = $0 }
 
         if let (title, text) = chatItem.meta.itemStatus.statusInfo ?? chatItem.meta.msgVerified?.sigMissingInfo {
@@ -110,6 +115,13 @@ struct FramedItemView: View {
         } else {
             v
         }
+    }
+
+    private func metadataView() -> some View {
+        CIMetaView(chat: chat, chatItem: chatItem, metaColor: theme.colors.secondary, invertedMaterial: useWhiteMetaColor)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 5)
+            .overlay(DetermineWidth())
     }
 
     @ViewBuilder private func framedMsgContentView() -> some View {
@@ -354,8 +366,9 @@ struct FramedItemView: View {
         )
         .environment(\.containerBackground, UIColor(chatItemFrameColor(ci, theme)))
         .multilineTextAlignment(rtl ? .trailing : .leading)
-        .padding(.vertical, 6)
-        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, ci.chatDir.sent ? 2 : 6)
+        .padding(.horizontal, 14)
         .overlay(DetermineWidth())
         .frame(minWidth: 0, alignment: .leading)
 
@@ -424,13 +437,24 @@ func chatItemFrameColorMaybeImageOrVideo(_ ci: ChatItem, _ theme: AppTheme) -> C
 }
 
 func chatItemFrameColor(_ ci: ChatItem, _ theme: AppTheme) -> Color {
-    ci.chatDir.sent
-        ? Color(red: 225 / 255, green: 215 / 255, blue: 198 / 255)
-        : Color.white
+    if !theme.colors.isLight {
+        guard ci.chatDir.sent else { return Color(red: 0.15, green: 0.15, blue: 0.15) }
+        return ci.xauXatWasSent
+            ? Color(red: 0.08, green: 0.29, blue: 0.22)
+            : Color(red: 0.25, green: 0.21, blue: 0.16)
+    }
+    guard ci.chatDir.sent else { return .white }
+    if ci.xauXatWasSent {
+        return Color(red: 217 / 255, green: 253 / 255, blue: 211 / 255)
+    }
+    return Color(red: 225 / 255, green: 215 / 255, blue: 198 / 255)
 }
 
 func chatItemFrameContextColor(_ ci: ChatItem, _ theme: AppTheme) -> Color {
-    ci.chatDir.sent
+    if !theme.colors.isLight {
+        return chatItemFrameColor(ci, theme).opacity(0.86)
+    }
+    return ci.chatDir.sent
         ? Color(red: 214 / 255, green: 202 / 255, blue: 181 / 255)
         : Color(red: 246 / 255, green: 244 / 255, blue: 240 / 255)
 }

@@ -62,7 +62,7 @@ struct ChannelMembersView: View {
     @ViewBuilder private func memberRow(_ gMember: GMember, user: Bool, showRole: Bool) -> some View {
         let member = gMember.wrapped
         let nameText = Text(member.chatViewName)
-            .foregroundColor(member.memberIncognito ? .indigo : theme.colors.onBackground)
+            .foregroundColor(member.memberIncognito ? .brown : theme.colors.onBackground)
         let displayName = member.verified
             ? (Text(Image(systemName: "checkmark.shield")) + textSpace)
                 .font(.caption).baselineOffset(2).kerning(-2)

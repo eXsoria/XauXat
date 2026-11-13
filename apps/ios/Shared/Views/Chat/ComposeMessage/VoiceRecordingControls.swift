@@ -2,12 +2,25 @@ import SwiftUI
 import UIKit
 import SimpleXChat
 
+func xauXatChampagne(_ scheme: ColorScheme) -> Color {
+    scheme == .dark
+        ? Color(red: 222 / 255, green: 206 / 255, blue: 175 / 255)
+        : Color(red: 146 / 255, green: 113 / 255, blue: 65 / 255)
+}
+
+let xauXatRecordingColor = Color(red: 208 / 255, green: 194 / 255, blue: 168 / 255)
+
+func xauXatWaveformColor(_ scheme: ColorScheme) -> Color {
+    scheme == .dark ? Color(white: 0.72) : Color(white: 0.30)
+}
+
 struct VoiceRecordingStatus: View {
     let interaction: VoiceRecordingInteraction
     let time: TimeInterval
     let levels: [CGFloat]
     let color: Color
     var deleteRecording: (() -> Void)? = nil
+    var listenOnce: Binding<Bool>? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
     @ScaledMetric(relativeTo: .callout) private var timeLabelSize: CGFloat = 16
@@ -24,7 +37,7 @@ struct VoiceRecordingStatus: View {
                 .accessibilityIdentifier("voice.cancel")
             } else {
               Circle()
-                .fill(Color.red)
+                .fill(xauXatRecordingColor)
                 .frame(width: 8, height: 8)
                 .opacity(pulse && !reduceMotion ? 0.35 : 1)
                 .accessibilityHidden(true)
@@ -51,7 +64,10 @@ struct VoiceRecordingStatus: View {
                 .offset(x: -interaction.cancelProgress * 16)
                 .frame(maxWidth: .infinity)
             } else {
-                VoiceRecordingWaveform(levels: levels, color: color)
+                VoiceRecordingWaveform(levels: levels)
+                if interaction.phase == .locked, let listenOnce {
+                    VoiceListenOnceButton(selection: listenOnce, color: color)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -63,9 +79,42 @@ struct VoiceRecordingStatus: View {
     }
 }
 
+struct VoiceListenOnceButton: View {
+    @Binding var selection: Bool
+    let color: Color
+    @AppStorage("xauxatVoiceOnceCompatibilityNotice") private var seenNotice = false
+    @State private var showNotice = false
+
+    var body: some View {
+        Button {
+            if !selection && !seenNotice {
+                showNotice = true
+            } else {
+                selection.toggle()
+            }
+        } label: {
+            Image(systemName: selection ? "1.circle.fill" : "1.circle")
+                .font(.title2)
+                .foregroundColor(selection ? color : .secondary)
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel("Listen once")
+        .accessibilityValue(selection ? "On" : "Off")
+        .alert("Listen once", isPresented: $showNotice) {
+            Button("Enable") {
+                seenNotice = true
+                selection = true
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Use with recipients on an updated XauXat iOS app. Older or other clients may play this voice message again.")
+        }
+    }
+}
+
 struct VoiceRecordingWaveform: View {
     let levels: [CGFloat]
-    let color: Color
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         GeometryReader { geometry in
@@ -75,7 +124,7 @@ struct VoiceRecordingWaveform: View {
                 ForEach(0..<count, id: \.self) { index in
                     let sample = index < count - samples.count ? CGFloat(0) : samples[index - (count - samples.count)]
                     Capsule()
-                        .fill(color.opacity(sample > 0 ? 1 : 0.25))
+                        .fill(xauXatWaveformColor(colorScheme).opacity(sample > 0 ? 1 : 0.25))
                         .frame(width: 3, height: 3 + min(1, max(0, sample)) * 21)
                 }
             }
@@ -99,15 +148,15 @@ struct VoiceRecordingButton: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(interaction.active ? color : Color.clear)
+                .fill(interaction.active ? xauXatRecordingColor : color)
             Image(systemName: interaction.phase == .locked ? "pause.fill" : "mic.fill")
                 .font(.system(size: 21, weight: .medium))
-                .foregroundColor(interaction.active ? .white : color)
+                .foregroundColor(interaction.active ? Color(white: 0.20) : Color(uiColor: .systemBackground))
                 .accessibilityHidden(true)
             VoiceRecordingTouchSurface(
                 enabled: !disabled && interaction.phase != .finishing,
                 label: interaction.phase == .locked ? NSLocalizedString("Pause recording", comment: "voice recording button") : NSLocalizedString("Record voice message", comment: "voice recording button"),
-                hint: interaction.active ? "" : NSLocalizedString("Hold to record. Release to stop. Slide left to cancel or up to lock. Double-tap to record hands-free.", comment: "voice recording accessibility hint"),
+                hint: interaction.active ? "" : NSLocalizedString("Hold to record. Release when done. Slide left to cancel or up to lock. Double-tap to record hands-free.", comment: "voice recording accessibility hint"),
                 touchDown: { interaction.phase == .locked ? pause() : begin(false) },
                 move: move,
                 release: release,

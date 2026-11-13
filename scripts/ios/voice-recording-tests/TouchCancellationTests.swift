@@ -18,7 +18,7 @@ import Darwin
         }
         func run(_ cancelled: Bool, down: TimeInterval = 2244.232948624,
                  up: TimeInterval = 2244.299615290, ready: TimeInterval? = 2246.498170570,
-                 locked: Bool = false, missing: Bool = false) -> String {
+                 locked: Bool = false, missing: Bool = false, checkSendIntent: Bool = false) -> String {
             let probe = Probe()
             probe.locked = locked
             let view = TouchView()
@@ -35,7 +35,7 @@ import Darwin
             } else {
                 view.touchesEnded(end, with: nil)
             }
-            return probe.outcome
+            return checkSendIntent ? String(probe.voiceSendOnFinish) : probe.outcome
         }
         expect(run(false) == "discard", "Observed 66.7ms ENDED discards late-ready audio")
         expect(run(true) == "discard", "The same physical interval with CANCELLED must also discard")
@@ -50,7 +50,11 @@ import Darwin
         expect(run(true, down: 10, up: 15, ready: 13.647) == "finish",
                "A confirmed held recording survives system interruption")
         expect(run(false, down: 10, up: 15, ready: 13.647) == "finish",
-               "A normal confirmed held recording still previews")
+               "A normal confirmed hold finalizes before the send flow")
+        expect(run(false, down: 10, up: 15, ready: 13.647, checkSendIntent: true) == "true",
+               "Only a deliberate release requests the send flow")
+        expect(run(true, down: 10, up: 15, ready: 13.647, checkSendIntent: true) == "false",
+               "An interrupted recording stays in the preview")
         expect(run(true, ready: nil) == "discard", "Cancellation during pending permission discards")
         expect(run(true, locked: true) == "finish", "Explicit hands-free intent keeps interruption behavior")
         expect(run(true, ready: nil, locked: true) == "discard",

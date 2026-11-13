@@ -1172,6 +1172,7 @@ enum ChatEvent: Decodable, ChatAPIResult {
     case rcvFileAccepted(user: UserRef, chatItem: AChatItem)
     case rcvFileAcceptedSndCancelled(user: UserRef, rcvFileTransfer: RcvFileTransfer)
     case rcvFileStart(user: UserRef, chatItem: AChatItem) // send by chats
+    case rcvFileDescrReady(user: UserRef, chatItem: AChatItem)
     case rcvFileProgressXFTP(user: UserRef, chatItem_: AChatItem?, receivedSize: Int64, totalSize: Int64, rcvFileTransfer: RcvFileTransfer)
     case rcvFileComplete(user: UserRef, chatItem: AChatItem)
     case rcvStandaloneFileComplete(user: UserRef, targetPath: String, rcvFileTransfer: RcvFileTransfer)
@@ -1249,6 +1250,7 @@ enum ChatEvent: Decodable, ChatAPIResult {
         case .rcvFileAccepted: "rcvFileAccepted"
         case .rcvFileAcceptedSndCancelled: "rcvFileAcceptedSndCancelled"
         case .rcvFileStart: "rcvFileStart"
+        case .rcvFileDescrReady: "rcvFileDescrReady"
         case .rcvFileProgressXFTP: "rcvFileProgressXFTP"
         case .rcvFileComplete: "rcvFileComplete"
         case .rcvStandaloneFileComplete: "rcvStandaloneFileComplete"
@@ -1331,6 +1333,7 @@ enum ChatEvent: Decodable, ChatAPIResult {
         case let .rcvFileAccepted(u, chatItem): return withUser(u, String(describing: chatItem))
         case .rcvFileAcceptedSndCancelled: return noDetails
         case let .rcvFileStart(u, chatItem): return withUser(u, String(describing: chatItem))
+        case .rcvFileDescrReady: return noDetails
         case let .rcvFileProgressXFTP(u, chatItem, receivedSize, totalSize, _): return withUser(u, "chatItem: \(String(describing: chatItem))\nreceivedSize: \(receivedSize)\ntotalSize: \(totalSize)")
         case let .rcvStandaloneFileComplete(u, targetPath, _): return withUser(u, targetPath)
         case let .rcvFileComplete(u, chatItem): return withUser(u, String(describing: chatItem))

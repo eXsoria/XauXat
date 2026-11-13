@@ -98,7 +98,7 @@ struct GroupChatInfoView: View {
                                 Text("Your random profile")
                                 Spacer()
                                 Text(groupInfo.membership.chatViewName)
-                                    .foregroundStyle(.indigo)
+                                    .foregroundStyle(.brown)
                             }
                         }
                     }
@@ -520,7 +520,7 @@ struct GroupChatInfoView: View {
                     .padding(.trailing, 2)
                 // TODO server connection status
                 VStack(alignment: .leading) {
-                    let t = Text(member.chatViewName).foregroundColor(member.memberIncognito ? .indigo : theme.colors.onBackground)
+                    let t = Text(member.chatViewName).foregroundColor(member.memberIncognito ? .brown : theme.colors.onBackground)
                     NameWithBadge((member.verified ? memberVerifiedShield + t : t), member.nameBadge)
                         .lineLimit(1)
                     (user ? Text ("you: ") + Text(member.memberStatus.shortText) : Text(memberConnStatus(member)))

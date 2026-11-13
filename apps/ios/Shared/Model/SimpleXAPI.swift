@@ -1001,7 +1001,14 @@ func apiSendMessages(type: ChatType, id: Int64, scope: GroupChatScope?, sendAsGr
         }
     }
     let cmd: ChatCommand = .apiSendMessages(type: type, id: id, scope: scope, sendAsGroup: sendAsGroup, live: live, ttl: ttl, sign: sign, composedMessages: composedMessages)
-    return await processSendMessageCmd(toChatType: type, cmd: cmd)
+    let hasAttachment = composedMessages.contains { $0.fileSource != nil }
+    let start = ProcessInfo.processInfo.systemUptime
+    let items = await processSendMessageCmd(toChatType: type, cmd: cmd)
+    if hasAttachment {
+        let elapsed = Int((ProcessInfo.processInfo.systemUptime - start) * 1000)
+        logger.info("Attachment send command completed in \(elapsed, privacy: .public) ms")
+    }
+    return items
 }
 
 private func processSendMessageCmd(toChatType: ChatType, cmd: ChatCommand) async -> [ChatItem]? {
@@ -2223,6 +2230,35 @@ func standaloneFileInfo(url: String, ctrl: chat_ctrl? = nil) async -> MigrationF
 }
 
 // Spec: spec/services/files.md#receiveFile
+private actor AutomaticAttachmentReceipts {
+    static let shared = AutomaticAttachmentReceipts()
+    private struct Key: Hashable {
+        let decoyStore: Bool
+        let userId: Int64
+        let fileId: Int64
+    }
+    private var attempts: [Key: TimeInterval] = [:]
+
+    func claim(decoyStore: Bool, userId: Int64, fileId: Int64) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        attempts = attempts.filter { now - $0.value < 15 }
+        let key = Key(decoyStore: decoyStore, userId: userId, fileId: fileId)
+        guard attempts[key] == nil else { return false }
+        attempts[key] = now
+        return true
+    }
+}
+
+func autoReceiveAttachments(user: any UserLike, fileIds: [Int64], decoyStore: Bool) async {
+    for fileId in fileIds {
+        guard !Task.isCancelled, (xauXatStorageScope() == .decoy) == decoyStore,
+              privacyAcceptImagesGroupDefault.get() else { return }
+        guard await AutomaticAttachmentReceipts.shared.claim(decoyStore: decoyStore, userId: user.userId, fileId: fileId),
+              (xauXatStorageScope() == .decoy) == decoyStore else { continue }
+        await receiveFile(user: user, fileId: fileId, auto: true)
+    }
+}
+
 func receiveFile(user: any UserLike, fileId: Int64, userApprovedRelays: Bool = false, auto: Bool = false) async {
     await receiveFiles(
         user: user,
@@ -2460,31 +2496,31 @@ func rejectContactRequest(_ contactRequestId: Int64, dismissToChatList: Bool = f
 }
 
 func apiSendCallInvitation(_ contact: Contact, _ callType: CallType) async throws {
-    try await sendCommandOkResp(.apiSendCallInvitation(contact: contact, callType: callType))
+    try await sendCallCommand(contact) { .apiSendCallInvitation(contact: $0, callType: callType) }
 }
 
 func apiRejectCall(_ contact: Contact) async throws {
-    try await sendCommandOkResp(.apiRejectCall(contact: contact))
+    try await sendCallCommand(contact) { .apiRejectCall(contact: $0) }
 }
 
 func apiSendCallOffer(_ contact: Contact, _ rtcSession: String, _ rtcIceCandidates: String, media: CallMediaType, capabilities: CallCapabilities) async throws {
     let webRtcSession = WebRTCSession(rtcSession: rtcSession, rtcIceCandidates: rtcIceCandidates)
     let callOffer = WebRTCCallOffer(callType: CallType(media: media, capabilities: capabilities), rtcSession: webRtcSession)
-    try await sendCommandOkResp(.apiSendCallOffer(contact: contact, callOffer: callOffer))
+    try await sendCallCommand(contact) { .apiSendCallOffer(contact: $0, callOffer: callOffer) }
 }
 
 func apiSendCallAnswer(_ contact: Contact, _ rtcSession: String, _ rtcIceCandidates: String) async throws {
     let answer = WebRTCSession(rtcSession: rtcSession, rtcIceCandidates: rtcIceCandidates)
-    try await sendCommandOkResp(.apiSendCallAnswer(contact: contact, answer: answer))
+    try await sendCallCommand(contact) { .apiSendCallAnswer(contact: $0, answer: answer) }
 }
 
 func apiSendCallExtraInfo(_ contact: Contact, _ rtcIceCandidates: String) async throws {
     let extraInfo = WebRTCExtraInfo(rtcIceCandidates: rtcIceCandidates)
-    try await sendCommandOkResp(.apiSendCallExtraInfo(contact: contact, extraInfo: extraInfo))
+    try await sendCallCommand(contact) { .apiSendCallExtraInfo(contact: $0, extraInfo: extraInfo) }
 }
 
 func apiEndCall(_ contact: Contact) async throws {
-    try await sendCommandOkResp(.apiEndCall(contact: contact))
+    try await sendCallCommand(contact) { .apiEndCall(contact: $0) }
 }
 
 func apiGetCallInvitationsSync() throws -> [RcvCallInvitation] {
@@ -2501,10 +2537,17 @@ func apiGetCallInvitations() async throws -> [RcvCallInvitation] {
 
 func apiCallStatus(_ contact: Contact, _ status: String) async throws {
     if let callStatus = WebRTCCallStatus.init(rawValue: status) {
-        try await sendCommandOkResp(.apiCallStatus(contact: contact, callStatus: callStatus))
+        try await sendCallCommand(contact) { .apiCallStatus(contact: $0, callStatus: callStatus) }
     } else {
         logger.debug("apiCallStatus: call status \(status) not used")
     }
+}
+
+private func sendCallCommand(_ contact: Contact, _ command: @escaping (Contact) -> ChatCommand) async throws {
+    #if DEBUG
+    if try await XauXatDirectCallTest.shared.sendIfSelected(contact, command) { return }
+    #endif
+    try await sendCommandOkResp(command(contact))
 }
 
 func markChatRead(_ im: ItemsModel, _ chat: Chat) async {
@@ -3027,6 +3070,9 @@ func startChat(refreshInvitations: Bool = true, onboarding: Bool = false) throws
     }
     ChatReceiver.shared.start()
     m.chatRunning = true
+    #if DEBUG
+    XauXatCallTiming.exportTransportSnapshot()
+    #endif
     reconcileXauXatNotificationRegistration(token: m.deviceToken)
     chatLastStartGroupDefault.set(Date.now)
 }
@@ -3314,8 +3360,14 @@ func processReceivedMsg(_ res: ChatEvent) async {
                 }
             }
             if let file = cItem.autoReceiveFile() {
+                #if DEBUG
+                if file.fileProtocol == .xftp {
+                    logger.notice("XFTP invitation received file=\(file.fileId, privacy: .private(mask: .hash))")
+                }
+                #endif
+                let decoyStore = xauXatStorageScope() == .decoy
                 Task {
-                    await receiveFile(user: user, fileId: file.fileId, auto: true)
+                    await autoReceiveAttachments(user: user, fileIds: [file.fileId], decoyStore: decoyStore)
                 }
             }
             if cItem.showNotification {
@@ -3539,12 +3591,27 @@ func processReceivedMsg(_ res: ChatEvent) async {
 //        Task { cleanupFile(aChatItem) }
     case let .rcvFileStart(user, aChatItem):
         await chatItemSimpleUpdate(user, aChatItem)
+    case let .rcvFileDescrReady(_, aChatItem):
+        #if DEBUG
+        if let file = aChatItem.chatItem.file {
+            logger.notice("XFTP description received file=\(file.fileId, privacy: .private(mask: .hash))")
+        }
+        #endif
     case let .rcvFileComplete(user, aChatItem):
+        logger.info("Attachment receive completed")
+        #if DEBUG
+        if let file = aChatItem.chatItem.file, file.fileProtocol == .xftp {
+            logger.notice("XFTP playable file=\(file.fileId, privacy: .private(mask: .hash))")
+        }
+        #endif
         await chatItemSimpleUpdate(user, aChatItem)
     case let .rcvFileSndCancelled(user, aChatItem, _):
         await chatItemSimpleUpdate(user, aChatItem)
         Task { cleanupFile(aChatItem) }
-    case let .rcvFileProgressXFTP(user, aChatItem, _, _, _):
+    case let .rcvFileProgressXFTP(user, aChatItem, receivedSize, totalSize, transfer):
+        #if DEBUG
+        logger.notice("XFTP progress file=\(transfer.fileId, privacy: .private(mask: .hash)) bytes=\(receivedSize, privacy: .public)/\(totalSize, privacy: .public)")
+        #endif
         if let aChatItem = aChatItem {
             await chatItemSimpleUpdate(user, aChatItem)
         }
@@ -3572,6 +3639,7 @@ func processReceivedMsg(_ res: ChatEvent) async {
             await chatItemSimpleUpdate(user, aChatItem)
         }
     case let .sndFileCompleteXFTP(user, aChatItem, _):
+        logger.info("Attachment upload completed")
         await chatItemSimpleUpdate(user, aChatItem)
     case let .sndFileError(user, aChatItem, _, _):
         if let aChatItem = aChatItem {
@@ -3583,15 +3651,17 @@ func processReceivedMsg(_ res: ChatEvent) async {
             await chatItemSimpleUpdate(user, aChatItem)
         }
     case let .callInvitation(invitation):
+        XauXatCallTiming.mark("invitation.received")
         guard xauXatContactInvitePermissions(invitation.contact).calls else {
             logger.info("Ignoring call disallowed by XauXat contact invite policy")
             break
         }
         await MainActor.run {
             m.callInvitations[invitation.contact.id] = invitation
+            activateCall(invitation)
         }
-        activateCall(invitation)
     case let .callOffer(_, contact, callType, offer, sharedKey, _):
+        XauXatCallTiming.mark("offer.received")
         await withCall(contact) { call in
             await MainActor.run {
                 call.callState = .offerReceived
@@ -3610,6 +3680,7 @@ func processReceivedMsg(_ res: ChatEvent) async {
             ))
         }
     case let .callAnswer(_, contact, answer):
+        XauXatCallTiming.mark("answer.received")
         await withCall(contact) { call in
             await MainActor.run {
                 call.callState = .answerReceived
@@ -3621,12 +3692,17 @@ func processReceivedMsg(_ res: ChatEvent) async {
             await m.callCommand.processCommand(.ice(iceCandidates: extraInfo.rtcIceCandidates))
         }
     case let .callEnded(_, contact):
-        if let invitation = await MainActor.run(body: { m.callInvitations.removeValue(forKey: contact.id) }) {
-            CallController.shared.reportCallRemoteEnded(invitation: invitation)
-        }
-        await withCall(contact) { call in
-            await m.callCommand.processCommand(.end)
-            CallController.shared.reportCallRemoteEnded(call: call)
+        XauXatCallTiming.mark("end.received")
+        await MainActor.run {
+            let controller = CallController.shared
+            if let invitation = m.callInvitations.removeValue(forKey: contact.id) {
+                controller.reportCallRemoteEnded(invitation: invitation)
+            } else if controller.activeCallInvitation?.contact.id == contact.id {
+                controller.activeCallInvitation = nil
+            }
+            if let call = m.activeCall, call.contact.apiId == contact.apiId, CallManager.clearActiveCall(call) {
+                controller.reportCallRemoteEnded(call: call)
+            }
         }
     case .chatSuspended:
         chatSuspended()
@@ -3929,8 +4005,11 @@ func refreshCallInvitations() async throws {
     let callInvitations = try await apiGetCallInvitations()
     await MainActor.run {
         m.callInvitations = callsByChat(callInvitations)
+        #if DEBUG
+        XauXatDirectCallTest.shared.restoreIncomingInvitation()
+        #endif
         if let (chatId, ntfAction) = m.ntfCallInvitationAction,
-           let invitation = m.callInvitations.removeValue(forKey: chatId) {
+           let invitation = m.callInvitations[chatId] {
             m.ntfCallInvitationAction = nil
             CallController.shared.callAction(invitation: invitation, action: ntfAction)
         } else if let invitation = callInvitations.last(where: { $0.user.showNotifications }) {
@@ -3943,6 +4022,9 @@ func justRefreshCallInvitations() async throws {
     let callInvitations = try apiGetCallInvitationsSync()
     await MainActor.run {
         ChatModel.shared.callInvitations = callsByChat(callInvitations)
+        #if DEBUG
+        XauXatDirectCallTest.shared.restoreIncomingInvitation()
+        #endif
     }
 }
 
@@ -3952,6 +4034,7 @@ private func callsByChat(_ callInvitations: [RcvCallInvitation]) -> [ChatId: Rcv
     }
 }
 
+@MainActor
 func activateCall(_ callInvitation: RcvCallInvitation) {
     let m = ChatModel.shared
     logger.debug("reportNewIncomingCall activeCallUUID \(String(describing: m.activeCall?.callUUID)) invitationUUID \(String(describing: callInvitation.callUUID))")

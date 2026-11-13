@@ -97,7 +97,7 @@ struct ContactListNavLink: View {
                     } label: {
                         Label("Accept incognito", systemImage: "theatermasks")
                     }
-                    .tint(.indigo)
+                    .tint(.brown)
                 }
                 Button {
                     alert = SomeAlert(alert: rejectContactRequestAlert(contactRequestId), id: "rejectContactRequestAlert")
@@ -295,7 +295,7 @@ struct ContactListNavLink: View {
                 } label: {
                     Label("Accept incognito", systemImage: "theatermasks")
                 }
-                .tint(.indigo)
+                .tint(.brown)
             }
             Button {
                 alert = SomeAlert(alert: rejectContactRequestAlert(contactRequest.apiId), id: "rejectContactRequestAlert")

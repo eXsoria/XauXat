@@ -67,6 +67,7 @@ source += textwrap.indent(touch_handlers, "    ") + "\n}\n"
 source += """
 final class Probe {
     var voiceInteraction = VoiceRecordingInteraction()
+    var voiceSendOnFinish = false
     var outcome = "none"
     var locked = false
     func begin() { _ = voiceInteraction.begin(locked: locked) }
