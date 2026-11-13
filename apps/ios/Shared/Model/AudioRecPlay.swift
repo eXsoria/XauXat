@@ -263,8 +263,16 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
     }
 
     private enum RecordingError: LocalizedError {
-        case unavailable
-        var errorDescription: String? { NSLocalizedString("Unable to prepare the voice recording. Please try again.", comment: "voice recording export error") }
+        case unavailable, incompleteCapture
+
+        var errorDescription: String? {
+            switch self {
+            case .unavailable:
+                NSLocalizedString("Unable to prepare the voice recording. Please try again.", comment: "voice recording export error")
+            case .incompleteCapture:
+                NSLocalizedString("The microphone did not capture the full recording. Check your audio input and record again.", comment: "voice capture error")
+            }
+        }
     }
 
     func start(fileName: String, shouldStart: () -> Bool = { true }) async -> StartError? {
@@ -320,6 +328,10 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
             do {
                 try await joinSegments(fileName: fileName, request: request)
                 guard operation == request, !cancelled else { throw CancellationError() }
+                guard duration < VoiceRecordingInteraction.minimumRecordingDuration ||
+                      AudioPlayer.hasPlayableVoiceMessage(at: getAppFilePath(fileName), declaredDuration: duration.rounded()) else {
+                    throw RecordingError.incompleteCapture
+                }
                 if Self.pendingRecorders[fileName] === self { Self.pendingRecorders[fileName] = nil }
             } catch {
                 let detail = error as NSError
@@ -392,6 +404,9 @@ class AudioRecorder: NSObject, AVAudioRecorderDelegate {
                     }
                 }
                 guard operation == request, !cancelled else { throw CancellationError() }
+                guard AudioPlayer.hasPlayableVoiceMessage(at: output, declaredDuration: position.seconds.rounded()) else {
+                    throw RecordingError.unavailable
+                }
                 // Commit through an atomic write, retaining the existing playable
                 // draft if replacing it fails (for example, when storage is full).
                 try Data(contentsOf: output).write(to: canonical, options: .atomic)
