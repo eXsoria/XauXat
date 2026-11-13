@@ -45,9 +45,10 @@ struct ChatItemInfoView: View {
             itemInfoView()
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button { showShareSheet(items: [itemInfoShareText()]) } label: {
-                            Image(systemName: "square.and.arrow.up")
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark")
                         }
+                        .accessibilityLabel("Close")
                     }
                 }
                 .alert(item: $alert) { a in
@@ -217,7 +218,10 @@ struct ChatItemInfoView: View {
                 }
             }
             if ci.file != nil, let servers = chatItemInfo?.fileXftpServers, !servers.isEmpty {
-                infoRow("File servers", servers.map(serverHostname).joined(separator: "\n"))
+                infoRow("File relays (XFTP)", servers.map(serverHostname).joined(separator: "\n"))
+                Text("The file is encrypted on your device. The relay temporarily stores encrypted data so the recipient can download it.")
+                    .font(.footnote)
+                    .foregroundColor(theme.colors.secondary)
             }
         }
     }
@@ -509,89 +513,6 @@ struct ChatItemInfoView: View {
         }
     }
 
-    private func itemInfoShareText() -> String {
-        let meta = ci.meta
-        var shareText: [String] = [String.localizedStringWithFormat(NSLocalizedString("# %@", comment: "copied message info title, # <title>"), title), ""]
-        shareText += [String.localizedStringWithFormat(
-            ci.localNote
-                ? NSLocalizedString("Created at: %@", comment: "copied message info")
-                : NSLocalizedString("Sent at: %@", comment: "copied message info"),
-            localTimestamp(meta.itemTs))
-        ]
-        if !ci.chatDir.sent {
-            shareText += [String.localizedStringWithFormat(NSLocalizedString("Received at: %@", comment: "copied message info"), localTimestamp(meta.createdAt))]
-        }
-        switch (ci.meta.itemDeleted) {
-        case let .deleted(deletedTs):
-            if let deletedTs = deletedTs {
-                shareText += [String.localizedStringWithFormat(NSLocalizedString("Deleted at: %@", comment: "copied message info"), localTimestamp(deletedTs))]
-            }
-        case let .moderated(deletedTs, _):
-            if let deletedTs = deletedTs {
-                shareText += [String.localizedStringWithFormat(NSLocalizedString("Moderated at: %@", comment: "copied message info"), localTimestamp(deletedTs))]
-            }
-        default: ()
-        }
-        if let deleteAt = meta.itemTimed?.deleteAt {
-            shareText += [String.localizedStringWithFormat(NSLocalizedString("Disappears at: %@", comment: "copied message info"), localTimestamp(deleteAt))]
-        }
-        if meta.msgVerified?.verified == true {
-            shareText += [ci.chatDir.sent
-                ? NSLocalizedString("Signed", comment: "copied message info")
-                : NSLocalizedString("Signed & verified", comment: "copied message info")]
-        } else if meta.msgVerified == .sigMissing {
-            shareText += [NSLocalizedString("Signature missing", comment: "copied message info")]
-        }
-        if developerTools {
-            shareText += [
-                String.localizedStringWithFormat(NSLocalizedString("Database ID: %d", comment: "copied message info"), meta.itemId),
-                String.localizedStringWithFormat(NSLocalizedString("Record updated at: %@", comment: "copied message info"), localTimestamp(meta.updatedAt)),
-                String.localizedStringWithFormat(NSLocalizedString("Message status: %@", comment: "copied message info"), meta.itemStatus.id)
-            ]
-            if let file = ci.file {
-                shareText += [String.localizedStringWithFormat(NSLocalizedString("File status: %@", comment: "copied message info"), file.fileStatus.id)]
-            }
-        }
-        if ci.file != nil, let servers = chatItemInfo?.fileXftpServers, !servers.isEmpty {
-            shareText += [String.localizedStringWithFormat(NSLocalizedString("File servers: %@", comment: "copied message info"), servers.map(serverHostname).joined(separator: ", "))]
-        }
-        if let qi = ci.quotedItem {
-            shareText += ["", NSLocalizedString("## In reply to", comment: "copied message info")]
-            let t = qi.text
-            shareText += [""]
-            if let sender = qi.getSender(nil) {
-                shareText += [String.localizedStringWithFormat(
-                    NSLocalizedString("%@ at %@:", comment: "copied message info, <sender> at <time>"),
-                    sender,
-                    localTimestamp(qi.sentAt)
-                )]
-            } else {
-                shareText += [String.localizedStringWithFormat(
-                    NSLocalizedString("%@:", comment: "copied message info"),
-                    localTimestamp(qi.sentAt)
-                )]
-            }
-            shareText += [t != "" ? t : NSLocalizedString("no text", comment: "copied message info in history")]
-        }
-        if let chatItemInfo = chatItemInfo,
-           !chatItemInfo.itemVersions.isEmpty {
-            shareText += ["", NSLocalizedString("## History", comment: "copied message info")]
-            for (index, itemVersion) in chatItemInfo.itemVersions.enumerated() {
-                let t = itemVersion.msgContent.text
-                shareText += [
-                    "",
-                    String.localizedStringWithFormat(
-                        index == 0 && ci.meta.itemDeleted == nil
-                        ? NSLocalizedString("%@ (current):", comment: "copied message info")
-                        : NSLocalizedString("%@:", comment: "copied message info"),
-                        localTimestamp(itemVersion.itemVersionTs)
-                    ),
-                    t != "" ? t : NSLocalizedString("no text", comment: "copied message info in history")
-                ]
-            }
-        }
-        return shareText.joined(separator: "\n")
-    }
 }
 
 func localTimestamp(_ date: Date) -> String {
