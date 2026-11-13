@@ -24,6 +24,7 @@ func voiceMessageTime_(_ time: TimeInterval?) -> String {
 }
 
 struct ComposeVoiceView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var chatModel: ChatModel
     @EnvironmentObject var theme: AppTheme
     @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
@@ -33,6 +34,8 @@ struct ComposeVoiceView: View {
     @Binding var maskingState: VoiceMaskingState
     var recordingLevels: [CGFloat] = []
     var resumeRecording: (() -> Void)? = nil
+    var listenOnce: Binding<Bool>? = nil
+    var sendPausedRecording: (() -> Void)? = nil
     let applyVoiceMask: (XauXatVoiceMaskPreset, Bool) -> Void
     let cancelVoiceMessage: ((String) -> Void)
     let cancelEnabled: Bool
@@ -50,12 +53,21 @@ struct ComposeVoiceView: View {
                 recordingMode()
                     .frame(height: 55)
             } else {
+                if resumeRecording != nil {
+                    Text("Paused")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(theme.colors.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 4)
+                }
                 playbackMode()
-                maskingMode()
+                if resumeRecording == nil { maskingMode() }
             }
         }
         .padding(.vertical, 6)
-        .background(theme.appColors.sentMessage)
+        .background(xauXatChampagne(colorScheme).opacity(0.10))
+        .tint(xauXatChampagne(colorScheme))
         .frame(minHeight: 54)
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $showMaskPicker) {
@@ -69,7 +81,7 @@ struct ComposeVoiceView: View {
 
     @ViewBuilder private func maskingMode() -> some View {
         switch maskingState {
-        case .unavailable:
+        case .unavailable, .ambienceApplied:
             EmptyView()
         case .available:
             Button { showMaskPicker = true } label: {
@@ -86,7 +98,7 @@ struct ComposeVoiceView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundColor(theme.colors.primary)
+            .foregroundColor(xauXatChampagne(colorScheme))
             .accessibilityHint("Opens local voice transformations and previews.")
         case .processing:
             HStack(spacing: 8) {
@@ -107,7 +119,7 @@ struct ComposeVoiceView: View {
                 Text(preset.name)
                     .foregroundColor(theme.colors.secondary)
             }
-            .foregroundColor(theme.colors.primary)
+            .foregroundColor(xauXatChampagne(colorScheme))
             .padding(.horizontal, 12)
             .frame(minHeight: 38)
             .accessibilityElement(children: .combine)
@@ -115,9 +127,9 @@ struct ComposeVoiceView: View {
     }
 
     private var preferredPreset: XauXatVoiceMaskPreset {
-        guard plusEntitlements.isAuthorized(for: .advancedVoiceMasking),
-              let rawValue = UserDefaults.standard.string(forKey: XauXatVoiceMaskPreset.defaultPreferenceKey),
-              let preset = XauXatVoiceMaskPreset(rawValue: rawValue) else {
+        guard let rawValue = UserDefaults.standard.string(forKey: XauXatVoiceMaskPreset.defaultPreferenceKey),
+              let preset = XauXatVoiceMaskPreset(rawValue: rawValue),
+              !preset.requiresPlus || plusEntitlements.isAuthorized(for: .advancedVoiceMasking) else {
             return .veil
         }
         return preset
@@ -148,7 +160,7 @@ struct ComposeVoiceView: View {
                     Button {
                         startPlayback()
                     } label: {
-                        playPauseIcon("play.fill", theme.colors.primary)
+                        playPauseIcon("play.fill", xauXatChampagne(colorScheme))
                     }
                     .accessibilityLabel("Play recording")
                     .accessibilityIdentifier("voice.play")
@@ -158,7 +170,7 @@ struct ComposeVoiceView: View {
                         audioPlayer?.pause()
                         playbackState = .paused
                     } label: {
-                        playPauseIcon("pause.fill", theme.colors.primary)
+                        playPauseIcon("pause.fill", xauXatChampagne(colorScheme))
                     }
                     .accessibilityLabel("Pause playback")
                     .accessibilityIdentifier("voice.play")
@@ -168,30 +180,19 @@ struct ComposeVoiceView: View {
                         audioPlayer?.play()
                         playbackState = .playing
                     } label: {
-                        playPauseIcon("play.fill", theme.colors.primary)
+                        playPauseIcon("play.fill", xauXatChampagne(colorScheme))
                     }
                     .accessibilityLabel("Play recording")
                     .accessibilityIdentifier("voice.play")
                     timeLabel(playbackTime)
                 }
-                VoiceRecordingWaveform(levels: recordingLevels, color: theme.colors.primary)
-                if let resumeRecording {
-                    Button {
-                        audioPlayer?.stop()
-                        playbackState = .noPlayback
-                        playbackTime = nil
-                        resumeRecording()
-                    } label: {
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 21))
-                            .foregroundColor(.red)
-                            .frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel("Resume recording")
-                    .accessibilityIdentifier("voice.resume")
+                VoiceRecordingWaveform(levels: recordingLevels)
+                if let listenOnce, maskingState != .processing {
+                    VoiceListenOnceButton(selection: listenOnce, color: xauXatChampagne(colorScheme))
                 }
-                if cancelEnabled {
-                    cancelButton()
+                if sendPausedRecording == nil {
+                    if let resumeRecording { resumeButton(resumeRecording) }
+                    if cancelEnabled { cancelButton() }
                 }
             }
             .padding(.trailing, 8)
@@ -202,6 +203,22 @@ struct ComposeVoiceView: View {
                     .padding(.horizontal, 12)
                     .frame(height: 24)
                     .accessibilityLabel("Recording position")
+            }
+            if let resumeRecording, let sendPausedRecording {
+                HStack(spacing: 8) {
+                    if cancelEnabled { cancelButton() }
+                    Spacer(minLength: 0)
+                    resumeButton(resumeRecording)
+                    Spacer(minLength: 0)
+                    Button(action: sendPausedRecording) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 33))
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Send recording")
+                    .accessibilityIdentifier("voice.send")
+                }
+                .padding(.horizontal, 8)
             }
         }
         .onChange(of: stopPlayback) { _ in
@@ -236,6 +253,22 @@ struct ComposeVoiceView: View {
             .fixedSize()
     }
 
+    private func resumeButton(_ resumeRecording: @escaping () -> Void) -> some View {
+        Button {
+            audioPlayer?.stop()
+            playbackState = .noPlayback
+            playbackTime = nil
+            resumeRecording()
+        } label: {
+            Label("Resume", systemImage: "mic.fill")
+                .font(.callout.weight(.semibold))
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+        }
+        .accessibilityLabel("Resume recording")
+        .accessibilityIdentifier("voice.resume")
+    }
+
     private func cancelButton() -> some View {
         Button {
             audioPlayer?.stop()
@@ -245,13 +278,13 @@ struct ComposeVoiceView: View {
                 .font(.system(size: 20))
                 .frame(width: 44, height: 44)
         }
-        .tint(theme.colors.primary)
+        .tint(xauXatChampagne(colorScheme))
         .accessibilityLabel("Delete recording")
         .accessibilityIdentifier("voice.delete")
     }
 
     struct SliderBar: View {
-        @EnvironmentObject var theme: AppTheme
+        @Environment(\.colorScheme) private var colorScheme
         var length: TimeInterval
         @Binding var progress: TimeInterval?
         var seek: (TimeInterval) -> Void
@@ -260,12 +293,12 @@ struct ComposeVoiceView: View {
             Slider(value: Binding(get: { progress ?? TimeInterval(0) }, set: { seek($0) }), in: 0 ... length)
                 .frame(maxWidth: .infinity)
                 .frame(height: 4)
-                .tint(theme.colors.primary)
+                .tint(xauXatChampagne(colorScheme))
         }
     }
 
     private struct ProgressBar: View {
-        @EnvironmentObject var theme: AppTheme
+        @Environment(\.colorScheme) private var colorScheme
         var length: TimeInterval
         @Binding var progress: TimeInterval?
 
@@ -273,7 +306,7 @@ struct ComposeVoiceView: View {
             GeometryReader { geometry in
                 ZStack {
                     Rectangle()
-                        .fill(theme.colors.primary)
+                        .fill(xauXatChampagne(colorScheme))
                         .frame(width: min(CGFloat((progress ?? TimeInterval(0)) / length) * geometry.size.width, geometry.size.width), height: 4)
                         .animation(.linear, value: progress)
                 }
@@ -297,6 +330,7 @@ struct ComposeVoiceView: View {
 }
 
 private struct XauXatVoiceMaskPickerView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var plusEntitlements: XauXatPlusEntitlements
     let recordingURL: URL
@@ -358,6 +392,7 @@ private struct XauXatVoiceMaskPickerView: View {
                 }
             }
         }
+        .tint(xauXatChampagne(colorScheme))
         .sheet(isPresented: $showPlus) {
             NavigationView {
                 XauXatPlusView()
@@ -420,7 +455,7 @@ private struct XauXatVoiceMaskPickerView: View {
             } else {
                 Button { preview(preset) } label: {
                     Image(systemName: previewing == preset ? "stop.fill" : "play.fill")
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(xauXatChampagne(colorScheme))
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
@@ -428,7 +463,7 @@ private struct XauXatVoiceMaskPickerView: View {
             }
 
             Image(systemName: selected == preset ? "checkmark.circle.fill" : "circle")
-                .foregroundColor(selected == preset ? .accentColor : .secondary)
+                .foregroundColor(selected == preset ? xauXatChampagne(colorScheme) : .secondary)
                 .accessibilityHidden(true)
         }
         .padding(.vertical, 3)

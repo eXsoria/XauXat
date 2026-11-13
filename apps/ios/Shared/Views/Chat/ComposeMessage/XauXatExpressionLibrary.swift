@@ -144,9 +144,23 @@ final class XauXatExpressionLibrary: ObservableObject {
             }
         }.value
         try Task.checkCancellation()
+        try saveImport(normalized.0, kind: kind, title: String(url.deletingPathExtension().lastPathComponent.prefix(80)), duration: normalized.1)
+    }
+
+    func importSticker(_ data: Data) async throws {
+        guard items.count < Self.maxItems else { throw XauXatExpressionError.libraryFull }
+        guard !data.isEmpty, data.count <= Self.maxInputBytes else { throw XauXatExpressionError.tooLarge }
+        let normalized = try await Task.detached(priority: .userInitiated) {
+            try Self.normalizeSticker(data)
+        }.value
+        try Task.checkCancellation()
+        try saveImport(normalized, kind: .sticker, title: NSLocalizedString("Sticker", comment: "sticker imported from Photos"), duration: 0)
+    }
+
+    private func saveImport(_ data: Data, kind: XauXatExpressionKind, title: String, duration: Int) throws {
         // Another import may have completed while this task decoded the file.
         guard items.count < Self.maxItems else { throw XauXatExpressionError.libraryFull }
-        try append(normalized.0, kind: kind, title: String(url.deletingPathExtension().lastPathComponent.prefix(80)), duration: normalized.1)
+        try append(data, kind: kind, title: title, duration: duration)
         do { try persist(items) } catch {
             if let item = items.last { try? FileManager.default.removeItem(at: assetURL(item)); items.removeLast() }
             throw error

@@ -19,17 +19,20 @@ struct ChatItemClipped: ViewModifier {
     private let chatItem: (content: CIContent, chatDir: CIDirection)?
     private let tailVisible: Bool
     private let sticker: Bool
+    private let showDeliveryPulse: Bool
 
     init() {
         self.chatItem = nil
         self.tailVisible = false
         self.sticker = false
+        self.showDeliveryPulse = false
     }
 
-    init(_ ci: ChatItem, tailVisible: Bool) {
+    init(_ ci: ChatItem, tailVisible: Bool, animateDelivery: Bool = false) {
         self.chatItem = (ci.content, ci.chatDir)
         self.tailVisible = tailVisible
         self.sticker = xauXatIsSticker(ci) && ci.meta.itemDeleted == nil && ci.quotedItem == nil && ci.meta.itemForwarded == nil
+        self.showDeliveryPulse = animateDelivery && ci.xauXatIsSending && !onlyImageOrVideo(ci)
     }
     
     private func shapeStyle() -> ChatItemShape.Style {
@@ -74,7 +77,31 @@ struct ChatItemClipped: ViewModifier {
                 .contentShape(.dragPreview, clipShape)
                 .contentShape(.contextMenuPreview, clipShape)
                 .clipShape(clipShape)
+                .background {
+                    if showDeliveryPulse {
+                        ChatDeliveryPulse(shape: clipShape)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
         }
+    }
+}
+
+private struct ChatDeliveryPulse: View {
+    let shape: ChatItemShape
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var expanded = false
+
+    var body: some View {
+        let animate = !reduceMotion && scenePhase == .active
+        shape
+            .stroke(Color(red: 159 / 255, green: 123 / 255, blue: 66 / 255), lineWidth: 1.5)
+            .padding(animate && expanded ? -8 : -2)
+            .opacity(animate ? (expanded ? 0.04 : 0.5) : 0.36)
+            .animation(animate ? .easeOut(duration: 1.65).repeatForever(autoreverses: false) : nil, value: expanded)
+            .task(id: animate) { expanded = animate }
     }
 }
 

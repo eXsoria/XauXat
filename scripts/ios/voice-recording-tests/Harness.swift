@@ -18,14 +18,16 @@ enum AppDelegate {
     static func keepScreenOn(_ value: Bool) { UIApplication.shared.isIdleTimerDisabled = value }
 }
 enum VoiceMessageRecordingState { case noRecording, recording, finished }
-enum VoiceMaskingState: Equatable { case unavailable, available, processing, applied(XauXatVoiceMaskPreset) }
+enum VoiceMaskingState: Equatable { case unavailable, available, processing, applied(XauXatVoiceMaskPreset), ambienceApplied }
 enum XauXatVoiceMaskPreset: String { case veil; var name: String { "Veil" }; static let defaultPreferenceKey = "voice-mask" }
 enum Feature { case voice, advancedVoiceMasking }
 class XauXatPlusEntitlements: ObservableObject {
     static let shared = XauXatPlusEntitlements()
     func isAuthorized(for feature: Feature) -> Bool { false }
 }
+func hideKeyboard() { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
 class ChatModel: ObservableObject {
+    var chatId: String? = "chat"
     @Published var stopPreviousRecPlay: URL?
     var draft: ComposeState?
     var draftChatId: String?
@@ -46,6 +48,8 @@ struct ComposeState {
     var preview = ComposePreview.noPreview
     var voiceMessageRecordingState = VoiceMessageRecordingState.noRecording
     var voiceMaskingState = VoiceMaskingState.unavailable
+    var voiceListenOnce = false
+    var voicePreview: Bool { voiceMessageRecordingFileName != nil }
     var inProgress = false
     var message = ""
     var editing = false
@@ -99,6 +103,8 @@ struct HarnessView: View {
     @State var composeState = ComposeState()
     @State var expressionLibrary: XauXatExpressionLibrary?
     @State var showExpressions = false
+    @State var expressionKind = XauXatExpressionKind.sticker
+    @State var voiceSendOnFinish = false
     @State var expressionSending = false
     @State var voiceInteraction = VoiceRecordingInteraction()
     @State var audioRecorder: AudioRecorder?
@@ -115,6 +121,25 @@ struct HarnessView: View {
     @State var keyboardVisible = false
     @State var keyboardHiddenDate = Date()
     @Environment(\.scenePhase) var scenePhase
+
+    func sendMessage(ttl: Int?) {
+        // Emulate the privacy prompt boundary. Release prepares a draft and
+        // these tests send through the explicit composer action.
+    }
+
+    private func sendRecording(ttl: Int?) {
+        audioRecorder?.stop()
+        audioRecorder = nil
+        if let name = composeState.voiceMessageRecordingFileName {
+            validDuration = (try? AVAudioPlayer(contentsOf: getAppFilePath(name)))?.duration ?? 0
+        }
+        sent += 1
+        discardVoiceMessageRecording()
+    }
+
+    private var recordingPaused: Bool {
+        composeState.voiceMessageRecordingState == .finished && audioRecorder?.canResume == true
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -138,45 +163,39 @@ struct HarnessView: View {
             .accessibilityIdentifier("voice.expressions")
             .disabled(voiceInteraction.active || !composeState.noPreview)
             if showExpressions, let library = expressionLibrary {
-                XauXatExpressionsView(library: library, allowStickers: true, allowSounds: true,
+                XauXatExpressionsView(library: library, kind: $expressionKind, allowStickers: true, allowSounds: true,
                                       allowPlayback: !voiceInteraction.active, close: closeExpressions) { _, _ in }
                     .frame(height: 320)
             }
             if composeState.voiceMessageRecordingState == .finished, let name = composeState.voiceMessageRecordingFileName {
-                ComposeVoiceView(recordingFileName: name, recordingTime: $voiceMessageRecordingTime, recordingState: $composeState.voiceMessageRecordingState, maskingState: $composeState.voiceMaskingState, recordingLevels: voiceRecordingLevels, resumeRecording: audioRecorder?.canResume == true ? resumeVoiceMessageRecording : nil, applyVoiceMask: { _, _ in }, cancelVoiceMessage: { _ in
+                ComposeVoiceView(recordingFileName: name, recordingTime: $voiceMessageRecordingTime, recordingState: $composeState.voiceMessageRecordingState, maskingState: $composeState.voiceMaskingState, recordingLevels: voiceRecordingLevels, resumeRecording: recordingPaused ? resumeVoiceMessageRecording : nil, sendPausedRecording: recordingPaused ? { sendRecording(ttl: nil) } : nil, applyVoiceMask: { _, _ in }, cancelVoiceMessage: { _ in
                     // A deleted preview must not leave stale playable-duration
                     // telemetry for the next clip. Sending keeps its own proof.
                     validDuration = 0
                     discardVoiceMessageRecording()
                 }, cancelEnabled: true, stopPlayback: $stopPlayback)
             }
-            SendMessageView(
-                composeState: $composeState,
-                selectedRange: $selectedRange,
-                sendMessage: { _ in
-                        audioRecorder?.stop()
-                        audioRecorder = nil
-                        if let name = composeState.voiceMessageRecordingFileName {
-                            validDuration = (try? AVAudioPlayer(contentsOf: getAppFilePath(name)))?.duration ?? 0
-                        }
-                        sent += 1
-                        discardVoiceMessageRecording()
-                },
-                sendLiveMessage: {},
-                updateLiveMessage: {},
-                voiceInteraction: voiceInteraction,
-                voiceRecordingTime: voiceMessageRecordingTime ?? 0,
-                voiceRecordingLevels: voiceRecordingLevels,
-                startVoiceMessageRecording: beginVoiceMessageRecording,
-                moveVoiceMessageRecording: moveVoiceMessageRecording,
-                releaseVoiceMessageRecording: releaseVoiceMessageRecording,
-                cancelVoiceMessageTouch: cancelVoiceMessageTouch,
-                discardVoiceMessageRecording: discardVoiceMessageRecording,
-                finishVoiceMessageRecording: finishVoiceMessageRecording,
-                onMediaAdded: { _ in },
-                keyboardVisible: $keyboardVisible,
-                keyboardHiddenDate: $keyboardHiddenDate
-            )
+            if !recordingPaused {
+                SendMessageView(
+                    composeState: $composeState,
+                    selectedRange: $selectedRange,
+                    sendMessage: { sendRecording(ttl: $0) },
+                    sendLiveMessage: {},
+                    updateLiveMessage: {},
+                    voiceInteraction: voiceInteraction,
+                    voiceRecordingTime: voiceMessageRecordingTime ?? 0,
+                    voiceRecordingLevels: voiceRecordingLevels,
+                    startVoiceMessageRecording: beginVoiceMessageRecording,
+                    moveVoiceMessageRecording: moveVoiceMessageRecording,
+                    releaseVoiceMessageRecording: releaseVoiceMessageRecording,
+                    cancelVoiceMessageTouch: cancelVoiceMessageTouch,
+                    discardVoiceMessageRecording: discardVoiceMessageRecording,
+                    finishVoiceMessageRecording: finishVoiceMessageRecording,
+                    onMediaAdded: { _ in },
+                    keyboardVisible: $keyboardVisible,
+                    keyboardHiddenDate: $keyboardHiddenDate
+                )
+            }
         }
         .padding()
         .onChange(of: composeState.voiceMessageRecordingState) { state in

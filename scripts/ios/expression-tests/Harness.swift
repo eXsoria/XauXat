@@ -15,6 +15,7 @@ struct HarnessView: View {
     @State private var result = "Checking privacy…"
     @State private var selected = "Nothing sent"
     @State private var show = true
+    @State private var kind: XauXatExpressionKind = ProcessInfo.processInfo.arguments.contains("--limited") ? .sound : .sticker
     private let limited = ProcessInfo.processInfo.arguments.contains("--limited")
 
     var body: some View {
@@ -33,7 +34,7 @@ struct HarnessView: View {
                 Image(systemName: "mic")
             }.padding().background(Color.secondary.opacity(0.06))
             if let library, show {
-                XauXatExpressionsView(library: library, allowStickers: !limited, allowSounds: true,
+                XauXatExpressionsView(library: library, kind: $kind, allowStickers: !limited, allowSounds: true,
                                       allowPlayback: !limited, close: { show = false }) { item, _ in
                     selected = item.kind == .sticker ? "Sticker sent" : "Sound ready to send"
                     try? library.markUsed(item)

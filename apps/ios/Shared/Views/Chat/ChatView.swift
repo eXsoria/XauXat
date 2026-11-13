@@ -39,6 +39,9 @@ private func shouldShowAvatar(_ current: ChatItem, _ older: ChatItem?) -> Bool {
 
 // Spec: spec/client/chat-view.md#ChatView
 struct ChatView: View {
+    // Compose the property wrappers without invoking SwiftUI's State macro.
+    typealias StoredChat<Value> = State<Value>
+
     @EnvironmentObject var chatModel: ChatModel
     @StateObject private var connectProgressManager = ConnectProgressManager.shared
     @StateObject private var connectionRecovery = XauXatConnectionRecoveryManager.shared
@@ -48,7 +51,7 @@ struct ChatView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.scenePhase) var scenePhase
-    @State @ObservedObject var chat: Chat
+    @StoredChat @ObservedObject var chat: Chat
     @ObservedObject var im: ItemsModel
     @State var mergedItems: BoxedValue<MergedItems>
     @State var floatingButtonModel: FloatingButtonModel
@@ -89,6 +92,7 @@ struct ChatView: View {
     @State private var showUserSupportChatSheet = false
     @State private var showCommandsMenu = false
     @State private var supportChatMemberInfoLinkActive = false
+    @State private var slowOutboundItemId: ChatItem.ID?
     @State private var scrollView: EndlessScrollView<MergedItem> = EndlessScrollView(frame: .zero)
 
     @AppStorage(DEFAULT_TOOLBAR_MATERIAL) private var toolbarMaterial = ToolbarMaterial.defaultMaterial
@@ -99,7 +103,6 @@ struct ChatView: View {
     var body: some View {
         if #available(iOS 16.0, *) {
             viewBody
-                .scrollDismissesKeyboard(.immediately)
                 .toolbarBackground(.hidden, for: .navigationBar)
         } else {
             viewBody
@@ -115,15 +118,21 @@ struct ChatView: View {
                     nil
                 }
         let userMemberKnockingChat = memberSupportChat?.groupInfo.membership.memberPending == true
+        let pendingItem = im.reversedChatItems.last(where: { $0.xauXatIsSending })
         return ZStack {
-            let wallpaperImage = theme.wallpaper.type.image
-            let wallpaperType = theme.wallpaper.type
-            let backgroundColor = theme.wallpaper.background ?? wallpaperType.defaultBackgroundColor(theme.base, theme.colors.background)
-            let tintColor = theme.wallpaper.tint ?? wallpaperType.defaultTintColor(theme.base)
             if case .local = cInfo {
                 xauXatPrivateNotesBackground.ignoresSafeArea(.all)
             } else {
-                xauXatChatBackground.ignoresSafeArea(.all)
+                GeometryReader { geometry in
+                    Image("xauxat-chat-wallpaper")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
             VStack(spacing: 0) {
                 ZStack(alignment: .bottomTrailing) {
@@ -148,16 +157,18 @@ struct ChatView: View {
                     )
                     if im.messageLoadError == chat.id {
                         VStack(spacing: 12) {
-                            Text("Could not load messages")
+                            Text(chatModel.chatRunning == true ? "Could not load messages" : "Waiting for Tor")
                                 .font(.headline)
-                            Text("Try again to load this conversation.")
+                            Text(chatModel.chatRunning == true ? "Try again to load this conversation." : "Messages will load when the private connection is ready.")
                                 .font(.callout)
-                            Button("Retry") {
-                                Task {
-                                    await loadChat(chat: chat, im: im, contentTag: contentFilter?.contentTag, search: searchText)
+                            if chatModel.chatRunning == true {
+                                Button("Retry") {
+                                    Task {
+                                        await loadChat(chat: chat, im: im, contentTag: contentFilter?.contentTag, search: searchText)
+                                    }
                                 }
+                                .buttonStyle(.borderedProminent)
                             }
-                            .buttonStyle(.borderedProminent)
                         }
                         .multilineTextAlignment(.center)
                         .padding(24)
@@ -189,6 +200,14 @@ struct ChatView: View {
                         .padding(.vertical, 14)
                         .background(theme.colors.background)
                     } else {
+                        if let pendingItem, slowOutboundItemId == pendingItem.id {
+                            Label("Still sending. Keep XauXat open a little longer.", systemImage: "clock.arrow.circlepath")
+                                .font(.footnote)
+                                .foregroundColor(theme.colors.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                        }
                         ComposeView(
                             chat: chat,
                             im: im,
@@ -198,6 +217,7 @@ struct ChatView: View {
                             keyboardHiddenDate: $keyboardHiddenDate,
                             selectedRange: $selectedRange
                         )
+                        .disabled(chatModel.chatRunning != true)
                     }
                 } else {
                     SelectedItemsBottomToolbar(
@@ -219,6 +239,15 @@ struct ChatView: View {
                         forwardItems: forwardSelectedMessages
                     )
                 }
+            }
+            .task(id: pendingItem?.id) {
+                slowOutboundItemId = nil
+                guard let pendingItem else { return }
+                let remaining = max(0, pendingItem.meta.createdAt.addingTimeInterval(8).timeIntervalSinceNow)
+                do { try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000)) }
+                catch { return }
+                guard !Task.isCancelled else { return }
+                slowOutboundItemId = pendingItem.id
             }
             if im.showLoadingProgress == chat.id {
                 ProgressView().scaleEffect(2)
@@ -510,15 +539,9 @@ struct ChatView: View {
         }
     }
 
-    private var xauXatChatBackground: Color {
-        colorScheme == .dark
-            ? Color(red: 18 / 255, green: 18 / 255, blue: 17 / 255)
-            : Color(red: 247 / 255, green: 244 / 255, blue: 238 / 255)
-    }
-
     private var xauXatPrivateNotesBackground: Color {
         colorScheme == .dark
-            ? Color.black
+            ? xauXatDarkBackground
             : Color(red: 244 / 255, green: 240 / 255, blue: 232 / 255)
     }
 
@@ -1547,11 +1570,14 @@ struct ChatView: View {
         Task {
             do {
                 if let selectedChatItems {
+                    let oneTimeIDs = Set(im.reversedChatItems.filter(xauXatIsOneTimeVoice).map { $0.id })
+                    let forwardable = selectedChatItems.subtracting(oneTimeIDs)
+                    guard !forwardable.isEmpty else { return }
                     let (validItems, confirmation) = try await apiPlanForwardChatItems(
                         type: chat.chatInfo.chatType,
                         id: chat.chatInfo.apiId,
                         scope: chat.chatInfo.groupChatScope(),
-                        itemIds: Array(selectedChatItems)
+                        itemIds: Array(forwardable)
                     )
                     if let confirmation {
                         if validItems.count > 0 {
@@ -1765,11 +1791,11 @@ struct ChatView: View {
         @State private var markReadTask: Task<Void, Never>? = nil
         @State private var actionSheet: SomeActionSheet? = nil
         @State private var safetyReport: XauXatSafetyReport? = nil
-        @State private var swipeOffset: CGFloat = 0
+        @GestureState(resetTransaction: Transaction(animation: .spring(response: 0.25))) private var replyDrag: CGSize = .zero
 
         var revealed: Bool { revealedItems.contains(chatItem.id) }
 
-        typealias ItemSeparation = (timestamp: Bool, largeGap: Bool, date: Date?)
+        typealias ItemSeparation = (largeGap: Bool, date: Date?)
 
         private func reveal(_ yes: Bool) -> Void {
             merged.revealItems(yes, $revealedItems)
@@ -1777,7 +1803,7 @@ struct ChatView: View {
 
         func getItemSeparation(_ chatItem: ChatItem, _ prevItem: ChatItem?) -> ItemSeparation {
             guard let prevItem else {
-                return ItemSeparation(timestamp: true, largeGap: true, date: nil)
+                return ItemSeparation(largeGap: true, date: nil)
             }
 
             let sameMemberAndDirection = if case .groupRcv(let prevGroupMember) = prevItem.chatDir, case .groupRcv(let groupMember) = chatItem.chatDir {
@@ -1790,7 +1816,6 @@ struct ChatView: View {
             let largeGap = !sameMemberAndDirection || prevItem.meta.itemTs.timeIntervalSince(chatItem.meta.itemTs) > 60
 
             return ItemSeparation(
-                timestamp: largeGap || formatTimestampMeta(chatItem.meta.itemTs) != formatTimestampMeta(prevItem.meta.itemTs),
                 largeGap: largeGap,
                 date: Calendar.current.isDate(chatItem.meta.itemTs, inSameDayAs: prevItem.meta.itemTs) ? nil : prevItem.meta.itemTs
             )
@@ -2155,14 +2180,9 @@ struct ChatView: View {
         func chatItemWithMenu(_ ci: ChatItem, _ range: ClosedRange<Int>?, _ maxWidth: CGFloat, _ itemSeparation: ItemSeparation) -> some View {
             let alignment: Alignment = ci.chatDir.sent ? .trailing : .leading
             let live = composeState.liveMessage != nil
-            let codeLocked = xauXatIsAnyCodeLockedContent(ci.content.text)
-            let canReply = ci.meta.itemDeleted == nil && !ci.isLiveDummy && !live && !ci.localNote && !codeLocked && selectedChatItems == nil && chat.chatInfo.sendMsgEnabled
-            return ZStack(alignment: .trailing) {
-                Image(systemName: "arrowshape.turn.up.left")
-                    .font(.system(size: 18))
-                    .foregroundColor(.secondary)
-                    .opacity(min(1, -swipeOffset / 30))
-                    .offset(x: swipeOffset + 40)
+            let canReply = canReplyTo(ci, live: live)
+            let swipeOffset = canReply ? replySwipeOffset(replyDrag, sent: ci.chatDir.sent) : 0
+            return Group {
                 VStack(alignment: alignment.horizontal, spacing: 3) {
                     HStack {
                         if ci.chatDir.sent {
@@ -2178,9 +2198,31 @@ struct ChatView: View {
                             allowMenu: $allowMenu
                         )
                         .environment(\.revealed, revealed)
-                        .environment(\.showTimestamp, itemSeparation.timestamp)
-                        .modifier(ChatItemClipped(ci, tailVisible: itemSeparation.largeGap && (ci.meta.itemDeleted == nil || revealed)))
+                        .environment(\.showTimestamp, true)
+                        .modifier(ChatItemClipped(ci, tailVisible: itemSeparation.largeGap && (ci.meta.itemDeleted == nil || revealed), animateDelivery: true))
                         .contextMenu { menu(ci, range, live: live) }
+                        .if(canReply) { bubble in
+                            bubble
+                                .contentShape(Rectangle())
+                                .background(alignment: alignment) {
+                                    Image(systemName: "arrowshape.turn.up.left")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                        .opacity(min(1, abs(swipeOffset) / 40))
+                                        .offset(x: ci.chatDir.sent ? 28 : -28)
+                                        .allowsHitTesting(false)
+                                        .accessibilityHidden(true)
+                                }
+                                .simultaneousGesture(
+                                    DragGesture(minimumDistance: 12, coordinateSpace: .global)
+                                        .updating($replyDrag) { value, drag, _ in drag = value.translation }
+                                        .onEnded { value in
+                                            guard abs(replySwipeOffset(value.translation, sent: ci.chatDir.sent)) >= 42 else { return }
+                                            replyTo(ci)
+                                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                        }
+                                )
+                        }
                         .accessibilityLabel("")
                         if !ci.chatDir.sent {
                             goToItemButton(false)
@@ -2192,32 +2234,6 @@ struct ChatView: View {
                     }
                 }
                 .offset(x: swipeOffset)
-                .contentShape(Rectangle())
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 10)
-                        .onChanged { value in
-                            guard canReply else { return }
-                            let x = value.translation.width
-                            if x < 0 {
-                                swipeOffset = max(x * 0.63, -56)
-                            }
-                        }
-                        .onEnded { _ in
-                            if swipeOffset < -42 {
-                                withAnimation {
-                                    if composeState.editing {
-                                        composeState = ComposeState(contextItem: .quotedItem(chatItem: ci))
-                                    } else {
-                                        composeState = composeState.copy(contextItem: .quotedItem(chatItem: ci))
-                                    }
-                                }
-                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            }
-                            withAnimation(.spring(response: 0.25)) {
-                                swipeOffset = 0
-                            }
-                        }
-                )
             }
                 .confirmationDialog("Delete message?", isPresented: $showDeleteMessage, titleVisibility: .visible) {
                     if publicGroupEditor(chat) {
@@ -2337,13 +2353,13 @@ struct ChatView: View {
                     reactionsGroup
                 }
                 let codeLocked = xauXatIsAnyCodeLockedContent(ci.content.text)
-                if ci.meta.itemDeleted == nil && !ci.isLiveDummy && !live && !ci.localNote && !codeLocked && chat.chatInfo.sendMsgEnabled && !xauxatIsOneTimePhoto(ci) {
-                    replyButton
+                if canReplyTo(ci, live: live) {
+                    replyButton(ci)
                 }
                 let fileSource = getLoadedFileSource(ci.file)
                 let fileExists = if let fs = fileSource, FileManager.default.fileExists(atPath: getAppFilePath(fs.filePath).path) { true } else { false }
-                let mediaExportAllowed = xauxatOneTimePhotoExportAllowed(ci)
-                let copyAndShareAllowed = !codeLocked && (!ci.content.text.isEmpty || (ci.content.msgContent?.isImage == true && fileExists && mediaExportAllowed))
+                let mediaExportAllowed = xauxatOneTimePhotoExportAllowed(ci) && !xauXatIsOneTimeVoice(ci)
+                let copyAndShareAllowed = !codeLocked && !xauXatIsOneTimeVoice(ci) && (!ci.content.text.isEmpty || (ci.content.msgContent?.isImage == true && fileExists && mediaExportAllowed))
                 if copyAndShareAllowed {
                     shareButton(ci)
                     copyButton(ci)
@@ -2376,7 +2392,7 @@ struct ChatView: View {
                 if ci.meta.itemDeleted == nil
                     && (ci.file == nil || (fileSource != nil && fileExists))
                     && !ci.isLiveDummy && !live {
-                    if !xauxatIsOneTimePhoto(ci) && !codeLocked {
+                    if !xauxatIsOneTimePhoto(ci) && !xauXatIsOneTimeVoice(ci) && !codeLocked {
                         forwardButton
                     }
                 }
@@ -2436,15 +2452,32 @@ struct ChatView: View {
             }
         }
 
-        var replyButton: Button<some View> {
-            Button {
-                withAnimation {
-                    if composeState.editing {
-                        composeState = ComposeState(contextItem: .quotedItem(chatItem: chatItem))
-                    } else {
-                        composeState = composeState.copy(contextItem: .quotedItem(chatItem: chatItem))
-                    }
+        private func canReplyTo(_ ci: ChatItem, live: Bool) -> Bool {
+            ci.content.msgContent != nil && ci.meta.itemDeleted == nil && !ci.isReport
+                && !ci.isLiveDummy && !live && !ci.localNote && !xauXatIsAnyCodeLockedContent(ci.content.text)
+                && !xauxatIsOneTimePhoto(ci) && !xauXatIsOneTimeVoice(ci) && selectedChatItems == nil && chat.chatInfo.sendMsgEnabled
+        }
+
+        private func replySwipeOffset(_ translation: CGSize, sent: Bool) -> CGFloat {
+            let direction: CGFloat = sent ? -1 : 1
+            let distance = translation.width * direction
+            guard distance > abs(translation.height) * 1.3 else { return 0 }
+            return min(distance * 0.72, 56) * direction
+        }
+
+        private func replyTo(_ ci: ChatItem) {
+            withAnimation {
+                if composeState.editing {
+                    composeState = ComposeState(contextItem: .quotedItem(chatItem: ci))
+                } else {
+                    composeState = composeState.copy(contextItem: .quotedItem(chatItem: ci))
                 }
+            }
+        }
+
+        private func replyButton(_ ci: ChatItem) -> Button<some View> {
+            Button {
+                replyTo(ci)
             } label: {
                 Label(
                     NSLocalizedString("Reply", comment: "chat item action"),

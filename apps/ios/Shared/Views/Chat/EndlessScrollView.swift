@@ -133,6 +133,7 @@ class EndlessScrollView<ScrollItem>: UIScrollView, UIScrollViewDelegate, UIGestu
     override init(frame: CGRect) {
         super.init(frame: frame)
         self.delegate = self
+        keyboardDismissMode = .onDrag
     }
 
     required init?(coder: NSCoder) { fatalError() }

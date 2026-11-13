@@ -626,13 +626,15 @@ public struct ThemeModeOverride: Codable, Equatable, Hashable {
     }
 }
 
+public let xauXatDarkBackground = Color(0xFF12100C)
+
 public let DarkColorPalette = Colors(
-    primary: SimplexBlue,
-    primaryVariant: SimplexBlue,
+    primary: Color(0xFFDECEAF),
+    primaryVariant: Color(0xFFDECEAF),
     secondary: HighOrLowlight,
     secondaryVariant: DarkGray,
-    background: Color.black,
-    surface: Color(0xFF222222),
+    background: xauXatDarkBackground,
+    surface: Color(0xFF211D17),
     error: Color.red,
     onBackground: Color.white,
     onSurface: Color.white,
@@ -640,16 +642,16 @@ public let DarkColorPalette = Colors(
 )
 public let DarkColorPaletteApp = AppColors(
     title: .white,
-    primaryVariant2: Color(0xFF18262E),
-    sentMessage: Color(0xFF18262E),
-    sentQuote: Color(0xFF1D3847),
+    primaryVariant2: Color(0xFF302921),
+    sentMessage: Color(0xFF302921),
+    sentQuote: Color(0xFF413629),
     receivedMessage: Color(0xff262627),
     receivedQuote: Color(0xff373739)
 )
 
 public let LightColorPalette = Colors (
-    primary: SimplexBlue,
-    primaryVariant: SimplexBlue,
+    primary: Color(0xFF927141),
+    primaryVariant: Color(0xFF927141),
     secondary: HighOrLowlight,
     secondaryVariant: LightGray,
     background: Color.white,
@@ -661,20 +663,20 @@ public let LightColorPalette = Colors (
 )
 public let LightColorPaletteApp = AppColors(
     title: .black,
-    primaryVariant2: Color(0xFFE9F7FF),
-    sentMessage: Color(0xFFE9F7FF),
-    sentQuote: Color(0xFFD6F0FF),
+    primaryVariant2: Color(0xFFF1E9DA),
+    sentMessage: Color(0xFFF1E9DA),
+    sentQuote: Color(0xFFE7D9C1),
     receivedMessage: Color(0xfff5f5f6),
     receivedQuote: Color(0xffececee)
 )
 
 public let SimplexColorPalette = Colors(
-    primary: Color(0xFF70F0F9),
-    primaryVariant: Color(0xFF1298A5),
+    primary: Color(0xFFDECEAF),
+    primaryVariant: Color(0xFFC6A874),
     secondary: HighOrLowlight,
-    secondaryVariant: Color(0xFF2C464D),
-    background: Color(0xFF111528),
-    surface: Color(0xFF121C37),
+    secondaryVariant: Color(0xFF453A2D),
+    background: Color(0xFF171411),
+    surface: Color(0xFF211C16),
     error: Color.red,
     onBackground: Color.white,
     onSurface: Color.white,
@@ -682,20 +684,20 @@ public let SimplexColorPalette = Colors(
 )
 public let SimplexColorPaletteApp = AppColors(
     title: .white,
-    primaryVariant2: Color(0xFF172941),
-    sentMessage: Color(0xFF172941),
-    sentQuote: Color(0xFF1C3A57),
-    receivedMessage: Color(0xff25283a),
-    receivedQuote: Color(0xff36394a)
+    primaryVariant2: Color(0xFF32291F),
+    sentMessage: Color(0xFF32291F),
+    sentQuote: Color(0xFF493C2D),
+    receivedMessage: Color(0xff282420),
+    receivedQuote: Color(0xff39312a)
 )
 
 public let BlackColorPalette = Colors(
-    primary: Color(0xff0077e0),
-    primaryVariant: Color(0xff0077e0),
+    primary: Color(0xFFDECEAF),
+    primaryVariant: Color(0xFFDECEAF),
     secondary: HighOrLowlight,
     secondaryVariant: DarkGray,
-    background: Color(0xff070707),
-    surface: Color(0xff161617),
+    background: xauXatDarkBackground,
+    surface: Color(0xFF1C1812),
     error: Color.red,
     onBackground: Color.white,
     onSurface: Color.white,
@@ -703,9 +705,9 @@ public let BlackColorPalette = Colors(
 )
 public let BlackColorPaletteApp = AppColors(
     title: .white,
-    primaryVariant2: Color(0xff243747),
-    sentMessage: Color(0xFF18262E),
-    sentQuote: Color(0xFF1D3847),
+    primaryVariant2: Color(0xff392f24),
+    sentMessage: Color(0xFF302921),
+    sentQuote: Color(0xFF413629),
     receivedMessage: Color(0xff1b1b1b),
     receivedQuote: Color(0xff29292b)
 )

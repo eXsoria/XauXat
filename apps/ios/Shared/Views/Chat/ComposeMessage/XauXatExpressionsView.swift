@@ -9,6 +9,7 @@ import PhotosUI
 @MainActor
 struct XauXatExpressionsView: View {
     @ObservedObject var library: XauXatExpressionLibrary
+    @Binding var kind: XauXatExpressionKind
     let allowStickers: Bool
     let allowSounds: Bool
     var allowPlayback: Bool = true
@@ -16,11 +17,10 @@ struct XauXatExpressionsView: View {
     let close: () -> Void
     let select: (XauXatExpression, Data) -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var kind: XauXatExpressionKind = .sticker
     @State private var pack = "all"
     @State private var query = ""
     @State private var importing = false
-    @State private var pickingPhotos = false
+    @State private var pickingStickers = false
     @State private var importTask: Task<Void, Never>?
     @State private var busy = false
     @State private var error: String?
@@ -52,9 +52,9 @@ struct XauXatExpressionsView: View {
                     }
                 }
                 Button {
-                    if kind == .sticker { pickingPhotos = true } else { importing = true }
+                    if kind == .sticker { pickingStickers = true } else { importing = true }
                 } label: { Image(systemName: "plus.circle").font(.title3) }
-                    .accessibilityLabel(kind == .sticker ? Text("Add stickers from Photos") : Text("Import sounds"))
+                    .accessibilityLabel(kind == .sticker ? "Add stickers from Photos" : "Import sounds")
                     .disabled(busy || library.items.count >= XauXatExpressionLibrary.maxItems)
                 Button(action: close) { Image(systemName: "chevron.down").font(.body.weight(.semibold)) }
                     .accessibilityLabel("Close stickers and sounds")
@@ -99,30 +99,32 @@ struct XauXatExpressionsView: View {
             .frame(maxWidth: .infinity).padding(.vertical, 8)
         }
         .background(Color(uiColor: .secondarySystemBackground))
-        .sheet(isPresented: $pickingPhotos) {
-            XauXatStickerPhotoPicker(selectionLimit: max(1, XauXatExpressionLibrary.maxItems - library.items.count)) { providers in
-                pickingPhotos = false
-                importPhotos(providers)
+        .sheet(isPresented: $pickingStickers) {
+            StickerPhotoPicker(limit: max(1, XauXatExpressionLibrary.maxItems - library.items.count)) { providers in
+                pickingStickers = false
+                guard !providers.isEmpty else { return }
+                importMedia {
+                    for provider in providers {
+                        try Task.checkCancellation()
+                        let data = try await Self.loadStickerPhoto(provider)
+                        try Task.checkCancellation()
+                        try await library.importStickerPhoto(data)
+                        pack = "mine"
+                    }
+                }
             }
-            .ignoresSafeArea()
         }
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.mpeg4Audio, .mp3, .wav, .aiff, .init(filenameExtension: "caf")!],
                       allowsMultipleSelection: true) { result in
             switch result {
             case let .success(urls):
-                let importKind = XauXatExpressionKind.sound
-                busy = true
-                stop()
-                importTask = Task {
-                    defer { busy = false; refreshThumbnails() }
-                    do {
-                        for url in urls {
-                            try Task.checkCancellation()
-                            try await library.importFile(url, kind: importKind)
-                        }
+                importMedia {
+                    for url in urls {
+                        try Task.checkCancellation()
+                        try await library.importFile(url, kind: .sound)
                         pack = "mine"
-                    } catch is CancellationError { } catch { self.error = error.localizedDescription }
+                    }
                 }
             case let .failure(error): self.error = error.localizedDescription
             }
@@ -141,28 +143,33 @@ struct XauXatExpressionsView: View {
         } message: { Text(error ?? "") }
     }
 
-    private func importPhotos(_ providers: [NSItemProvider]) {
-        guard !providers.isEmpty else { return }
+    private func importMedia(_ work: @escaping @MainActor () async throws -> Void) {
         busy = true
         stop()
         importTask = Task {
             defer { busy = false; refreshThumbnails() }
-            do {
-                for provider in providers {
-                    try Task.checkCancellation()
-                    guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else {
+            do { try await work() }
+            catch is CancellationError { }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private static func loadStickerPhoto(_ provider: NSItemProvider) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, error in
+                continuation.resume(with: Result {
+                    if let error { throw error }
+                    guard let url else { throw XauXatExpressionError.invalidFile }
+                    let maxBytes = XauXatExpressionLibrary.maxInputBytes
+                    let file = try FileHandle(forReadingFrom: url)
+                    defer { try? file.close() }
+                    guard let data = try file.read(upToCount: maxBytes + 1), !data.isEmpty else {
                         throw XauXatExpressionError.invalidFile
                     }
-                    let data: Data = try await withCheckedThrowingContinuation { continuation in
-                        provider.loadDataRepresentation(forTypeIdentifier: type) { data, error in
-                            if let data { continuation.resume(returning: data) }
-                            else { continuation.resume(throwing: error ?? XauXatExpressionError.invalidFile) }
-                        }
-                    }
-                    try await library.importStickerPhoto(data)
-                }
-                pack = "mine"
-            } catch is CancellationError { } catch { self.error = error.localizedDescription }
+                    guard data.count <= maxBytes else { throw XauXatExpressionError.tooLarge }
+                    return data
+                })
+            }
         }
     }
 
@@ -295,29 +302,33 @@ struct XauXatExpressionsView: View {
     }
 }
 
-private struct XauXatStickerPhotoPicker: UIViewControllerRepresentable {
-    let selectionLimit: Int
-    let completion: ([NSItemProvider]) -> Void
+private struct StickerPhotoPicker: UIViewControllerRepresentable {
+    let limit: Int
+    let onPicked: ([NSItemProvider]) -> Void
 
     final class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        let completion: ([NSItemProvider]) -> Void
-        init(completion: @escaping ([NSItemProvider]) -> Void) { self.completion = completion }
+        let onPicked: ([NSItemProvider]) -> Void
+        init(_ onPicked: @escaping ([NSItemProvider]) -> Void) { self.onPicked = onPicked }
+
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            completion(results.map(\.itemProvider))
+            onPicked(results.map(\.itemProvider))
         }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
+    func makeCoordinator() -> Coordinator { Coordinator(onPicked) }
+
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var configuration = PHPickerConfiguration()
         configuration.filter = .images
-        configuration.selectionLimit = selectionLimit
+        configuration.selectionLimit = limit
+        configuration.selection = .ordered
         configuration.preferredAssetRepresentationMode = .compatible
         let picker = PHPickerViewController(configuration: configuration)
         picker.delegate = context.coordinator
         picker.view.accessibilityIdentifier = "sticker-photo-picker"
         return picker
     }
-    func updateUIViewController(_ controller: PHPickerViewController, context: Context) {}
+
+    func updateUIViewController(_ picker: PHPickerViewController, context: Context) {}
 }
 
