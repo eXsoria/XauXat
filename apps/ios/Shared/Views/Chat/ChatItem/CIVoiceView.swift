@@ -302,7 +302,7 @@ private struct VoiceMessageWaveform: View {
                 let count = 40
                 let step = (size.width - 12) / CGFloat(count - 1)
                 guard step > 0 else { return }
-                let progressFraction = duration > 0 ? min(1, max(0, progress / duration)) : 0
+                let progressFraction: Double = duration > 0 ? min(1, max(0, progress / duration)) : 0
                 for index in 0..<count {
                     let level = levels.indices.contains(index) ? CGFloat(levels[index]) : 0
                     let barHeight = 3 + level * 21
@@ -313,7 +313,7 @@ private struct VoiceMessageWaveform: View {
                     context.fill(Path(roundedRect: bar, cornerRadius: width / 2), with: .color(color.opacity(played ? 1 : 0.75)))
                 }
                 if source != nil {
-                    let x = 6 + (size.width - 12) * progressFraction
+                    let x: CGFloat = 6 + (size.width - 12) * CGFloat(progressFraction)
                     context.fill(Path(ellipseIn: CGRect(x: x - 5, y: size.height / 2 - 5, width: 10, height: 10)), with: .color(color))
                 }
             }
@@ -324,7 +324,7 @@ private struct VoiceMessageWaveform: View {
                         .gesture(DragGesture(minimumDistance: 0).onChanged { gesture in
                             guard geometry.size.width > 12 else { return }
                             let fraction = (gesture.location.x - 6) / (geometry.size.width - 12)
-                            seek(duration * min(1, max(0, fraction)))
+                            seek(duration * Double(min(1, max(0, fraction))))
                         })
                 }
                 .accessibilityElement(children: .ignore)
