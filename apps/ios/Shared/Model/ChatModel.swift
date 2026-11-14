@@ -195,10 +195,10 @@ class ItemsModel: ObservableObject {
         let reason: String
 
         if isPrivateNotes {
-            title = "Private notes"
+            title = "Vault"
             reason = NSLocalizedString(
-                "Authenticate to open your private notes",
-                comment: "private notes authentication"
+                "Authenticate to open your vault",
+                comment: "vault authentication"
             )
         } else if isHidden {
             title = "Hidden conversation"

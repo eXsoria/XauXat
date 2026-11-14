@@ -588,6 +588,7 @@
 		648010AA281ADD15009009B9 /* CIFileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CIFileView.swift; sourceTree = "<group>"; };
 		648679AA2BC96A74006456E7 /* ChatItemForwardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatItemForwardingView.swift; sourceTree = "<group>"; };
 		6493D667280ED77F007A76FB /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		8054DC738C6E421B9E57B7B1 /* pt */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = pt; path = pt.lproj/Localizable.strings; sourceTree = "<group>"; };
 		6495D7032F48CFC50060512B /* ChannelMembersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelMembersView.swift; sourceTree = "<group>"; };
 		6495D7052F48CFFD0060512B /* ChannelRelaysView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelRelaysView.swift; sourceTree = "<group>"; };
 		6495D7072F48D0000060512B /* AddGroupRelayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddGroupRelayView.swift; sourceTree = "<group>"; };
@@ -1505,6 +1506,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				pt,
 				ru,
 				Base,
 				de,
@@ -2031,6 +2033,7 @@
 			children = (
 				5CC2C0FB2809BF11000C35E3 /* ru */,
 				6493D667280ED77F007A76FB /* en */,
+				8054DC738C6E421B9E57B7B1 /* pt */,
 				5CB2085428DE647400D024EC /* de */,
 				5CBD285529565CAE00EC2CF4 /* fr */,
 				5CA85D0A297218AA0095AF72 /* it */,

@@ -1,0 +1,18 @@
+/* Private local vault. Other untranslated labels retain the English source text. */
+"Vault" = "Cofre";
+"Only you can access this vault." = "Só tu podes aceder a este cofre.";
+"Vault unavailable" = "Cofre indisponível";
+"Your vault is not ready yet." = "O teu cofre ainda não está pronto.";
+"Authenticate to open your vault" = "Autentica-te para abrir o cofre";
+"Clear vault?" = "Limpar o cofre?";
+
+/* Preserve the development language's substitutions for untranslated strings. */
+"_italic_" = "\\_italic_";
+"*bold*" = "\\*bold*";
+"`a + b`" = "\\`a + b`";
+"~strike~" = "\\~strike~";
+"connecting call" = "connecting call…";
+"Connecting server…" = "Connecting to server…";
+"Connecting server… (error: %@)" = "Connecting to server… (error: %@)";
+"member connected" = "connected";
+"No group!" = "Group not found!";
