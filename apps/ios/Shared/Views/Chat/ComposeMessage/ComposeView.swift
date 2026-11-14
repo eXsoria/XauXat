@@ -1528,6 +1528,7 @@ struct ComposeView: View {
                             Text(preset.name).tag(preset)
                         }
                     }
+                    .accessibilityIdentifier("voice.note.preset")
                     Picker("Background sound", selection: $voiceNoteAmbience) {
                         Text("Off").tag(XauXatCallAmbience.off)
                         Text("Rain").tag(XauXatCallAmbience.rain)

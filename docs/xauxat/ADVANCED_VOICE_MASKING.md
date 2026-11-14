@@ -1,13 +1,14 @@
 # Advanced voice masking on iOS
 
-XauXat Plus adds Alloy, Hollow, and Wisp to the free Veil voice transformation.
-All four presets use the same local AVFoundation offline-rendering pipeline. No
-recording, preview, or audio sample leaves the device.
+XauXat Plus adds Alloy, Hollow, and Wisp to the free Veil and Stealth voice
+transformations. The four pitch presets use AVFoundation offline rendering;
+Stealth uses the bundled LLVC Core ML model. No recording, preview, or audio
+sample leaves the device for processing.
 
 ## Composer flow
 
 - Finishing a new voice recording exposes the voice-mask chooser.
-- Veil remains visible and available on Free. The Plus presets remain visible
+- Veil and Stealth remain visible and available on Free. The Plus presets remain visible
   with a lock when Plus is inactive and open the existing XauXat Plus screen.
 - Each available preset has a direct preview action. Previews are always
   rendered from the untouched draft, so the user can compare any Plus preset
@@ -25,7 +26,7 @@ saved advanced preset is ignored and the composer returns to Veil.
 
 ## Audio properties
 
-The presets vary pitch while keeping the playback rate at `1.0`. Rendering uses
+The pitch presets vary pitch while keeping the playback rate at `1.0`. Rendering uses
 the source sample rate, channel count, and exact source-frame duration, then
 writes AAC with the same voice-message bitrate used by the recorder. This keeps
 message duration stable and avoids an unnecessary network or cloud conversion.

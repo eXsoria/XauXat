@@ -40,6 +40,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  stealth-effects:
+    name: Stealth menus and local Core ML audio
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: bash scripts/ios/test-stealth-effects.sh
+        env:
+          STEALTH_TEST_OUTPUT: ${{ runner.temp }}/stealth-proof
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: XauXat-stealth-${{ github.sha }}
+          path: ${{ runner.temp }}/stealth-proof
+          if-no-files-found: error
+          retention-days: 7
+
   voice-recording:
     name: Voice recording gestures and AAC preview
     runs-on: macos-15
@@ -349,6 +368,7 @@ jobs:
           xcrun vtool -show-build "$app_path/Frameworks/Tor.framework/Tor" | grep -q 'platform IOS'
           otool -L "$app_path/SimpleX" | grep -q '@rpath/Tor.framework/Tor'
           ./scripts/ios/verify-xauxat-identifiers.sh "$app_path" production
+          bash scripts/ios/verify-stealth-resources.sh "$app_path"
           python3 scripts/ios/verify-first-party-privacy.py "$app_path"
           swiftygif_privacy_manifest=$(find "$app_path/Frameworks" -path '*SwiftyGif*.framework/*/PrivacyInfo.xcprivacy' -type f -print -quit)
           test -n "$swiftygif_privacy_manifest"
@@ -454,6 +474,7 @@ jobs:
           test -d "$app_path"
           test "$(plutil -extract CFBundleDisplayName raw "$app_path/Info.plist")" = "XauXat"
           ./scripts/ios/verify-xauxat-identifiers.sh "$app_path" development
+          bash scripts/ios/verify-stealth-resources.sh "$app_path"
           python3 scripts/ios/verify-first-party-privacy.py "$app_path"
           file "$app_binary" | grep -q 'arm64'
           file "$tor_binary" | grep -q 'arm64'

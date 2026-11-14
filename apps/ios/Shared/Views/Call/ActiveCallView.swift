@@ -409,7 +409,7 @@ struct ActiveCallOverlay: View {
             Text(voiceMasking.failureMessage ?? "")
         }
         .onChange(of: plusEntitlements.status) { _ in
-            if !plusEntitlements.isAuthorized(for: .realTimeVoiceMasking), voiceMasking.enabled {
+            if !plusEntitlements.isAuthorized(for: .realTimeVoiceMasking), voiceMasking.enabled, !voiceMasking.llvcEnabled {
                 voiceMasking.setEnabled(false)
             }
         }
@@ -608,28 +608,31 @@ private struct XauXatRealtimeVoiceMaskingView: View {
     var body: some View {
         NavigationView {
             Form {
-                #if DEBUG
                 Section {
                     Toggle("Stealth", isOn: Binding(
                         get: { voiceMasking.llvcEnabled },
                         set: voiceMasking.setLLVCEnabled
                     ))
+                    .accessibilityIdentifier("call.stealth.enabled")
                 } footer: {
-                    Text("Processed locally on your iPhone. With active noise cancelation.")
+                    Text("Processed locally on your iPhone.")
                 }
-                #else
                 if allowsVoiceMasking {
                     Section {
                         Toggle("Mask my voice", isOn: Binding(
-                            get: { voiceMasking.enabled },
-                            set: voiceMasking.setEnabled
+                            get: { voiceMasking.enabled && !voiceMasking.llvcEnabled },
+                            set: { enabled in
+                                if enabled && voiceMasking.preset == .stealth { voiceMasking.setPreset(.veil) }
+                                voiceMasking.setEnabled(enabled)
+                            }
                         ))
+                        .accessibilityIdentifier("call.voiceMask.enabled")
                     } footer: {
                         Text("Your microphone is transformed locally before WebRTC receives it. Preset changes keep the call connected.")
                     }
 
                     Section("Voice preset") {
-                        ForEach(XauXatVoiceMaskPreset.allCases) { preset in
+                        ForEach(XauXatVoiceMaskPreset.allCases.filter { $0 != .stealth }) { preset in
                             Button { voiceMasking.setPreset(preset) } label: {
                                 HStack(spacing: 12) {
                                     VStack(alignment: .leading, spacing: 3) {
@@ -647,6 +650,7 @@ private struct XauXatRealtimeVoiceMaskingView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("call.voicePreset.\(preset.rawValue)")
                         }
                     }
                 } else {
@@ -658,8 +662,6 @@ private struct XauXatRealtimeVoiceMaskingView: View {
                         Label("Voice masking · XauXat Plus", systemImage: "lock")
                     }
                 }
-                #endif
-
                 Section {
                     Picker("Background sound", selection: Binding(
                         get: { voiceMasking.ambience },
@@ -670,6 +672,7 @@ private struct XauXatRealtimeVoiceMaskingView: View {
                         Text("Outside").tag(XauXatCallAmbience.traffic)
                     }
                     .pickerStyle(.menu)
+                    .accessibilityIdentifier("call.ambience")
                 } footer: {
                     Text("The other person hears this sound during the call.")
                 }
