@@ -1,0 +1,55 @@
+name: XauXat waveform compiler diagnostic
+
+on:
+  push:
+    branches: [codex/testflight-354-waveform]
+
+permissions:
+  contents: read
+
+jobs:
+  waveform-typecheck:
+    runs-on: macos-15
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 3
+      - name: Verify original failure and corrected production waveform
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, subprocess
+          from pathlib import Path
+          path = 'apps/ios/Shared/Views/Chat/ChatItem/CIVoiceView.swift'
+          fixed = Path(path).read_text()
+          original = subprocess.check_output(['git', 'show', '6d537e4e44ec8ad0dca7187395bd44e8c9a5436c:' + path]).decode()
+          def extract(source):
+              start = source.index('private struct VoiceMessageWaveform: View {')
+              end = source.index('\nprivate func voiceWaveformLevels(', start)
+              return source[start:end]
+          stubs = "import Foundation\nimport SwiftUI\nprivate struct CryptoFile: Equatable { let filePath: String; let cryptoArgs: Int? }\nprivate func getAppFilePath(_ path: String) -> URL { URL(fileURLWithPath: path) }\nprivate func voiceWaveformLevels(_ url: URL, _ args: Int?) -> [Float] { [] }\nprivate func voiceMessageTime(_ time: TimeInterval) -> String { \"\" }\n"
+          out = Path(os.environ['RUNNER_TEMP'])
+          (out / 'Waveform-original.swift').write_text(stubs + extract(original))
+          (out / 'Waveform-fixed.swift').write_text(stubs + extract(fixed))
+          PY
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          if xcrun swiftc -swift-version 5 -typecheck -sdk "$sdk" -target arm64-apple-ios15.0-simulator "$RUNNER_TEMP/Waveform-original.swift" > "$RUNNER_TEMP/Waveform-original.log" 2>&1; then
+            echo "The original component unexpectedly compiled; inspect probe fidelity."
+            exit 1
+          fi
+          grep -q "ambiguous use of operator" "$RUNNER_TEMP/Waveform-original.log"
+          grep "error:" "$RUNNER_TEMP/Waveform-original.log"
+          xcrun swiftc -swift-version 5 -typecheck -sdk "$sdk" -target arm64-apple-ios15.0-simulator "$RUNNER_TEMP/Waveform-fixed.swift" 2>&1 | tee "$RUNNER_TEMP/Waveform-fixed.log"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: XauXat-waveform-compile-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/Waveform-*.swift
+            ${{ runner.temp }}/Waveform-*.log
+          if-no-files-found: error
+          retention-days: 7
