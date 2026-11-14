@@ -8,7 +8,7 @@ final class XauXatLLVCCapture {
     private static let sendCapacity = 8192
     private static let inputNames = ["encoder", "decoder", "synthesis", "prenet"]
     private static let outputNames = ["encoder_next", "decoder_next", "synthesis_next", "prenet_next"]
-    private static let model = Result {
+    private static func makeModel() throws -> MLModel {
         guard let url = Bundle.main.url(forResource: "XauXatLLVC", withExtension: "mlmodelc") else {
             throw Failure.model
         }
@@ -17,8 +17,10 @@ final class XauXatLLVCCapture {
         return try MLModel(contentsOf: url, configuration: config)
     }
 
+    private static let prepared: Void = { _ = try? makeModel() }()
+
     static func warmUp() {
-        DispatchQueue.global(qos: .userInitiated).async { _ = model }
+        DispatchQueue.global(qos: .userInitiated).async { _ = prepared }
     }
 
     private enum Failure: LocalizedError {
@@ -53,6 +55,9 @@ final class XauXatLLVCCapture {
     private var failed = false
 
     // Only the worker accesses the model inputs and streaming state.
+    // Core ML requires each MLModel instance to be used on one queue at a time.
+    // A recording/preview owns another processor, separate from live capture.
+    private var inferenceModel: MLModel?
     private var workerGeneration: UInt64?
     private var state: [String: MLMultiArray] = [:]
     private var window: MLMultiArray?
@@ -148,7 +153,7 @@ final class XauXatLLVCCapture {
         guard let active else { return }
         do {
             if overrun { throw Failure.overrun }
-            let model = try Self.model.get()
+            let model = try loadModel()
             if workerGeneration != active {
                 try reset(model)
                 workerGeneration = active
@@ -189,6 +194,13 @@ final class XauXatLLVCCapture {
             lock.unlock()
             if isCurrent { onFailure(active, error.localizedDescription) }
         }
+    }
+
+    private func loadModel() throws -> MLModel {
+        if let inferenceModel { return inferenceModel }
+        let model = try Self.makeModel()
+        inferenceModel = model
+        return model
     }
 
     private func reset(_ model: MLModel) throws {
@@ -250,11 +262,12 @@ final class XauXatLLVCCapture {
               let input = processor.capture.floatChannelData?[0],
               let destination = processor.converted.floatChannelData?[0] else { throw Failure.samples }
 
-        let model = try Self.model.get()
+        let model = try processor.loadModel()
         try processor.reset(model)
         let mixer = ambience == .off ? nil : XauXatCallAmbienceMixer(sampleRate: format.sampleRate)
         var remaining = source.length
         while remaining > 0 {
+            try Task.checkCancellation()
             input.update(repeating: 0, count: Self.chunk)
             try source.read(into: processor.capture, frameCount: AVAudioFrameCount(min(Int64(Self.chunk), remaining)))
             let frames = processor.capture.frameLength

@@ -247,6 +247,7 @@ unzip -q "$ipa_path" -d "$work_dir/ipa"
 exported_app=$(find "$work_dir/ipa/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)
 test -n "$exported_app"
 "$repo_root/scripts/ios/verify-xauxat-identifiers.sh" "$exported_app" production
+bash "$script_dir/verify-stealth-resources.sh" "$exported_app"
 bash "$script_dir/verify-device-architectures.sh" "$exported_app"
 verify_signed_entitlements "$exported_app" production
 

@@ -341,6 +341,7 @@ private struct XauXatVoiceMaskPickerView: View {
     @State private var previewing: XauXatVoiceMaskPreset?
     @State private var previewPlayer: AudioPlayer?
     @State private var previewOperation = UUID()
+    @State private var previewRenderTask: Task<Result<Data, Error>, Never>?
     @State private var showPlus = false
     @State private var errorMessage: String?
 
@@ -443,6 +444,7 @@ private struct XauXatVoiceMaskPickerView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("voice.recording.preset.\(preset.rawValue)")
 
             if !canUse(preset) {
                 Button { showPlus = true } label: {
@@ -483,11 +485,14 @@ private struct XauXatVoiceMaskPickerView: View {
         let operation = UUID()
         previewOperation = operation
         previewing = preset
+        let rendering = Task.detached(priority: .userInitiated) {
+            Result { try XauXatVoiceMask.previewData(from: recordingURL, preset: preset) }
+        }
+        previewRenderTask = rendering
         Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try XauXatVoiceMask.previewData(from: recordingURL, preset: preset) }
-            }.value
+            let result = await rendering.value
             guard previewOperation == operation else { return }
+            previewRenderTask = nil
             switch result {
             case let .success(data):
                 let player = AudioPlayer(onTimer: { _ in }, onFinishPlayback: {
@@ -507,6 +512,8 @@ private struct XauXatVoiceMaskPickerView: View {
 
     private func stopPreview() {
         previewOperation = UUID()
+        previewRenderTask?.cancel()
+        previewRenderTask = nil
         previewPlayer?.stop()
         previewPlayer = nil
         previewing = nil

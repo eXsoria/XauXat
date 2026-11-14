@@ -390,9 +390,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
         let callProtection = useRelay
             ? NSLocalizedString("Your call uses end-to-end encryption when supported by both devices. A call relay hides your IP address from the other person.", comment: "call privacy warning with relay")
             : NSLocalizedString("Your call uses end-to-end encryption when supported by both devices. A direct connection can reveal your IP address to the other person.", comment: "call privacy warning without mandatory relay")
-        let voiceMaskMessage = useRelay
-            ? NSLocalizedString("Although your call is end-to-end encrypted and your IP is hidden through a relay, your voice is still a part of you. We recommend you to use the xauxat voice mask for an extra layer of privacy", comment: "call privacy warning with relay and voice mask")
-            : callProtection + "\n\n" + NSLocalizedString("Your voice can still identify you. For an extra layer of privacy, use the xauxat voice mask.", comment: "call privacy warning voice mask recommendation")
+        let voiceMaskMessage = callProtection + "\n\n" + NSLocalizedString("Your voice can still identify you. For an extra layer of privacy, use the xauxat voice mask.", comment: "call privacy warning voice mask recommendation")
         #if DEBUG
         let privacyMessage = XauXatDirectCallTest.shared.usesDirectSignaling(for: contact)
             ? voiceMaskMessage + "\n\n" + NSLocalizedString("The messaging relay can see your IP address during this test call.", comment: "direct SMP test privacy warning")

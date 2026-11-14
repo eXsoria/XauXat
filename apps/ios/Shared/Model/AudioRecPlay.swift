@@ -126,7 +126,8 @@ struct XauXatVoiceMask {
             commonFormat: renderFormat.commonFormat,
             interleaved: renderFormat.isInterleaved
         )
-        if preset == .stealth, let maskedFile {
+        if preset == .stealth {
+            guard let maskedFile else { throw XauXatVoiceMaskError.renderingFailed }
             try XauXatLLVCCapture.renderRecording(sourceFile, to: maskedFile, ambience: ambience)
         } else {
             try renderPitch()
@@ -174,6 +175,7 @@ struct XauXatVoiceMask {
 
             var stalledRenderAttempts = 0
             while engine.manualRenderingSampleTime < sourceFile.length {
+                try Task.checkCancellation()
                 let remainingFrames = sourceFile.length - engine.manualRenderingSampleTime
                 let framesToRender = min(renderBufferSize, AVAudioFrameCount(remainingFrames))
 
