@@ -2208,7 +2208,7 @@ struct ChatView: View {
                                     Image(systemName: "arrowshape.turn.up.left")
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(.secondary)
-                                        .opacity(min(1, abs(swipeOffset) / 40))
+                                        .opacity(min(1, Double(abs(swipeOffset)) / 40))
                                         .offset(x: ci.chatDir.sent ? 28 : -28)
                                         .allowsHitTesting(false)
                                         .accessibilityHidden(true)
