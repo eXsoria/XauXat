@@ -608,7 +608,6 @@ private struct XauXatRealtimeVoiceMaskingView: View {
     var body: some View {
         NavigationView {
             Form {
-                #if DEBUG
                 Section {
                     Toggle("Stealth", isOn: Binding(
                         get: { voiceMasking.llvcEnabled },
@@ -617,7 +616,7 @@ private struct XauXatRealtimeVoiceMaskingView: View {
                 } footer: {
                     Text("Processed locally on your iPhone. With active noise cancelation.")
                 }
-                #else
+                #if !DEBUG
                 if allowsVoiceMasking {
                     Section {
                         Toggle("Mask my voice", isOn: Binding(
@@ -629,7 +628,7 @@ private struct XauXatRealtimeVoiceMaskingView: View {
                     }
 
                     Section("Voice preset") {
-                        ForEach(XauXatVoiceMaskPreset.allCases) { preset in
+                        ForEach(XauXatVoiceMaskPreset.allCases.filter { $0 != .stealth }) { preset in
                             Button { voiceMasking.setPreset(preset) } label: {
                                 HStack(spacing: 12) {
                                     VStack(alignment: .leading, spacing: 3) {

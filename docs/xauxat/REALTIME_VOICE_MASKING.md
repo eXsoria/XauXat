@@ -32,18 +32,20 @@ change all presets while speaking, and repeat on receiver, speaker, wired, and
 Bluetooth routes. Confirm that the call remains connected and that no original
 voice is heard during either preset transitions or forced processing failures.
 
-## LLVC call prototype
+## Stealth in calls and voice notes
 
-Run the Debug configuration of `SimpleX (iOS)` on an iPhone. In a private
-audio call, open the XauXat mask button and enable **xauxat voice mask**.
+In a private audio call, open the XauXat mask button and enable **Stealth**.
+Choose **use voice mask** to start with Stealth, or **Answer with voice mask**
+in the in-app incoming call banner. The system CallKit screen has only the
+standard iOS answer controls. Voice notes offer Stealth in the preset picker.
 Start with the built-in microphone. Have the recipient compare normal and
 converted speech during a conversation, including quick turns and overlapping
 speech. Switching the toggle off restores the normal microphone.
 
 The bundled Core ML model uses the MIT-licensed KoeAI LLVC `G_500000` checkpoint,
-with a single target voice. Inference stays on the phone. The prototype accepts
+with a single target voice. Inference stays on the phone. Live capture accepts
 16 kHz and 48 kHz capture routes and sends silence during startup or failure.
-It is available in Debug independently of Plus and has no validated speaker
+Stealth is available independently of Plus and has no validated speaker
 anonymization claim.
 
 To reproduce the model, run [export-llvc.py](../../scripts/ios/export-llvc.py)

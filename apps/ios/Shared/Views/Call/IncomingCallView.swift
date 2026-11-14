@@ -91,14 +91,12 @@ struct IncomingCallView: View {
             callButton("Accept", Image(systemName: "phone.fill"), Color(red: 0.08, green: 0.50, blue: 0.25)) {
                 answer(invitation, startWithModifiedVoice: false)
             }
-            #if DEBUG
-            if !CallController.useCallKit() {
+            if !CallController.useCallKit() || invitation.callUUID == nil {
                 callButton("Answer with voice mask", Image("xauxat-mask"),
                            Color(red: 0.87, green: 0.81, blue: 0.69), foreground: .black) {
                     answer(invitation, startWithModifiedVoice: true)
                 }
             }
-            #endif
         }
         .fixedSize()
     }

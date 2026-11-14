@@ -30,12 +30,10 @@ final class XauXatRealtimeVoiceMasking: ObservableObject {
         setAmbience(.off)
         preset = .veil
         failureMessage = nil
-        #if DEBUG
         if call.startWithModifiedVoice {
             setLLVCEnabled(true)
             return
         }
-        #endif
         XauXatRealtimeAudioDevice.shared.configureMasking(enabled: false, preset: .veil)
     }
 
@@ -76,7 +74,6 @@ final class XauXatRealtimeVoiceMasking: ObservableObject {
         failureMessage = message
     }
 
-    #if DEBUG
     func setLLVCEnabled(_ enabled: Bool) {
         guard activeCall != nil else { return }
         self.enabled = false
@@ -85,7 +82,6 @@ final class XauXatRealtimeVoiceMasking: ObservableObject {
         if enabled { XauXatLLVCCapture.warmUp() }
         XauXatRealtimeAudioDevice.shared.configureMasking(enabled: false, preset: preset, llvc: enabled)
     }
-    #endif
 }
 
 final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
@@ -332,11 +328,9 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
 
                 let deliverRecordedData = delegate.deliverRecordedData
                 let ambienceMixer = XauXatCallAmbienceMixer(sampleRate: inputFormat.sampleRate)
-                #if DEBUG
                 let llvc = XauXatLLVCCapture(format: inputFormat, channels: Int(channels)) { [weak self] generation, message in
                     self?.reportPipelineFailure(message, generation: generation)
                 }
-                #endif
                 let renderBlock: RTCAudioDeviceRenderRecordedDataBlock = { _, _, _, frameCount, output, context in
                     guard let context else { return kAudio_ParamError }
                     let input = context.assumingMemoryBound(
@@ -357,7 +351,6 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
                     let masking = self.currentMaskingState()
                     guard !masking.suspended else { return noErr }
                     var flags: AudioUnitRenderActionFlags = []
-                    #if DEBUG
                     if masking.llvc {
                         guard frameCount > 0, !masking.suppress, !masking.failed else { return noErr }
                         guard var samples = llvc?.render(inputData, count: Int(frameCount), generation: masking.generation) else {
@@ -367,6 +360,7 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
                         ambienceMixer.mix(into: &samples, frames: Int(frameCount), selection: masking.ambience)
                         return deliverRecordedData(&flags, timestamp, 1, frameCount, &samples, nil, nil)
                     }
+                    #if DEBUG
                     // The prototype capture graph has no legacy pitch processor.
                     if masking.enabled { return noErr }
                     #else
