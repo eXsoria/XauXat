@@ -22,7 +22,7 @@ private enum XauXatTab: String, CaseIterable, Identifiable {
         switch self {
         case .chats: "Chats"
         case .contacts: "Contacts"
-        case .notes: "Notes"
+        case .notes: "Vault"
         case .settings: "Settings"
         }
     }
@@ -31,7 +31,7 @@ private enum XauXatTab: String, CaseIterable, Identifiable {
         switch self {
         case .chats: "bubble.left"
         case .contacts: "person.2"
-        case .notes: "note.text"
+        case .notes: "lock.square"
         case .settings: "gearshape"
         }
     }
@@ -1025,7 +1025,7 @@ private struct XauXatNotesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Notes")
+            Text("Vault")
                 .font(.system(size: 32, weight: .bold))
                 .foregroundStyle(palette.ink)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1038,18 +1038,18 @@ private struct XauXatNotesView: View {
                     ItemsModel.shared.loadOpenChat(privateNotes.id)
                 } label: {
                     HStack(spacing: 14) {
-                        Image(systemName: "lock.doc")
+                        Image(systemName: "lock.square.fill")
                             .font(.system(size: 19, weight: .medium))
                             .foregroundStyle(palette.ivoryInk)
                             .frame(width: 50, height: 50)
                             .background(palette.ivory, in: Circle())
 
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("Private notes")
+                            Text("Vault")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(palette.ink)
 
-                            Text("Only you can access these notes.")
+                            Text("Only you can access this vault.")
                                 .font(.system(size: 13.5, weight: .regular))
                                 .foregroundStyle(palette.muted)
                         }
@@ -1070,15 +1070,15 @@ private struct XauXatNotesView: View {
                 Spacer()
             } else {
                 VStack(spacing: 10) {
-                    Image(systemName: "lock.doc")
+                    Image(systemName: "lock.square.fill")
                         .font(.system(size: 28, weight: .regular))
                         .foregroundStyle(palette.muted)
 
-                    Text("Private notes unavailable")
+                    Text("Vault unavailable")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(palette.ink)
 
-                    Text("Your private notes are not ready yet.")
+                    Text("Your vault is not ready yet.")
                         .font(.system(size: 14))
                         .foregroundStyle(palette.muted)
                 }

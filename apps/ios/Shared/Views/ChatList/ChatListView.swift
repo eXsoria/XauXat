@@ -1139,7 +1139,7 @@ struct TagsView: View {
         case .groups: (item: active ? "person.2.fill" : "person.2", menu: nil, label: "Groups")
         case .channels: (item: active ? "antenna.radiowaves.left.and.right.circle.fill" : "antenna.radiowaves.left.and.right", menu: "antenna.radiowaves.left.and.right", label: "Channels")
         case .business: (item: active ? "briefcase.fill" : "briefcase", menu: nil, label: "Businesses")
-        case .notes: (item: active ? "folder.fill" : "folder", menu: nil, label: "Notes")
+        case .notes: (item: active ? "lock.square.fill" : "lock.square", menu: nil, label: "Vault")
         }
     }
 

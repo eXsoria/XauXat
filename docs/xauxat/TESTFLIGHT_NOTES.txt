@@ -1,6 +1,8 @@
-This build brings together the reviewed messaging, voice, photo and privacy updates.
+This build adds Vault (Cofre in Portuguese) and Stealth voice options to the reviewed messaging, voice, photo and privacy updates.
 
 What to test:
+- Open Vault from the home tab. Check its new lock icon, conversation title and authentication prompt. Confirm your existing private content is still available. In Portuguese, the name should appear as Cofre.
+- Try Stealth in call audio effects and in normal voice messages. Confirm the existing voice presets remain available.
 - Exchange text, photos, files and voice messages in both directions between two devices on Wi-Fi and mobile data. Check arrival time, attachment playback readiness, duplicate items and send status after a connection interruption.
 - Open a chat with several pending attachments and confirm automatic receiving continues through the whole batch.
 - Record, pause, resume, preview and send voice notes. Try Voice Mask with Rain or Outside, then turn Voice Mask off and confirm the saved background sound is not applied.

@@ -95,7 +95,7 @@ public func chatIconName(_ cInfo: ChatInfo) -> String {
     switch cInfo {
     case let .direct(contact): contact.chatIconName
     case let .group(groupInfo, _): groupInfo.chatIconName
-    case .local: "folder.circle.fill"
+    case .local: "lock.square.fill"
     case .contactRequest: "person.crop.circle.fill"
     default:  "circle.fill"
     }

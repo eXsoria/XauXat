@@ -608,7 +608,7 @@ struct ChatListNavLink: View {
 
     private func clearNoteFolderAlert() -> Alert {
         Alert(
-            title: Text("Clear private notes?"),
+            title: Text("Clear vault?"),
             message: Text("All messages will be deleted - this cannot be undone!"),
             primaryButton: .destructive(Text("Clear")) {
                 Task { await clearChat(chat) }
