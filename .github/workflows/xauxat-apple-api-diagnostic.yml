@@ -1,0 +1,33 @@
+name: XauXat Apple API diagnostic
+
+on:
+  push:
+    branches: [codex/testflight-354-apple-api]
+
+permissions:
+  contents: read
+
+jobs:
+  apple-api-access:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check existing Apple API access without changing account data
+        run: python3 scripts/ios/apple-api-release-diagnostic.py
+        env:
+          APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      - name: Remove temporary authentication material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/xauxat-api-diagnostic.p8"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: XauXat-Apple-API-diagnostic-${{ github.sha }}
+          path: ${{ runner.temp }}/apple-api-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 7
