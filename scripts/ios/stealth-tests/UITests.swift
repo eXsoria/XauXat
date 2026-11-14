@@ -96,6 +96,7 @@ final class StealthTests: XCTestCase {
         app.launchArguments.append("start-stealth")
         app.launch()
         expect("fixture.call", "Call stealth / on / neural")
+        expect("fixture.initialPath", "Initial path neural")
     }
     func testNormalVoiceNotesOfferStealth() {
         open("Voice note settings")

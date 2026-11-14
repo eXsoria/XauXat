@@ -81,8 +81,12 @@ final class XauXatRealtimeVoiceMasking: ObservableObject {
     }
 
     func setLLVCEnabled(_ enabled: Bool) {
-        if enabled { setPreset(.stealth) }
-        setEnabled(enabled)
+        guard activeCall != nil else { return }
+        self.enabled = enabled
+        if enabled { preset = .stealth }
+        failureMessage = nil
+        // Starting a masked call must never configure an intermediate raw path.
+        applySelection()
     }
 }
 

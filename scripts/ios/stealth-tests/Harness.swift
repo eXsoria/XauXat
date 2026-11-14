@@ -14,8 +14,10 @@ func excludeFromSystemBackup(_ url: URL) -> Bool { true }
 final class XauXatRealtimeAudioDevice {
     static let shared = XauXatRealtimeAudioDevice()
     var mode = "off"
+    var modes: [String] = []
     func configureMasking(enabled: Bool, preset: XauXatVoiceMaskPreset, llvc: Bool = false) {
         mode = llvc ? "neural" : (enabled ? "legacy" : "off")
+        modes.append(mode)
     }
     func setAmbience(_ ambience: XauXatCallAmbience) {}
     func suspendCapture() { mode = "off" }
@@ -43,17 +45,21 @@ final class AudioPlayer {
     }
 }
 
+struct RecordingDraft: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 struct HarnessView: View {
     @EnvironmentObject var plusEntitlements: XauXatPlusEntitlements
     @StateObject var voiceMasking = XauXatRealtimeVoiceMasking.shared
     @State var call = Call()
     @State var showCallEffects = false
     @State var showVoiceSettings = false
-    @State var showRecordingEffects = false
     @State var voiceNoteMaskEnabled = false
     @State var voiceNotePreset: XauXatVoiceMaskPreset = .veil
     @State var voiceNoteAmbience: XauXatCallAmbience = .off
-    @State var recordingURL: URL?
+    @State var recordingDraft: RecordingDraft?
     @State var result = "Ready"
     @State var started = false
 
@@ -63,13 +69,13 @@ struct HarnessView: View {
             Button("Voice note settings") { showVoiceSettings = true }
             Button("Recording effects") {
                 do {
-                    recordingURL = try AudioChecks.recording()
-                    showRecordingEffects = true
+                    recordingDraft = RecordingDraft(url: try AudioChecks.recording())
                 } catch { result = "Failed: \(error.localizedDescription)" }
             }
             Text("Call \(voiceMasking.preset.rawValue) / \(voiceMasking.enabled ? "on" : "off") / \(XauXatRealtimeAudioDevice.shared.mode)")
                 .accessibilityIdentifier("fixture.call")
             Text("Ambience \(voiceMasking.ambience.rawValue)").accessibilityIdentifier("fixture.ambience")
+            Text("Initial path \(XauXatRealtimeAudioDevice.shared.modes.first ?? "none")").accessibilityIdentifier("fixture.initialPath")
             Text("Voice note \(voiceNotePreset.rawValue)").accessibilityIdentifier("fixture.note")
             Text(result).accessibilityIdentifier("fixture.result")
         }
@@ -85,18 +91,17 @@ struct HarnessView: View {
             XauXatRealtimeVoiceMaskingView(allowsVoiceMasking: plusEntitlements.isAuthorized(for: .realTimeVoiceMasking))
         }
         .sheet(isPresented: $showVoiceSettings) { voiceNoteSettings }
-        .sheet(isPresented: $showRecordingEffects) {
-            if let recordingURL {
-                XauXatVoiceMaskPickerView(recordingURL: recordingURL, initialPreset: .veil) { preset, _ in
-                    result = "Rendering"
-                    Task {
-                        let outcome = await Task.detached(priority: .userInitiated) {
-                            Result { try AudioChecks.verify(recordingURL, preset: preset) }
-                        }.value
-                        switch outcome {
-                        case let .success(message): result = message
-                        case let .failure(error): result = "Failed: \(error.localizedDescription)"
-                        }
+        .sheet(item: $recordingDraft) { draft in
+            let recordingURL = draft.url
+            XauXatVoiceMaskPickerView(recordingURL: recordingURL, initialPreset: .veil) { preset, _ in
+                result = "Rendering"
+                Task {
+                    let outcome = await Task.detached(priority: .userInitiated) {
+                        Result { try AudioChecks.verify(recordingURL, preset: preset) }
+                    }.value
+                    switch outcome {
+                    case let .success(message): result = message
+                    case let .failure(error): result = "Failed: \(error.localizedDescription)"
                     }
                 }
             }
