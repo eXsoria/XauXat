@@ -443,6 +443,7 @@ private struct XauXatVoiceMaskPickerView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("voice.recording.preset.\(preset.rawValue)")
 
             if !canUse(preset) {
                 Button { showPlus = true } label: {

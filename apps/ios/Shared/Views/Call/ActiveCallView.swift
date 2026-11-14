@@ -608,22 +608,13 @@ private struct XauXatRealtimeVoiceMaskingView: View {
     var body: some View {
         NavigationView {
             Form {
-                #if DEBUG
-                Section {
-                    Toggle("Stealth", isOn: Binding(
-                        get: { voiceMasking.llvcEnabled },
-                        set: voiceMasking.setLLVCEnabled
-                    ))
-                } footer: {
-                    Text("Processed locally on your iPhone. With active noise cancelation.")
-                }
-                #else
                 if allowsVoiceMasking {
                     Section {
                         Toggle("Mask my voice", isOn: Binding(
                             get: { voiceMasking.enabled },
                             set: voiceMasking.setEnabled
                         ))
+                        .accessibilityIdentifier("call.voiceMask.enabled")
                     } footer: {
                         Text("Your microphone is transformed locally before WebRTC receives it. Preset changes keep the call connected.")
                     }
@@ -647,6 +638,7 @@ private struct XauXatRealtimeVoiceMaskingView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("call.voicePreset.\(preset.rawValue)")
                         }
                     }
                 } else {
@@ -658,8 +650,6 @@ private struct XauXatRealtimeVoiceMaskingView: View {
                         Label("Voice masking · XauXat Plus", systemImage: "lock")
                     }
                 }
-                #endif
-
                 Section {
                     Picker("Background sound", selection: Binding(
                         get: { voiceMasking.ambience },
@@ -670,6 +660,7 @@ private struct XauXatRealtimeVoiceMaskingView: View {
                         Text("Outside").tag(XauXatCallAmbience.traffic)
                     }
                     .pickerStyle(.menu)
+                    .accessibilityIdentifier("call.ambience")
                 } footer: {
                     Text("The other person hears this sound during the call.")
                 }

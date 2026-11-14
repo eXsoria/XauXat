@@ -1,4 +1,3 @@
-#if DEBUG
 import AVFoundation
 import CoreML
 import Foundation
@@ -314,4 +313,3 @@ final class XauXatLLVCCapture {
         }
     }
 }
-#endif

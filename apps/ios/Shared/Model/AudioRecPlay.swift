@@ -30,9 +30,7 @@ enum XauXatVoiceMaskPreset: String, CaseIterable, Identifiable {
     case alloy
     case hollow
     case wisp
-    #if DEBUG
     case stealth
-    #endif
 
     static let defaultPreferenceKey = "xauxat.voiceMask.defaultPreset"
 
@@ -44,9 +42,7 @@ enum XauXatVoiceMaskPreset: String, CaseIterable, Identifiable {
         case .alloy: return NSLocalizedString("Alloy", comment: "Plus voice masking preset name")
         case .hollow: return NSLocalizedString("Hollow", comment: "Plus voice masking preset name")
         case .wisp: return NSLocalizedString("Wisp", comment: "Plus voice masking preset name")
-        #if DEBUG
         case .stealth: return NSLocalizedString("Stealth", comment: "LLVC voice masking preset name")
-        #endif
         }
     }
 
@@ -56,16 +52,12 @@ enum XauXatVoiceMaskPreset: String, CaseIterable, Identifiable {
         case .alloy: return NSLocalizedString("Bright and metallic", comment: "voice masking preset description")
         case .hollow: return NSLocalizedString("Deep and distant", comment: "voice masking preset description")
         case .wisp: return NSLocalizedString("Light and airy", comment: "voice masking preset description")
-        #if DEBUG
         case .stealth: return NSLocalizedString("Neural voice transformation on this device", comment: "LLVC voice masking preset description")
-        #endif
         }
     }
 
     var requiresPlus: Bool {
-        #if DEBUG
         if self == .stealth { return false }
-        #endif
         return self != .veil
     }
 
@@ -75,9 +67,7 @@ enum XauXatVoiceMaskPreset: String, CaseIterable, Identifiable {
         case .alloy: return 320
         case .hollow: return -700
         case .wisp: return 610
-        #if DEBUG
         case .stealth: return 0
-        #endif
         }
     }
 }
@@ -136,15 +126,12 @@ struct XauXatVoiceMask {
             commonFormat: renderFormat.commonFormat,
             interleaved: renderFormat.isInterleaved
         )
-        #if DEBUG
-        if preset == .stealth, let maskedFile {
+        if preset == .stealth {
+            guard let maskedFile else { throw XauXatVoiceMaskError.renderingFailed }
             try XauXatLLVCCapture.renderRecording(sourceFile, to: maskedFile, ambience: ambience)
         } else {
             try renderPitch()
         }
-        #else
-        try renderPitch()
-        #endif
         if #available(iOS 18, *) { maskedFile?.close() }
         maskedFile = nil
         let sourceDuration = Double(sourceFile.length) / renderFormat.sampleRate
