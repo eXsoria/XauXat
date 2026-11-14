@@ -180,6 +180,19 @@ enum AudioChecks {
         let capture = XauXatLLVCCapture(format: format, channels: 1) { _, message in
             lock.lock(); failures.append(message); lock.unlock()
         }!
+        let previewURL = try recording()
+        defer { try? FileManager.default.removeItem(at: previewURL) }
+        let previews = DispatchGroup()
+        previews.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { previews.leave() }
+            do {
+                let data = try XauXatVoiceMask.previewData(from: previewURL, preset: .stealth)
+                try require(try AVAudioPlayer(data: data).duration > 1, "Concurrent preview was not playable")
+            } catch {
+                lock.lock(); failures.append("Concurrent preview: \(error)"); lock.unlock()
+            }
+        }
         let frames = Int(rate / 16_000) * 208
         let input = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))!
         input.frameLength = AVAudioFrameCount(frames)
@@ -198,6 +211,7 @@ enum AudioChecks {
         let switched = capture.render(input.audioBufferList, count: frames, generation: 2)!
         let transition = UnsafeBufferPointer(start: switched.mBuffers.mData!.assumingMemoryBound(to: Int16.self), count: frames)
         try require(transition.allSatisfy { $0 == 0 }, "A new processing generation leaked previous audio")
+        try require(previews.wait(timeout: .now() + 30) == .success, "Concurrent preview did not complete")
         lock.lock(); let errors = failures; lock.unlock()
         try require(errors.isEmpty, "Capture failed at \(rate) Hz: \(errors)")
         try require(audible, "Capture never emitted transformed audio at \(rate) Hz")

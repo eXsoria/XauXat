@@ -48,6 +48,9 @@ speech. Switching the toggle off restores the normal microphone.
 
 The bundled Core ML model uses the MIT-licensed KoeAI LLVC `G_500000` checkpoint,
 with a single target voice. Inference stays on the phone.
+Live capture and recording/preview rendering own separate model instances, as
+required by [Core ML's model threading contract](https://developer.apple.com/documentation/coreml/mlmodel).
+Cancelling a preview stops its render task and checks cancellation between audio chunks.
 The model and its MIT license are included in the release app. Stealth has no
 validated speaker anonymization claim. Voice-message rendering requires the
 recorder's 16 kHz mono format; an unsupported recording or missing model fails
@@ -56,7 +59,7 @@ with silence during startup, mode changes, or processing failure.
 
 `test-stealth-effects.sh` exercises the production menus and selection state in
 Debug and optimized Release. It runs the actual bundled model on AAC recordings
-and 16/48 kHz capture, checks startup/generation silence, and verifies that a
+and 16/48 kHz capture with concurrent previews, checks startup/generation silence, and verifies that a
 release fixture without the model preserves the original draft. Device,
 simulator, and exported IPA checks require the compiled model and its license.
 These checks do not replace two-iPhone testing of latency and audio routes.

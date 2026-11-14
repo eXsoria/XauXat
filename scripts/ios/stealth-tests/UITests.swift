@@ -5,7 +5,25 @@ final class StealthTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
+        app.terminate()
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+    }
+    override func tearDownWithError() throws {
+        if (testRun?.failureCount ?? 0) > 0 {
+            snapshot("failure")
+            print(app.debugDescription)
+        }
+    }
+    func setToggle(_ identifier: String, enabled: Bool) {
+        let control = app.switches[identifier]
+        XCTAssertTrue(control.waitForExistence(timeout: 10))
+        let value = enabled ? "1" : "0"
+        if control.value as? String != value {
+            // SwiftUI's AX frame includes the row label; target the actual thumb.
+            control.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        }
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: control)
+        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
     }
     func open(_ button: String) {
         if app.state != .runningForeground { app.launch() }
@@ -34,7 +52,7 @@ final class StealthTests: XCTestCase {
         for preset in ["veil", "alloy", "hollow", "wisp", "stealth"] {
             XCTAssertTrue(app.buttons["call.voicePreset.\(preset)"].exists)
         }
-        app.switches["call.voiceMask.enabled"].tap()
+        setToggle("call.voiceMask.enabled", enabled: true)
         choose("call.voicePreset.stealth")
         snapshot("call-stealth-and-existing-presets")
         let ambience = app.descendants(matching: .any)["call.ambience"].firstMatch
@@ -53,18 +71,18 @@ final class StealthTests: XCTestCase {
             expect("fixture.ambience", "Ambience rain")
         }
         open("Call effects")
-        app.switches["call.voiceMask.enabled"].tap()
+        setToggle("call.voiceMask.enabled", enabled: false)
         choose("call.voicePreset.stealth")
         app.buttons["Done"].tap()
         expect("fixture.call", "Call stealth / off / off")
         open("Call effects")
-        app.switches["call.voiceMask.enabled"].tap()
+        setToggle("call.voiceMask.enabled", enabled: true)
         app.buttons["Done"].tap()
         expect("fixture.call", "Call stealth / on / neural")
     }
     func testNormalVoiceNotesOfferStealth() {
         open("Voice note settings")
-        app.switches["xauxat voice mask"].tap()
+        setToggle("xauxat voice mask", enabled: true)
         let picker = app.descendants(matching: .any)["voice.note.preset"].firstMatch
         XCTAssertTrue(picker.exists)
         picker.tap()

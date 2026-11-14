@@ -175,6 +175,7 @@ struct XauXatVoiceMask {
 
             var stalledRenderAttempts = 0
             while engine.manualRenderingSampleTime < sourceFile.length {
+                try Task.checkCancellation()
                 let remainingFrames = sourceFile.length - engine.manualRenderingSampleTime
                 let framesToRender = min(renderBufferSize, AVAudioFrameCount(remainingFrames))
 
