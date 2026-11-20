@@ -256,7 +256,7 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
 
         if let audioEngine {
             let inputChanged = shouldRecord && audioSinkNode != nil && {
-                let format = audioEngine.inputNode.outputFormat(forBus: 1)
+                let format = audioEngine.inputNode.outputFormat(forBus: 0)
                 return audioInputFormat?.sampleRate != format.sampleRate
                     || audioInputFormat?.channelCount != min(2, format.channelCount)
             }()
@@ -315,7 +315,7 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
 
         if shouldRecord {
             if audioSinkNode == nil {
-                let inputFormat = engine.inputNode.outputFormat(forBus: 1)
+                let inputFormat = engine.inputNode.outputFormat(forBus: 0)
                 guard inputFormat.xauxatIsUsable else {
                     reportPipelineFailure("invalid input format")
                     return
