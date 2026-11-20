@@ -1,6 +1,7 @@
-This build adds Vault (Cofre in Portuguese) and Stealth voice options to the reviewed messaging, voice, photo and privacy updates.
+This build corrects invalid microphone access when call audio starts or is rebuilt. It includes Vault (Cofre in Portuguese), Stealth voice options, and the existing messaging, voice, photo and privacy updates.
 
 What to test:
+- Place and answer audio calls in both directions. Check the transition from connecting to connected and keep speaking after connection. Repeat with Stealth off and on, and switch between receiver, speaker and Bluetooth where available.
 - Open Vault from the home tab. Check its new lock icon, conversation title and authentication prompt. Confirm your existing private content is still available. In Portuguese, the name should appear as Cofre.
 - Try Stealth in call audio effects and in normal voice messages. Confirm the existing voice presets remain available.
 - Exchange text, photos, files and voice messages in both directions between two devices on Wi-Fi and mobile data. Check arrival time, attachment playback readiness, duplicate items and send status after a connection interruption.
@@ -13,5 +14,7 @@ What to test:
 - If startup or delivery stalls, use Private connection > Copy connection diagnostics and include the time, network type and affected media in the report.
 
 Known limitation: when redundant relay queues are enabled, a full relay can make a contact appear inactive even when another relay is delivering receipts. Please report this status along with the diagnostics.
+
+The reported app exit immediately after a call connects still needs physical iPhone confirmation on this build. If it persists, include the crash report, build number, time, audio route and whether voice effects were enabled. Automated checks do not establish every CallKit or Bluetooth route.
 
 Physical iPhone acceptance is still needed for delivery latency, real audio playback and call/notification behavior. Automated relay tests are not a latency guarantee.
