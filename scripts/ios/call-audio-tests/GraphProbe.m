@@ -43,13 +43,20 @@
             self.result[@"error"] = @"No usable simulator audio route";
             [self save]; return;
         }
-        BOOL tap = [self.caseName hasPrefix:@"tap-pitch"];
+        BOOL tap = [self.caseName hasPrefix:@"tap-"];
         BOOL pitch = ![self.caseName hasPrefix:@"direct"];
         AVAudioUnitTimePitch *effect = pitch ? [AVAudioUnitTimePitch new] : nil;
         if (effect) {
             effect.pitch = 0; effect.rate = 1;
             [engine attachNode:effect];
-            [engine connect:engine.inputNode to:effect format:input];
+            if ([self.caseName containsString:@"mixer-pitch"]) {
+                AVAudioMixerNode *inputMixer = [AVAudioMixerNode new];
+                [engine attachNode:inputMixer];
+                [engine connect:engine.inputNode to:inputMixer format:input];
+                [engine connect:inputMixer to:effect format:input];
+            } else {
+                [engine connect:engine.inputNode to:effect format:[self.caseName containsString:@"native-pitch"] ? nil : input];
+            }
         }
         if (tap) {
             AVAudioMixerNode *muted = [AVAudioMixerNode new]; muted.outputVolume = 0;

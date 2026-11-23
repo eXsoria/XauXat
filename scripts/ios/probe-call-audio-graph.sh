@@ -34,7 +34,7 @@ xcrun simctl bootstatus "$udid" -b
 xcrun simctl install "$udid" "$app"
 xcrun simctl privacy "$udid" grant microphone pt.exsoria.call-graph-probe
 data=$(xcrun simctl get_app_container "$udid" pt.exsoria.call-graph-probe data)
-for variant in direct-default sink-pitch-default tap-pitch-default direct-voice sink-pitch-voice tap-pitch-voice; do
+for variant in tap-mixer-pitch-default tap-mixer-pitch-voice tap-native-pitch-default tap-native-pitch-voice; do
   xcrun simctl launch "$udid" pt.exsoria.call-graph-probe "$variant"
   for attempt in {1..30}; do
     [[ -f "$data/Documents/$variant.json" ]] && break
