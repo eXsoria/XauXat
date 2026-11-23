@@ -147,4 +147,46 @@ final class HomeChatTests: XCTestCase {
         app.buttons["Delete chat"].tap()
         assertResult("Full deletion notify=false")
     }
+
+    func testLongChatListScrollsBothWaysFromRowsAndStillRevealsSearch() {
+        app.launchArguments.append("many-chats")
+        app.launch()
+        let first = app.buttons["xauxat.chat.@1"]
+        let sixth = app.buttons["xauxat.chat.@6"]
+        XCTAssertTrue(sixth.waitForExistence(timeout: 5))
+        waitUntil { sixth.isHittable }
+        let originalY = sixth.frame.minY
+        let start = sixth.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -260)))
+        waitUntil { sixth.frame.minY < originalY - 150 && !first.isHittable }
+        XCTAssertEqual(app.staticTexts["open.result"].label, "Opened 0")
+        proof("long-chat-list-scrolled-down")
+
+        let scrolledY = sixth.frame.minY
+        let back = sixth.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        back.press(forDuration: 0.1, thenDragTo: back.withOffset(CGVector(dx: 0, dy: 300)))
+        waitUntil { first.isHittable && sixth.frame.minY > scrolledY + 150 }
+        XCTAssertTrue(app.textFields["Search conversations"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["open.result"].label, "Opened 0")
+        proof("long-chat-list-scrolled-up-with-search")
+        first.tap()
+        XCTAssertEqual(app.staticTexts["open.result"].label, "Opened 1")
+    }
+
+    func testHorizontalActionsStillWorkAfterScrollingLongChatList() {
+        app.launchArguments.append("many-chats")
+        app.launch()
+        let sixth = app.buttons["xauxat.chat.@6"]
+        XCTAssertTrue(sixth.waitForExistence(timeout: 5))
+        let originalY = sixth.frame.minY
+        let start = sixth.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -260)))
+        waitUntil { sixth.frame.minY < originalY - 150 }
+        revealActions()
+        XCTAssertEqual(app.staticTexts["open.result"].label, "Opened 0")
+        action("More").tap()
+        XCTAssertTrue(app.buttons["Delete contact"].waitForExistence(timeout: 3))
+        proof("horizontal-actions-after-vertical-scroll")
+    }
 }
+

@@ -11,6 +11,8 @@ struct Contact {
 }
 enum ChatInfo {
     case direct(Contact), group, local, contactConnection
+    var chatDeleted: Bool { false }
+    var contactCard: Bool { false }
     var chatViewName: String { "Test contact" }
     var shortDescr: String? { nil }
     var chatTs: Date { Date(timeIntervalSince1970: 1_800_000_000) }
@@ -29,11 +31,15 @@ struct ChatItem {
 }
 struct ChatStats { var unreadCount = 0 }
 final class Chat: ObservableObject, Identifiable {
-    let id = "@7"
+    let id: String
+    var viewId: String { id }
     @Published var chatInfo: ChatInfo
     var chatItems = [ChatItem()]
     var chatStats = ChatStats()
-    init(_ status: ContactStatus) { chatInfo = .direct(Contact(contactStatus: status)) }
+    init(_ status: ContactStatus, id: String = "@7") {
+        self.id = id
+        chatInfo = .direct(Contact(contactStatus: status))
+    }
 }
 enum ChatDeleteMode { case full(notify: Bool), messages }
 final class ChatModel: ObservableObject {
@@ -84,6 +90,8 @@ func chatPreviewText(_ chat: Chat) -> String {
     return "Message preview"
 }
 func xauXatIsChatLocked(_ id: String) -> Bool { false }
+func xauXatIsChatHidden(_ id: String) -> Bool { false }
+func reconnectAllServers() async throws {}
 func xauXatSetChatLocked(_ id: String, locked: Bool) -> Bool { true }
 func toggleNotifications(_ chat: Chat, enableNtfs: NtfMode) {}
 func authenticate(title: String, reason: String, completion: (Result<Void, Error>) -> Void) {
@@ -115,7 +123,7 @@ func deleteContactChat(_ chat: Chat, chatDeleteMode: ChatDeleteMode) async -> Al
     @StateObject private var model = ChatModel.shared
     @StateObject private var entitlements = XauXatPlusEntitlements()
     @State private var parentSheet: SomeSheet<AnyView>?
-    @State private var swiping = false
+    @State private var showNewChatSheet = false
 
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -125,6 +133,9 @@ func deleteContactChat(_ chat: Chat, chatDeleteMode: ChatDeleteMode) async -> Al
             UserDefaults.standard.removeObject(forKey: "fixture.deleted")
         }
         ChatModel.shared.chats = UserDefaults.standard.bool(forKey: "fixture.deleted") ? [] : [Chat(status)]
+        if args.contains("many-chats") {
+            ChatModel.shared.chats = (1...40).map { Chat(.active, id: "@\($0)") }
+        }
         ChatModel.shared.failOnce = args.contains("fail-once")
         ChatModel.shared.result = "No deletion"
         ChatModel.shared.opens = 0
@@ -133,15 +144,8 @@ func deleteContactChat(_ chat: Chat, chatDeleteMode: ChatDeleteMode) async -> Al
     var body: some Scene {
         WindowGroup {
             VStack {
-                Text("Chats").font(.largeTitle)
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(model.chats) { chat in
-                            XauXatChatDestination(chat: chat, palette: XauXatPalette(.light),
-                                parentSheet: $parentSheet, contactStyle: false, chatSwipeActive: $swiping)
-                        }
-                    }.padding(.horizontal, 22)
-                }
+                XauXatChatsView(palette: XauXatPalette(.light), parentSheet: $parentSheet,
+                    showNewChatSheet: $showNewChatSheet)
                 Text(model.result).accessibilityIdentifier("delete.result")
                 Text("Opened \(model.opens)").accessibilityIdentifier("open.result")
                 Button("Receive deletion event") {
@@ -153,3 +157,4 @@ func deleteContactChat(_ chat: Chat, chatDeleteMode: ChatDeleteMode) async -> Al
         }
     }
 }
+

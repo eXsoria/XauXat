@@ -11,6 +11,10 @@ for name in ("Harness.swift", "UITests.swift"):
 source = (root / "apps/ios/Shared/Views/XauXatHomeView.swift").read_text(encoding="utf-8")
 palette = source[source.index("private struct XauXatPalette {"):source.index("private enum XauXatOnboardingField:")]
 rows = source[source.index("private struct XauXatChatDestination:"):source.index("private struct XauXatEmptyState:")]
+# Exercise the real scroll container and search gesture together with its rows.
+chats = source[source.index("private struct XauXatChatsView:"):source.index("private struct XauXatNotesView:")]
+empty = source[source.index("private struct XauXatEmptyState:"):source.index("private struct XauXatSettingsHome:")]
+rows = chats + rows + empty
 # File-level access only; leave the implementation and nested private members intact.
 rows = rows.replace("private struct ", "struct ")
 palette = palette.replace("private struct ", "struct ")
@@ -76,3 +80,4 @@ app, tests = reference("A", "HomeChatHarness.app"), reference("T", "HomeChatHarn
 <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"><Testables><TestableReference skipped="NO">{tests}</TestableReference></Testables></TestAction>
 <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" allowLocationSimulation="YES"><BuildableProductRunnable runnableDebuggingMode="0">{app}</BuildableProductRunnable></LaunchAction>
 </Scheme>''')
+

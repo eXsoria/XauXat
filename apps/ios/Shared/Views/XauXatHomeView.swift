@@ -1404,7 +1404,9 @@ private struct XauXatChatDestination: View {
                 .background(palette.background)
                 .offset(x: swipeOffset)
                 .contentShape(Rectangle())
-                .highPriorityGesture(horizontalSwipeGesture)
+                // Direction checks run after recognition. A high-priority drag
+                // therefore steals vertical pans before they can scroll the list.
+                .simultaneousGesture(horizontalSwipeGesture)
                 .zIndex(1)
         }
         .overlay(alignment: .trailing) {
