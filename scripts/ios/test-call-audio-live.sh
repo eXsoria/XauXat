@@ -4,6 +4,7 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 temp=$(mktemp -d)
 out=${CALL_LIVE_OUTPUT:-"$temp/proof"}
 mkdir -p "$out" "$temp/CallAudioLive.app"
+touch "$temp/started"
 udid=""
 cleanup() {
   if [[ -n "$udid" ]]; then xcrun simctl shutdown "$udid" || true; xcrun simctl delete "$udid" || true; fi
@@ -47,7 +48,7 @@ xcrun --sdk iphonesimulator swiftc -O -swift-version 5 -target "$target" -sdk "$
   "$temp/source/main.swift" "$temp/objc.o" -o "$app/Live" 2>&1 | tee "$out/build.log"
 mkdir -p "$app/Frameworks"
 cp -R "$framework/WebRTC.framework" "$app/Frameworks/"
-xcrun coremlcompiler compile "$root/apps/ios/Shared/Views/Call/XauXatLLVC.mlpackage" "$app" --deployment-target 15.0
+xcrun coremlcompiler compile "$root/apps/ios/Shared/Views/Call/XauXatLLVC.mlpackage" "$app" --deployment-target 15.0 --platform iphonesimulator
 xcrun actool "$temp/source/Ambience.xcassets" --compile "$app" --platform iphonesimulator \
   --minimum-deployment-target 15.0 --target-device iphone --output-partial-info-plist "$temp/assets.plist"
 codesign --force --deep --sign - "$app"
@@ -58,12 +59,23 @@ xcrun simctl bootstatus "$udid" -b
 xcrun simctl install "$udid" "$app"
 xcrun simctl privacy "$udid" grant microphone pt.exsoria.call-audio-live
 data=$(xcrun simctl get_app_container "$udid" pt.exsoria.call-audio-live data)
-for variant in record-default play-default record-voice play-voice; do
-  xcrun simctl launch --stdout="$out/$variant.stdout.log" --stderr="$out/$variant.stderr.log" "$udid" pt.exsoria.call-audio-live "$variant"
+for variant in ${CALL_LIVE_CASES:-record-default play-default record-voice play-voice}; do
+  launch=$(xcrun simctl launch --stdout="$out/$variant.stdout.log" --stderr="$out/$variant.stderr.log" "$udid" pt.exsoria.call-audio-live "$variant")
+  echo "$launch"
   for attempt in {1..75}; do
     [[ -f "$data/Documents/$variant.json" ]] && break
     sleep 1
   done
+  if [[ -f "$data/Documents/$variant.progress.json" ]]; then cp "$data/Documents/$variant.progress.json" "$out/"; fi
+  if [[ ! -f "$data/Documents/$variant.json" ]]; then
+    pid=${launch##*: }
+    sample "$pid" 3 -file "$out/$variant.sample.txt" || true
+    xcrun simctl spawn "$udid" log show --last 3m --style compact --predicate 'process == "Live" OR eventMessage CONTAINS "call-audio-live"' > "$out/$variant.system.log" || true
+    mkdir -p "$out/crashes"
+    find "$HOME/Library/Logs/DiagnosticReports" -type f -name 'Live*' -newer "$temp/started" -exec cp {} "$out/crashes/" \; || true
+    echo "Missing result for $variant; saved progress, process sample and crash diagnostics" >&2
+    exit 1
+  fi
   cp "$data/Documents/$variant.json" "$out/$variant.json"
   cat "$out/$variant.json"
   xcrun simctl terminate "$udid" pt.exsoria.call-audio-live || true

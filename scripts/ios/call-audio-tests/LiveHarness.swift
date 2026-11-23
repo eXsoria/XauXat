@@ -83,6 +83,14 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     var name = CommandLine.arguments.last!
     var failure: String?
 
+    func progress(_ phase: String) {
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(name + ".progress.json")
+        let data: [String:Any] = ["case":name, "phase":phase, "counts":endpoint.snapshot(), "checks":results, "time":Date().timeIntervalSince1970]
+        try! JSONSerialization.data(withJSONObject:data, options:[.prettyPrinted,.sortedKeys]).write(to:url,options:.atomic)
+        print("CALL_AUDIO_PHASE \(name) \(phase)")
+        fflush(stdout)
+    }
+
     func save() {
         let result: [String: Any] = ["case": name, "failure": failure ?? NSNull(), "checks": results, "stage": failure == nil ? "passed" : "failed"]
         let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(name + ".json")
@@ -102,6 +110,7 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     }
 
     func settle(_ label: String, record: Bool = true, play: Bool = true, signal: Bool = false, next: @escaping () -> Void) {
+        progress(label)
         let before = endpoint.snapshot()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             do {
@@ -117,6 +126,7 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     }
 
     func finish() {
+        progress("terminate-device")
         _ = XauXatRealtimeAudioDevice.shared.terminateDevice()
         save()
     }
@@ -152,12 +162,15 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
     }
 
     func start() {
+        progress("manual-pitch-proof")
         do {
             try check("manual-pitch-signal") { try self.runPitchProof() }
+            progress("activate-session")
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: name.hasSuffix("voice") ? .voiceChat : .default, options: [.defaultToSpeaker])
             try session.setPreferredIOBufferDuration(0.01)
             try session.setActive(true)
+            progress("initialize-device")
             let device = XauXatRealtimeAudioDevice.shared
             try require(device.initialize(with: endpoint), "initialize failed")
             device.configureMasking(enabled:false, preset:.veil)
