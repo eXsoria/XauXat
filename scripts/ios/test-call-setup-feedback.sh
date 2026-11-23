@@ -75,14 +75,34 @@ expect(!XauXatCallSetupTimeline.latestDiagnosticText.contains("987654321") && !X
         .environment(\\.dynamicTypeSize, size)
         .foregroundColor(.white).font(.subheadline).padding(24)
         .frame(width: 390, height: 330).background(.black)
-    let renderer = ImageRenderer(content: content)
-    renderer.scale = 2
-    guard let image = renderer.nsImage,
-          let data = image.tiffRepresentation,
-          let bitmap = NSBitmapImageRep(data: data),
-          let png = bitmap.representation(using: .png, properties: [:]) else { fatalError("Feedback rendering failed") }
+    // A live host is required for TimelineView and the native activity indicator.
+    // ImageRenderer can substitute an unsupported-view symbol or an empty frame.
+    let host = NSHostingView(rootView: content)
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 390, height: 330),
+                          styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = host
+    window.orderFront(nil)
+    host.layoutSubtreeIfNeeded()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    host.displayIfNeeded()
+    guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { fatalError("Feedback rendering failed") }
+    host.cacheDisplay(in: host.bounds, to: bitmap)
+    var visiblePixels = 0
+    for y in 0..<bitmap.pixelsHigh {
+        for x in 0..<bitmap.pixelsWide {
+            if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+               max(color.redComponent, color.greenComponent, color.blueComponent) > 0.2 { visiblePixels += 1 }
+        }
+    }
+    expect(visiblePixels > 100, "Feedback must be visible, including with accessibility text sizes")
+    guard let png = bitmap.representation(using: .png, properties: [:]) else { fatalError("PNG encoding failed") }
     try! png.write(to: URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent(name + ".png"))
+    window.orderOut(nil)
+    window.close()
 }
+_ = NSApplication.shared
+NSApp.setActivationPolicy(.accessory)
 MainActor.assumeIsolated { render(call, "connecting") }
 Thread.sleep(forTimeInterval: 15)
 expect(call.setupTimeline.elapsedSeconds >= 15, "Elapsed time survives view recreation")
