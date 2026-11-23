@@ -85,6 +85,7 @@ expect(!XauXatCallSetupTimeline.latestDiagnosticText.contains("987654321") && !X
     window.orderFront(nil)
     host.layoutSubtreeIfNeeded()
     RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    host.needsDisplay = true
     host.displayIfNeeded()
     guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { fatalError("Feedback rendering failed") }
     host.cacheDisplay(in: host.bounds, to: bitmap)
@@ -103,14 +104,18 @@ expect(!XauXatCallSetupTimeline.latestDiagnosticText.contains("987654321") && !X
 }
 _ = NSApplication.shared
 NSApp.setActivationPolicy(.accessory)
-MainActor.assumeIsolated { render(call, "connecting") }
+let previewCall = Call(direction: .incoming, contact: Contact(apiId: 1), callUUID: nil,
+                       callState: .invitationAccepted, initialCallType: .audio)
+MainActor.assumeIsolated { render(previewCall, "preparing") }
 Thread.sleep(forTimeInterval: 15)
-expect(call.setupTimeline.elapsedSeconds >= 15, "Elapsed time survives view recreation")
+expect(previewCall.setupTimeline.elapsedSeconds >= 15, "Elapsed time survives view recreation")
 MainActor.assumeIsolated {
-    render(call, "delayed")
-    render(call, "delayed-large-text", .accessibility3)
-    call.callState = .connected
-    render(call, "connected")
+    previewCall.callState = .offerSent
+    render(previewCall, "delayed")
+    previewCall.callState = .answerReceived
+    render(previewCall, "delayed-large-text", .accessibility3)
+    previewCall.callState = .connected
+    render(previewCall, "connected")
 }
 print("Call setup timing, state integration, privacy and four feedback renders passed")
 ''', encoding='utf-8')
