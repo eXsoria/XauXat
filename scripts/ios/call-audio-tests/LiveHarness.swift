@@ -89,7 +89,7 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
         try! JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: url)
     }
 
-    func check(_ label: String, _ body: () throws -> Void) throws {
+    func check(_ label: String, _ body: @escaping () throws -> Void) throws {
         try ObjC.catchException {
             do { try body() } catch { self.failure = label + ": " + error.localizedDescription }
         }
@@ -153,7 +153,7 @@ final class HarnessApp: UIResponder, UIApplicationDelegate {
 
     func start() {
         do {
-            try check("manual-pitch-signal") { try runPitchProof() }
+            try check("manual-pitch-signal") { try self.runPitchProof() }
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: name.hasSuffix("voice") ? .voiceChat : .default, options: [.defaultToSpeaker])
             try session.setPreferredIOBufferDuration(0.01)
