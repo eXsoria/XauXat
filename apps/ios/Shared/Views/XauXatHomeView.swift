@@ -3405,6 +3405,7 @@ struct XauXatTorDiagnosticsView: View {
                     UIPasteboard.general.string = "XauXat \(version) (\(build))\nstore_open=\(isChatStoreOpen())\n"
                         + "startup_initialized=\(model.chatInitialized) startup_initializing=\(model.ctrlInitInProgress) onboarding_stage=\(model.onboardingStage?.rawValue ?? "none")\n"
                         + recovery.diagnosticText + "\n\n" + tor.diagnosticText
+                        + "\n\n" + XauXatCallSetupTimeline.latestDiagnosticText
                 }
                 .font(.system(size: 14, weight: .bold, design: .default))
                 .foregroundStyle(palette.ink)

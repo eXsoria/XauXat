@@ -1,0 +1,37 @@
+name: XauXat call setup feedback
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - apps/ios/Shared/Views/Call/WebRTC.swift
+      - apps/ios/Shared/Views/Call/ActiveCallView.swift
+      - apps/ios/Shared/Views/XauXatHomeView.swift
+      - apps/ios/en.lproj/Localizable.strings
+      - apps/ios/pt.lproj/Localizable.strings
+      - scripts/ios/test-call-setup-feedback.sh
+      - .github/workflows/xauxat-call-setup-feedback.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: call-setup-feedback-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  feedback:
+    runs-on: macos-26-intel
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: bash scripts/ios/test-call-setup-feedback.sh
+        env:
+          CALL_SETUP_OUTPUT: ${{ runner.temp }}/call-setup-feedback
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: XauXat-call-setup-feedback-${{ github.sha }}
+          path: ${{ runner.temp }}/call-setup-feedback
+          if-no-files-found: warn
+          retention-days: 7
