@@ -38,7 +38,7 @@
       "vendored_frameworks": "tor-nolzma.xcframework",
       "libraries": "z",
       "pod_target_xcconfig": {
-        "HEADER_SEARCH_PATHS": "$(inherited) \"${PODS_TARGET_SRCROOT}/tor-nolzma.xcframework/ios-arm64/tor-nolzma.framework/Headers\""
+        "HEADER_SEARCH_PATHS": "$(inherited) \"${PODS_TARGET_SRCROOT}/tor-nolzma.xcframework/ios-arm64/Headers\""
       },
       "preserve_paths": "tor-nolzma.xcframework"
     }

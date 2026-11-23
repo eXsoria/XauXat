@@ -10,7 +10,7 @@ pod install --project-directory="$root/apps/ios" --deployment
 python3 "$root/scripts/ios/verify-tor-dependency.py" --installed
 
 tor="$root/apps/ios/Pods/Tor"
-framework=$(python3 - "$tor/tor-nolzma.xcframework" "$temp" "$root" <<'PY'
+engine=$(python3 - "$tor/tor-nolzma.xcframework" "$temp" "$root" <<'PY'
 import json
 from pathlib import Path
 import platform
@@ -25,16 +25,19 @@ with (framework / 'Info.plist').open('rb') as stream:
 lib = next(lib for lib in libraries if lib['SupportedPlatform'] == 'macos'
            and arch in lib['SupportedArchitectures'])
 print(framework / lib['LibraryIdentifier'] / lib['LibraryPath'])
+print(framework / lib['LibraryIdentifier'] / lib['HeadersPath'])
 # Derive the wrapper pin from the same spec that installed the engine.
 spec = json.loads((root / 'apps/ios/podspecs/Tor.podspec.json').read_text())
 url = 'https://raw.githubusercontent.com/iCepa/Tor.framework/' + spec['source']['commit'] + '/Sources/CTor/TORThread.m'
 (temp / 'TORThread.m').write_bytes(urllib.request.urlopen(url, timeout=30).read())
 PY
 )
+library=$(printf '%s\n' "$engine" | head -1)
+headers=$(printf '%s\n' "$engine" | tail -1)
 sources="$tor/Sources"
 flags=(-fobjc-arc -fsanitize=address -framework Foundation -framework CFNetwork
-       -I "$sources/TorCore/include" -I "$sources/CTor/include" -I "$framework/Headers"
-       -F "$(dirname "$framework")" -framework tor-nolzma -lz)
+       -I "$sources/TorCore/include" -I "$sources/CTor/include" -I "$headers"
+       "$library" -lz)
 harness="$root/scripts/ios/tor-recovery-tests/EngineVersion.m"
 
 clang "${flags[@]}" "$temp/TORThread.m" "$harness" -o "$temp/upstream"

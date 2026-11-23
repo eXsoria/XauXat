@@ -11,7 +11,7 @@ EXTERNAL SOURCES:
     :podspec: podspecs/Tor.podspec.json
 
 SPEC CHECKSUMS:
-  Tor: c3d49cc332f0d13e41836a06be3323e794c236d0
+  Tor: 4cdb759ea565167e89b321e52cb79b2ccaa11dc5
 
 PODFILE CHECKSUM: b46d01e6fd831f6902db5f95ce6f2dd68df8e406
 

@@ -80,7 +80,9 @@ def validate_installed(root):
                       and 'arm64' in lib['SupportedArchitectures']]
         require(bool(candidates), f'No ARM64 iOS {variant or "device"} engine slice')
         for lib in candidates:
-            binary = framework / lib['LibraryIdentifier'] / lib['LibraryPath'] / 'tor-nolzma'
+            binary = framework / lib['LibraryIdentifier'] / lib['LibraryPath']
+            require(binary.is_file() and binary.suffix == '.a',
+                    f'Expected the pinned release static library: {binary}')
             payload = binary.read_bytes()
             require(ENGINE_VERSION.encode() in payload, f'Wrong Tor version in {binary}')
             require(b'OpenSSL 3.6.5' in payload, f'Wrong OpenSSL version in {binary}')
