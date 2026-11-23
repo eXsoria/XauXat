@@ -115,6 +115,7 @@ test "$(pod --version)" = "1.17.0"
 "$repo_root/scripts/ios/verify-notification-privacy-policy.sh"
 "$repo_root/scripts/ios/validate-notification-matrix.sh" --allow-pending "$repo_root/docs/xauxat/ios-notification-test-matrix.json"
 pod install --project-directory="$repo_root/apps/ios" --deployment
+python3 "$repo_root/scripts/ios/verify-tor-dependency.py" --installed
 
 build_settings=$(xcodebuild \
   -workspace "$workspace" \

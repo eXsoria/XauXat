@@ -367,6 +367,7 @@ jobs:
         run: |
           test "$(pod --version)" = "1.17.0"
           pod install --project-directory=apps/ios --deployment
+          python3 scripts/ios/verify-tor-dependency.py --installed
 
       - name: Verify production notification configuration
         run: python3 scripts/ios/verify-notification-configuration.py
@@ -454,6 +455,7 @@ jobs:
         run: |
           test "$(pod --version)" = "1.17.0"
           pod install --project-directory=apps/ios --deployment
+          python3 scripts/ios/verify-tor-dependency.py --installed
 
       - name: Boot latest available iPhone simulator
         id: simulator

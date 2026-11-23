@@ -4,35 +4,27 @@ use_frameworks!
 target 'SimpleX (iOS)' do
   # Embed Tor in XauXat without installing a VPN or changing the device proxy.
   # NoLZMA also avoids the case-insensitive Tor.framework / tor.framework clash.
-  pod 'Tor/CTor-NoLZMA', '409.11.2'
+  pod 'Tor/CTor-NoLZMA', :podspec => 'podspecs/Tor.podspec.json'
 end
 
 target 'SimpleX NSE' do
   # A notification service extension runs in a separate process and cannot
   # depend on the app's Tor thread still being alive while the app is suspended.
-  pod 'Tor/CTor-NoLZMA', '409.11.2'
+  pod 'Tor/CTor-NoLZMA', :podspec => 'podspecs/Tor.podspec.json'
 end
 
-# Tor 409.11.2 writes the argv terminator one element past its allocation.
-# Keep this patch bounded and fail dependency installation if upstream changes.
+# Latest upstream engine and wrapper, pinned by SHA-256 and commit respectively.
+# Apply both reviewed fixes to the shared app/NSE wrapper, failing on source drift.
 post_install do |installer|
   controller_patch = File.expand_path('../../scripts/ios/patch-tor-controller.py', __dir__)
-  controller_source = installer.sandbox.root + 'Tor/Tor/Classes/Core'
+  controller_source = installer.sandbox.root + 'Tor/Sources/TorCore'
   unless system('python3', controller_patch, controller_source.to_s)
     raise 'Could not apply the pinned Tor control-socket lifecycle patch.'
   end
 
-  path = installer.sandbox.root + 'Tor/Tor/Classes/CTor/TORThread.m'
-  source = File.read(path)
-  original = 'char *argv[argc];'
-  fixed = 'char *argv[argc + 1];'
-
-  unless source.include?(original) || source.include?(fixed)
-    raise 'TORThread argv layout changed; review the XauXat safety patch.'
-  end
-
-  if source.include?(original)
-    File.chmod(0644, path)
-    File.write(path, source.sub(original, fixed))
+  thread_patch = File.expand_path('../../scripts/ios/patch-tor-thread.py', __dir__)
+  thread_source = installer.sandbox.root + 'Tor/Sources/CTor/TORThread.m'
+  unless system('python3', thread_patch, thread_source.to_s)
+    raise 'Could not apply the pinned Tor argv safety patch.'
   end
 end

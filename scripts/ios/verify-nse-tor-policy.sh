@@ -17,7 +17,8 @@ require_text() {
 }
 
 require_text "$podfile" "target 'SimpleX NSE' do"
-require_text "$podfile" "pod 'Tor/CTor-NoLZMA', '409.11.2'"
+require_text "$podfile" "pod 'Tor/CTor-NoLZMA', :podspec => 'podspecs/Tor.podspec.json'"
+python3 "$repo_root/scripts/ios/verify-tor-dependency.py"
 require_text "$manager" '"--SocksPort", "127.0.0.1:auto"'
 require_text "$manager" 'case .stopped, .ready, .failed:'
 require_text "$manager" 'if authenticated, let controller, controller.isConnected'
