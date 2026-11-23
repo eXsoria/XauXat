@@ -1,7 +1,8 @@
-This build changes call audio capture to address the native audio-engine abort reported immediately after connecting in build 356. Voice processing now runs separately from the hardware microphone graph. It includes Vault (Cofre in Portuguese), Stealth voice options, and the existing messaging, voice, photo and privacy updates.
+This build combines the call-connection fix from build 357 with an update to the embedded Tor connection engine. It includes Vault (Cofre in Portuguese), Stealth voice options, and the existing messaging, voice, photo and privacy updates.
 
 What to test:
 - Place and answer audio calls in both directions. Check the transition from connecting to connected and keep speaking after connection. Repeat with Stealth off and on, and switch between receiver, speaker and Bluetooth where available.
+- Check the private connection from a cold start, after locking and reopening the app, and when switching between Wi-Fi and mobile data. Exchange messages and verify notification delivery while the app is closed.
 - Open Vault from the home tab. Check its new lock icon, conversation title and authentication prompt. Confirm your existing private content is still available. In Portuguese, the name should appear as Cofre.
 - Try Stealth in call audio effects and in normal voice messages. Confirm the existing voice presets remain available.
 - Exchange text, photos, files and voice messages in both directions between two devices on Wi-Fi and mobile data. Check arrival time, attachment playback readiness, duplicate items and send status after a connection interruption.

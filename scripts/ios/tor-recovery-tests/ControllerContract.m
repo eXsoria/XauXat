@@ -137,6 +137,8 @@ int main(void) {
             int requests = 0;
             while (recv(client, &byte, 1, 0) == 1) {
                 if (byte == '\n') {
+                    const char status[] = "650 STATUS_CLIENT NOTICE BOOTSTRAP PROGRESS=100\r\n";
+                    send(client, status, sizeof(status) - 1, 0);
                     send(client, "250 OK\r\n", 8, 0);
                     if (++requests == 100) break;
                 }
@@ -145,6 +147,11 @@ int main(void) {
         });
         control = [[TORController alloc] initWithSocketHost:@"127.0.0.1" port:port];
         NSCAssert(control.connected, @"fixture connect failed");
+        __block int statusEvents = 0;
+        id statusToken = [control addObserverForStatusEvents:^BOOL(NSString *type, NSString *severity, NSString *action, NSDictionary *arguments) {
+            ++statusEvents;
+            return YES;
+        }];
         BOOL replies = YES;
         for (int i = 0; i < 100; ++i) {
             dispatch_semaphore_t reply = dispatch_semaphore_create(0);
@@ -152,9 +159,11 @@ int main(void) {
                 if (ok) dispatch_semaphore_signal(reply);
             }];
             if (dispatch_semaphore_wait(reply, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) != 0) { replies = NO; break; }
+            if (i == 0) [control removeObserver:statusToken];
         }
         [control xauxatCloseControlSocket];
         check(replies, @"100 immediate replies reach the installed observer");
+        check(statusEvents == 1, @"latest wrapper removes a status observer by its stable token");
         check(dispatch_group_wait(responder, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0, @"fixture responder stops after socket close");
         close(server); control = nil;
 #endif

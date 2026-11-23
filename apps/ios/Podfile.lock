@@ -1,18 +1,18 @@
 PODS:
-  - Tor/Core (409.11.2)
-  - Tor/CTor-NoLZMA (409.11.2):
-    - Tor/Core
+  - Tor/Core (409.17.1)
+  - Tor/CTor-NoLZMA (409.17.1):
+    - Tor/Core (= 409.17.1)
 
 DEPENDENCIES:
-  - Tor/CTor-NoLZMA (= 409.11.2)
+  - Tor/CTor-NoLZMA (from `podspecs/Tor.podspec.json`)
 
-SPEC REPOS:
-  trunk:
-    - Tor
+EXTERNAL SOURCES:
+  Tor:
+    :podspec: podspecs/Tor.podspec.json
 
 SPEC CHECKSUMS:
-  Tor: 6162631fd67a5e69113eacdc552757a1d7944e63
+  Tor: ad8c371437ec4a3e75faa1182b5d20d1ced385db
 
-PODFILE CHECKSUM: 5242a6c206febd767888d97436137baea1679643
+PODFILE CHECKSUM: b46d01e6fd831f6902db5f95ce6f2dd68df8e406
 
 COCOAPODS: 1.17.0

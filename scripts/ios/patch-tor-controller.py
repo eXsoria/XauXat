@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Bounded socket-lifecycle fix for Tor.framework 409.11.2 (Core, app and NSE).
+"""Bounded socket-lifecycle fix for Tor.framework 409.17.1 (Core, app and NSE).
 
-Upstream: iCepa/Tor.framework commit 727f628a15dd1bd83e0e171deb0aba7ab18be09e.
+Upstream: iCepa/Tor.framework commit 9c5df82840cd83a62b592293c2e53249ffa1e083.
 Never call disconnect(): that API sends SIGNAL SHUTDOWN to the Tor runtime.
 """
 import hashlib
@@ -129,7 +129,11 @@ def implementation(source):
     # before the write-completion callback installs the upstream observer.
     source = replace_once(source, '''    dispatch_io_write(_channel, 0, dispatchData, [self.class controlQueue], ^(bool done, dispatch_data_t __unused data, int error) {
         if (done && !error && observer) {
-            [self->_blocks insertObject:observer atIndex:0];
+            TORObserverEntry *entry = [TORObserverEntry new];
+            entry.token = [NSUUID UUID];
+            entry.block = observer;
+
+            [self->_blocks insertObject:entry atIndex:0];
         }
     });''', '''    dispatch_async([self.class controlQueue], ^{
         dispatch_io_t channel;
@@ -139,7 +143,12 @@ def implementation(source):
             generation = self->_xauxatSocketGeneration;
         }
         if (!channel) return;
-        if (observer) [self->_blocks insertObject:observer atIndex:0];
+        if (observer) {
+            TORObserverEntry *entry = [TORObserverEntry new];
+            entry.token = [NSUUID UUID];
+            entry.block = observer;
+            [self->_blocks insertObject:entry atIndex:0];
+        }
         dispatch_io_write(channel, 0, dispatchData, [self.class controlQueue], ^(bool __unused done, dispatch_data_t __unused data, int error) {
             if (error) {
                 @synchronized (self) {
@@ -163,17 +172,19 @@ def patch(directory):
     # Hashes cover normalized upstream text; patched hashes are verified too,
     # so repeated pod installs cannot silently accept a partial/altered patch.
     entries = [
-        ('TORController.m', 'c49aea0df45981b0b09f3bac7cc35a5b43d5b872daaa0581846d0693bfd2cbdc', '172f36fc90c3772918225177f57b519c11dcc48349b2d1074138f963a90efa39', implementation),
-        ('TORController.h', '0524b978c1ebbc70a96eea3c0f0e750a6356ecc2b76ba82644901f08c9606a5c', '600ac91a0538d9dd695147df6264cd3207eab5faab4c160e782d74028403e15a', header),
+        ('TORController.m', 'de176459b8473a5a9d549cea0c4da4d245143eed401b2033250071a62bfd2ed9', 'c9b668e6383efc0d2ce8a5d42c8d683258db2d698ba7ffded75373281f3b4764', implementation),
+        ('TORController.h', 'c1b4c7ee400c4520b1dfb9ab4ef1d360a40323465fc4b241e9fddc998b0e64be', '1819c092cd6ea727ab9a853ab07b05bb0dfbf5990380dcd2987161680be54a61', header),
     ]
     pending = []
     for name, original, patched, transform in entries:
         path = directory / name
+        if name.endswith('.h') and (directory / 'include' / name).exists():
+            path = directory / 'include' / name
         source = path.read_text(encoding='utf-8')
         digest = hashlib.sha256(source.encode()).hexdigest()
         if digest == patched:
             continue
-        assert digest == original, f'{name} differs from pinned Tor 409.11.2; review before patching'
+        assert digest == original, f'{name} differs from pinned Tor 409.17.1; review before patching'
         result = transform(source)
         assert hashlib.sha256(result.encode()).hexdigest() == patched
         pending.append((path, result))

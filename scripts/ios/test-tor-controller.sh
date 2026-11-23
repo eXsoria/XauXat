@@ -10,13 +10,13 @@ import sys
 import urllib.request
 
 target = Path(sys.argv[1])
-# Exact source commit used by the pinned 409.11.2 CocoaPod, not a mutable branch.
-url = 'https://raw.githubusercontent.com/iCepa/Tor.framework/727f628a15dd1bd83e0e171deb0aba7ab18be09e/Tor/Classes/Core/'
+# Exact source commit used by the pinned 409.17.1 CocoaPod, not a mutable branch.
+url = 'https://raw.githubusercontent.com/iCepa/Tor.framework/9c5df82840cd83a62b592293c2e53249ffa1e083/Sources/TorCore/'
 files = ['TORController.m', 'TORController.h', 'TORCircuit.m', 'TORCircuit.h',
          'TORNode.m', 'TORNode.h', 'NSCharacterSet+PredefinedSets.m',
          'NSCharacterSet+PredefinedSets.h', 'TORControlCommand.h', 'TORControlReplyCode.h']
 def fetch(name):
-    (target / name).write_bytes(urllib.request.urlopen(url + name, timeout=30).read())
+    (target / name).write_bytes(urllib.request.urlopen(url + ('include/' if name.endswith('.h') else '') + name, timeout=30).read())
 with ThreadPoolExecutor(max_workers=5) as pool:
     list(pool.map(fetch, files))
 PY

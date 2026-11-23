@@ -1,0 +1,48 @@
+{
+  "name": "Tor",
+  "version": "409.17.1",
+  "summary": "Tor.framework with the latest upstream engine and Objective-C wrapper.",
+  "homepage": "https://github.com/iCepa/Tor.framework",
+  "license": {
+    "type": "MIT",
+    "file": "LICENSE"
+  },
+  "authors": {
+    "Conrad Kramer": "conrad@conradkramer.com",
+    "Chris Ballinger": "chris@chatsecure.org",
+    "Mike Tigas": "mike@tig.as",
+    "Benjamin Erhart": "berhart@netzarchitekten.com"
+  },
+  "source": {
+    "git": "https://github.com/iCepa/Tor.framework.git",
+    "commit": "9c5df82840cd83a62b592293c2e53249ffa1e083"
+  },
+  "platforms": {
+    "ios": "15.0",
+    "osx": "12.0"
+  },
+  "requires_arc": true,
+  "prepare_command": "set -eu\ncurl --fail --location --retry 3 --output tor-nolzma.xcframework.zip https://github.com/iCepa/Tor.framework/releases/download/409.17.1/tor-nolzma.xcframework.zip\nprintf '%s  %s\\n' 39579058d205389ce6aaeda6b152b730bed18032ec987487218f9466e9cd6c49 tor-nolzma.xcframework.zip | shasum -a 256 -c -\nunzip -q tor-nolzma.xcframework.zip\nrm tor-nolzma.xcframework.zip\npython3 - <<'PY'\nfrom pathlib import Path\nimport plistlib\nframework = Path('tor-nolzma.xcframework')\nmanifest = framework / 'Info.plist'\ninfo = plistlib.loads(manifest.read_bytes())\nfor library in info['AvailableLibraries']:\n    if library['LibraryPath'] != 'tor-nolzma.a':\n        raise RuntimeError('Unexpected upstream Tor archive layout')\n    binary = framework / library['LibraryIdentifier'] / library['LibraryPath']\n    binary.rename(binary.with_name('libtor-nolzma.a'))\n    library['LibraryPath'] = 'libtor-nolzma.a'\nmanifest.write_bytes(plistlib.dumps(info))\nPY",
+  "default_subspecs": "CTor-NoLZMA",
+  "subspecs": [
+    {
+      "name": "Core",
+      "source_files": "Sources/TorCore/**/*.{h,m}"
+    },
+    {
+      "name": "CTor-NoLZMA",
+      "dependencies": {
+        "Tor/Core": [
+          "= 409.17.1"
+        ]
+      },
+      "source_files": "Sources/CTor/**/*.{h,m}",
+      "vendored_frameworks": "tor-nolzma.xcframework",
+      "libraries": "z",
+      "pod_target_xcconfig": {
+        "HEADER_SEARCH_PATHS": "$(inherited) \"${PODS_TARGET_SRCROOT}/tor-nolzma.xcframework/ios-arm64/Headers\""
+      },
+      "preserve_paths": "tor-nolzma.xcframework"
+    }
+  ]
+}
