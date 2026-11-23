@@ -46,6 +46,10 @@ def validate(root):
     subspecs = {s['name']: s for s in spec['subspecs']}
     require(subspecs['CTor-NoLZMA']['vendored_frameworks'] == 'tor-nolzma.xcframework',
             'Unexpected vendored Tor framework')
+    require(subspecs['CTor-NoLZMA']['dependencies'] == {'Tor/Core': ['= ' + ENGINE_RELEASE]},
+            'Pin Core explicitly; empty dependency arrays have platform-dependent JSON checksums')
+    require("library['LibraryPath'] = 'libtor-nolzma.a'" in prepare,
+            'Normalize the verified upstream archive name for CocoaPods -ltor-nolzma linking')
 
     podfile = (ios / 'Podfile').read_text(encoding='utf-8')
     declaration = "pod 'Tor/CTor-NoLZMA', :podspec => 'podspecs/Tor.podspec.json'"
@@ -56,6 +60,7 @@ def validate(root):
     for line in [
         f'  - Tor/Core ({ENGINE_RELEASE})',
         f'  - Tor/CTor-NoLZMA ({ENGINE_RELEASE}):',
+        f'    - Tor/Core (= {ENGINE_RELEASE})',
         '  - Tor/CTor-NoLZMA (from `podspecs/Tor.podspec.json`)',
         'EXTERNAL SOURCES:\n  Tor:\n    :podspec: podspecs/Tor.podspec.json',
         '  Tor: ' + hashlib.sha1(canonical.encode()).hexdigest(),
@@ -81,7 +86,7 @@ def validate_installed(root):
         require(bool(candidates), f'No ARM64 iOS {variant or "device"} engine slice')
         for lib in candidates:
             binary = framework / lib['LibraryIdentifier'] / lib['LibraryPath']
-            require(binary.is_file() and binary.suffix == '.a',
+            require(binary.is_file() and binary.name == 'libtor-nolzma.a',
                     f'Expected the pinned release static library: {binary}')
             payload = binary.read_bytes()
             require(ENGINE_VERSION.encode() in payload, f'Wrong Tor version in {binary}')

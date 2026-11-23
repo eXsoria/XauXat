@@ -22,7 +22,7 @@
     "osx": "12.0"
   },
   "requires_arc": true,
-  "prepare_command": "set -eu\ncurl --fail --location --retry 3 --output tor-nolzma.xcframework.zip https://github.com/iCepa/Tor.framework/releases/download/409.17.1/tor-nolzma.xcframework.zip\nprintf '%s  %s\\n' 39579058d205389ce6aaeda6b152b730bed18032ec987487218f9466e9cd6c49 tor-nolzma.xcframework.zip | shasum -a 256 -c -\nunzip -q tor-nolzma.xcframework.zip\nrm tor-nolzma.xcframework.zip",
+  "prepare_command": "set -eu\ncurl --fail --location --retry 3 --output tor-nolzma.xcframework.zip https://github.com/iCepa/Tor.framework/releases/download/409.17.1/tor-nolzma.xcframework.zip\nprintf '%s  %s\\n' 39579058d205389ce6aaeda6b152b730bed18032ec987487218f9466e9cd6c49 tor-nolzma.xcframework.zip | shasum -a 256 -c -\nunzip -q tor-nolzma.xcframework.zip\nrm tor-nolzma.xcframework.zip\npython3 - <<'PY'\nfrom pathlib import Path\nimport plistlib\nframework = Path('tor-nolzma.xcframework')\nmanifest = framework / 'Info.plist'\ninfo = plistlib.loads(manifest.read_bytes())\nfor library in info['AvailableLibraries']:\n    if library['LibraryPath'] != 'tor-nolzma.a':\n        raise RuntimeError('Unexpected upstream Tor archive layout')\n    binary = framework / library['LibraryIdentifier'] / library['LibraryPath']\n    binary.rename(binary.with_name('libtor-nolzma.a'))\n    library['LibraryPath'] = 'libtor-nolzma.a'\nmanifest.write_bytes(plistlib.dumps(info))\nPY",
   "default_subspecs": "CTor-NoLZMA",
   "subspecs": [
     {
@@ -32,7 +32,9 @@
     {
       "name": "CTor-NoLZMA",
       "dependencies": {
-        "Tor/Core": []
+        "Tor/Core": [
+          "= 409.17.1"
+        ]
       },
       "source_files": "Sources/CTor/**/*.{h,m}",
       "vendored_frameworks": "tor-nolzma.xcframework",

@@ -9,6 +9,20 @@ test "$(pod --version)" = '1.17.0'
 pod install --project-directory="$root/apps/ios" --deployment
 python3 "$root/scripts/ios/verify-tor-dependency.py" --installed
 
+# A host-engine version check cannot catch CocoaPods selecting an iOS archive
+# with a name that -ltor-nolzma cannot resolve. Link the actual generated wrapper
+# for both ARM64 iOS platforms before running the host sanitizers.
+for sdk in iphoneos iphonesimulator; do
+  xcodebuild -project "$root/apps/ios/Pods/Pods.xcodeproj" -target Tor \
+    -configuration Release -sdk "$sdk" ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+    BUILD_DIR="$temp/build-$sdk" OBJROOT="$temp/objects-$sdk" \
+    CONFIGURATION_BUILD_DIR="$temp/products-$sdk" CODE_SIGNING_ALLOWED=NO build
+  binary="$temp/products-$sdk/Tor.framework/Tor"
+  test -f "$binary"
+  file "$binary" | grep -q arm64
+  xcrun vtool -show-build "$binary" | grep -q 'platform IOS'
+done
+
 tor="$root/apps/ios/Pods/Tor"
 engine=$(python3 - "$tor/tor-nolzma.xcframework" "$temp" "$root" <<'PY'
 import json

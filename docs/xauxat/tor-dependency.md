@@ -21,6 +21,14 @@ around a newer engine, and it does not modify upstream's Swift package manifest.
 
 The spec pins the wrapper's full commit and verifies the release archive's SHA-256
 before extraction. Both app and NSE use the same spec, lockfile and patches.
+The Core dependency has an explicit version requirement. This avoids different
+Ruby JSON versions serializing an empty array differently and invalidating the
+deployment lock checksum on one of the build platforms.
+
+Upstream names its static archives `tor-nolzma.a`; CocoaPods emits
+`-ltor-nolzma`, which requires `libtor-nolzma.a`. After verifying and extracting
+the upstream ZIP, preparation renames each archive and updates its XCFramework
+manifest. The binary bytes and reviewed upstream archive digest remain unchanged.
 The archive digest matches upstream's 409.17.1 `Package.swift` and release metadata:
 
 `39579058d205389ce6aaeda6b152b730bed18032ec987487218f9466e9cd6c49`
@@ -58,7 +66,9 @@ bash scripts/ios/verify-nse-tor-policy.sh
 
 The engine test runs the actual downloaded engine via `TORThread`: the pristine
 wrapper must reproduce its stack overflow under AddressSanitizer; the patched
-wrapper must report Tor 0.4.9.17 without that error. Installed-payload checks cover
+wrapper must report Tor 0.4.9.17 without that error. It also links CocoaPods'
+generated Tor wrapper for ARM64 device and simulator SDKs, so host-only success
+cannot conceal a broken iOS library search/name configuration. Installed-payload checks cover
 ARM64 iOS device and simulator slices and their Tor/OpenSSL versions. The normal
 iOS workflow builds the real app and NSE, and the archive script verifies the
 installed dependency before creating a TestFlight archive.
