@@ -371,7 +371,7 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
                 let renderBlock: RTCAudioDeviceRenderRecordedDataBlock = { [weak self] _, _, _, frameCount, output, context in
                     guard let context else { return kAudio_ParamError }
                     let input = context.assumingMemoryBound(
-                        to: (UnsafeMutablePointer<AudioBufferList>, XauXatCallAmbience, UInt64).self
+                        to: (UnsafePointer<AudioBufferList>, XauXatCallAmbience, UInt64).self
                     ).pointee
                     let result = converter.convert(
                         frameCount: frameCount,
@@ -411,13 +411,13 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
                     if masking.enabled && (masking.suppress || masking.failed) {
                         return noErr
                     }
-                    let processed: UnsafeMutablePointer<AudioBufferList>
+                    let processed: UnsafePointer<AudioBufferList>
                     if let pitch {
                         guard let data = pitch.render(inputData, frames: frameCount) else {
                             self.reportPipelineFailure("pitch rendering failed", generation: masking.generation)
                             return noErr
                         }
-                        processed = data
+                        processed = UnsafePointer(data)
                     } else {
                         processed = inputData
                     }
@@ -686,7 +686,7 @@ final class XauXatRealtimePitch {
         deinit { samples.deallocate() }
 
         func append(_ input: UnsafePointer<AudioBufferList>, frames: Int) -> Bool {
-            let buffers = UnsafeAudioBufferListPointer(input)
+            let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
             guard frames <= XauXatRealtimePitch.capacity - count,
                   buffers.count == channels,
                   buffers.allSatisfy({ $0.mData != nil && Int($0.mDataByteSize) >= frames * MemoryLayout<Float>.stride }) else { return false }
