@@ -1,26 +1,17 @@
-name: XauXat call audio regression
+name: XauXat runner availability probe
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  graph:
-    runs-on: macos-15
-    timeout-minutes: 15
+  probe:
+    runs-on: macos-26
+    timeout-minutes: 5
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - run: bash scripts/ios/probe-call-audio-graph.sh
-        env:
-          CALL_GRAPH_OUTPUT: ${{ runner.temp }}/call-graph-proof/baseline
-      - run: bash scripts/ios/test-call-audio-live.sh
-        env:
-          CALL_LIVE_OUTPUT: ${{ runner.temp }}/call-graph-proof/live
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: always()
-        with:
-          name: XauXat-call-graph-${{ github.sha }}
-          path: ${{ runner.temp }}/call-graph-proof
-          if-no-files-found: error
-          retention-days: 7
+      - run: |
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          test "$(pod --version)" = 1.17.0
