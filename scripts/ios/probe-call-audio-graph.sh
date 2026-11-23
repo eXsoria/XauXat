@@ -34,7 +34,7 @@ xcrun simctl bootstatus "$udid" -b
 xcrun simctl install "$udid" "$app"
 xcrun simctl privacy "$udid" grant microphone pt.exsoria.call-graph-probe
 data=$(xcrun simctl get_app_container "$udid" pt.exsoria.call-graph-probe data)
-for variant in tap-mixer-pitch-default tap-mixer-pitch-voice tap-native-pitch-default tap-native-pitch-voice; do
+for variant in direct-default direct-voice sink-pitch-default sink-pitch-voice; do
   xcrun simctl launch "$udid" pt.exsoria.call-graph-probe "$variant"
   for attempt in {1..30}; do
     [[ -f "$data/Documents/$variant.json" ]] && break
@@ -43,4 +43,14 @@ for variant in tap-mixer-pitch-default tap-mixer-pitch-voice tap-native-pitch-de
   cp "$data/Documents/$variant.json" "$out/$variant.json"
   cat "$out/$variant.json"
   xcrun simctl terminate "$udid" pt.exsoria.call-graph-probe || true
+  python3 - "$out/$variant.json" <<'PY'
+import json,sys
+r=json.load(open(sys.argv[1]))
+if r['case'].startswith('direct'):
+    assert r['stage']=='passed',r
+else:
+    # Negative control: the old graph must reproduce the specific converter
+    # assertion, rather than passing because of a session/fixture failure.
+    assert r['stage']=='prepare' and r.get('exception')=='com.apple.coreaudio.avfaudio' and 'isInputConnToConverter' in r.get('reason',''),r
+PY
 done

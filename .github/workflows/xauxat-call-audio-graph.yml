@@ -1,7 +1,5 @@
-name: XauXat call audio graph diagnostic
+name: XauXat call audio regression
 on:
-  push:
-    branches: [xauxat/call-audio-graph]
   workflow_dispatch:
 permissions:
   contents: read
@@ -13,9 +11,12 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: bash scripts/ios/probe-call-audio-graph.sh
+        env:
+          CALL_GRAPH_OUTPUT: ${{ runner.temp }}/call-graph-proof/baseline
       - run: bash scripts/ios/test-call-audio-live.sh
         env:
-          CALL_LIVE_OUTPUT: ${{ runner.temp }}/call-graph-proof
+          CALL_LIVE_OUTPUT: ${{ runner.temp }}/call-graph-proof/live
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
