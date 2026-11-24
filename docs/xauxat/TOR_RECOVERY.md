@@ -149,6 +149,19 @@ resuming the core does not by itself satisfy subscription recovery. That same
 event demand remains until a healthy native summary confirms convergence; this
 also covers a suspended incoming-only session with no further failure event.
 
+Every accepted global reconnect now requests a fresh receive-subscription scan,
+including foreground, post-unlock, manual and route/session retries. Previously
+only a network-change reconnect did this. The foreground scan could finish
+before its later asynchronous reconnect, and post-unlock recovery could have no
+scan at all. If that global command was accepted while receive subscriptions
+remained stalled, no outgoing message or new event meant no further recovery.
+The scan retains the existing native connection budget and selectively repairs
+failed relays until the native summary is healthy. A healthy summary stops it
+without another Tor check or reconnect. `test-incoming-only-recovery.sh` runs
+these empty-outbox cases against both the baseline and corrected coordinator.
+This demonstrates the code defect; it does not establish a particular physical
+iPhone incident's cause or validate APNs delivery.
+
 Foreground recovery may stop at the Decoy PIN/store-selection gate. Successful
 PIN/Face ID authorization and the existing authorization grace explicitly resume
 recovery for an already initialized session, including the same selected store.

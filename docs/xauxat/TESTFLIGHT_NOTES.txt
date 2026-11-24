@@ -1,21 +1,11 @@
-This build combines the call-connection fix from build 357 with an update to the embedded Tor connection engine. It includes Vault (Cofre in Portuguese), Stealth voice options, and the existing messaging, voice, photo and privacy updates.
+Build 359 improves incoming-message recovery after opening or unlocking XauXat. The app now checks receive subscriptions after every global reconnection and continues recovery for failed relays without needing an outgoing message. It retains the Tor, call-audio, Vault, Stealth and messaging updates from build 358.
 
-What to test:
-- Place and answer audio calls in both directions. Check the transition from connecting to connected and keep speaking after connection. Repeat with Stealth off and on, and switch between receiver, speaker and Bluetooth where available.
-- Check the private connection from a cold start, after locking and reopening the app, and when switching between Wi-Fi and mobile data. Exchange messages and verify notification delivery while the app is closed.
-- Open Vault from the home tab. Check its new lock icon, conversation title and authentication prompt. Confirm your existing private content is still available. In Portuguese, the name should appear as Cofre.
-- Try Stealth in call audio effects and in normal voice messages. Confirm the existing voice presets remain available.
-- Exchange text, photos, files and voice messages in both directions between two devices on Wi-Fi and mobile data. Check arrival time, attachment playback readiness, duplicate items and send status after a connection interruption.
-- Open a chat with several pending attachments and confirm automatic receiving continues through the whole batch.
-- Record, pause, resume, preview and send voice notes. Try Voice Mask with Rain or Outside, then turn Voice Mask off and confirm the saved background sound is not applied.
-- Import stickers using Photos, switch between Stickers and Soundboard, and check search, favorites and recent items.
-- Decline an incoming call and confirm the caller stops ringing. Check call cleanup after a failed connection.
-- Background and reopen the app with authentication enabled. Confirm immediate locking, correct profile selection and recovery of the same conversation session.
-- Switch between Wi-Fi and mobile data, briefly enable airplane mode, then restore connectivity. Verify incoming and outgoing delivery recover without force-closing the app.
-- If startup or delivery stalls, use Private connection > Copy connection diagnostics and include the time, network type and affected media in the report.
+What to test on two iPhones:
+- Leave the receiving phone in the background, send several messages from the other phone, then open and unlock XauXat. Wait for the private connection to recover without sending anything from the receiving phone. Check that the queued messages arrive.
+- Repeat after locking the phone, after a longer background interval, and with app authentication enabled. Confirm the correct profile and existing conversation reopen.
+- Repeat in both directions on Wi-Fi and mobile data, including a network change or a brief airplane-mode interruption. Check incoming and outgoing messages, attachments, duplicates and delivery status.
+- Check notifications while XauXat is in the background and closed. Note whether notification delivery and message arrival after opening differ.
+- Place and answer audio calls in both directions, including with Stealth voice effects, and check audio after the call connects.
+- If reception stalls, copy Private connection > Copy connection diagnostics before sending from the affected phone. Record the build, time and network type, then compare with diagnostics after recovery.
 
-Known limitation: when redundant relay queues are enabled, a full relay can make a contact appear inactive even when another relay is delivering receipts. Please report this status along with the diagnostics.
-
-Please prioritize calls between the two iPhones affected by build 356. Verify connecting to connected, audio in both directions, backgrounding and reopening, repeated calls, and voice effects. If an app exit persists, include the crash report, build number, time and audio route. Native engine regression tests do not establish every physical CallKit or Bluetooth route.
-
-Physical iPhone acceptance is still needed for delivery latency, real audio playback and call/notification behavior. Automated relay tests are not a latency guarantee.
+Automated checks reproduce and cover the incoming-only recovery defect. Device-specific delivery latency and background Apple push notifications still require physical iPhone acceptance.

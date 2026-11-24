@@ -409,9 +409,10 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 // can satisfy the event demand, even for this same generation.
                 lastGlobal = (operationEpoch, context, dependencies.now())
                 firstObserved.removeAll()
-                if reason == .networkChange {
-                    requestSubscriptionScan(reconnectStartedAt: lastGlobal?.time)
-                }
+                // Foreground/post-unlock/manual recovery also needs receive
+                // confirmation with an empty outbox. A scan requested before
+                // this command may already have finished against old sessions.
+                requestSubscriptionScan(reconnectStartedAt: lastGlobal?.time)
             } else {
                 // Check the new attempt at its deadline even during a long polling backoff.
                 for (relay, budget) in relayBudgets {
