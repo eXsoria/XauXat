@@ -291,7 +291,10 @@ final class ChatModel {
             f.sessionState = .suspended
             var delays: [TimeInterval] = []
             f.sleep = { delay in
-                delays.append(delay)
+                // Measure session repair separately from receive confirmation
+                // scheduled after the successful native command.
+                if f.commands.isEmpty { delays.append(delay) }
+                f.clock += delay
                 try await Task.sleep(nanoseconds: 2_000_000)
             }
             switch failure {
@@ -319,7 +322,8 @@ final class ChatModel {
             let f = RecoveryFixture()
             var delays: [TimeInterval] = []
             f.sleep = { delay in
-                delays.append(delay)
+                if f.commands.count < 3 { delays.append(delay) }
+                f.clock += delay
                 try await Task.sleep(nanoseconds: 2_000_000)
             }
             f.onReconnect = { _ in
@@ -341,7 +345,8 @@ final class ChatModel {
         let f = RecoveryFixture()
         var delays: [TimeInterval] = []
         f.sleep = { delay in
-            delays.append(delay)
+            if f.commands.count < 2 { delays.append(delay) }
+            f.clock += delay
             try await Task.sleep(nanoseconds: 2_000_000)
         }
         // A delayed native suspend can close the store after activation and
@@ -389,7 +394,8 @@ final class ChatModel {
         f.sessionState = .suspended
         var delays: [TimeInterval] = []
         f.sleep = { delay in
-            delays.append(delay)
+            if f.commands.isEmpty { delays.append(delay) }
+            f.clock += delay
             try await Task.sleep(nanoseconds: 2_000_000)
         }
         f.resume = { if f.resumeCount < 4 { throw RecoveryFixture.Failure.synthetic } }
@@ -707,7 +713,8 @@ final class ChatModel {
         f.sessionState = .suspended
         var delays: [TimeInterval] = []
         f.sleep = { delay in
-            delays.append(delay)
+            if f.commands.isEmpty { delays.append(delay) }
+            f.clock += delay
             try await Task.sleep(nanoseconds: 2_000_000)
         }
         f.ensure = { if f.forces.count == 1 { throw RecoveryFixture.Failure.synthetic } }
@@ -1060,7 +1067,8 @@ final class ChatModel {
         let f = RecoveryFixture()
         var delays: [TimeInterval] = []
         f.sleep = { delay in
-            delays.append(delay)
+            if f.commands.isEmpty { delays.append(delay) }
+            f.clock += delay
             try await Task.sleep(nanoseconds: 2_000_000)
         }
         f.ensure = { if f.forces.count < 4 { throw RecoveryFixture.Failure.synthetic } }
