@@ -13,6 +13,9 @@ func initChatAndMigrate() { initializations += 1; ChatModel.shared.chatInitializ
     var reconnects = 0
     var failRoutes = 0
     var holdRoute = false
+    var receivePending = false
+    var summaryCount = 0
+    var clock: TimeInterval = 100
     var held: CheckedContinuation<Void, Never>?
     lazy var manager = Recovery(dependencies: .init(
         context: {
@@ -29,8 +32,14 @@ func initChatAndMigrate() { initializations += 1; ChatModel.shared.chatInitializ
         },
         invalidateTor: { torReady = false },
         applyTor: { self.events.append("config"); return false },
-        failedRelays: { [:] },
-        reconnect: { _ in self.events.append("reconnect"); self.reconnects += 1 },
+        failedRelays: {
+            self.summaryCount += 1
+            return self.receivePending ? [.init(userId: 1, server: "smp://private-relay.example"): 0] : [:]
+        },
+        reconnect: { scope in
+            self.events.append("reconnect"); self.reconnects += 1
+            if case .relays = scope { self.receivePending = false }
+        },
         sessionState: { xauXatRecoverySessionState() },
         resumeChat: { isCurrent in
             self.events.append("resume")
@@ -38,8 +47,9 @@ func initChatAndMigrate() { initializations += 1; ChatModel.shared.chatInitializ
                 startChatAndActivate(ifAllowed: { isCurrent() && isXauXatTorReady() }) { continuation.resume() }
             }
         },
+        now: { self.clock },
         retryJitter: { 1 },
-        sleep: { _ in try await Task.sleep(nanoseconds: 2_000_000) }
+        sleep: { delay in self.clock += delay; try await Task.sleep(nanoseconds: 2_000_000) }
     ))
 }
 @MainActor var postAuthFixture: PostAuthFixture!
@@ -135,6 +145,16 @@ func initChatAndMigrate() { initializations += 1; ChatModel.shared.chatInitializ
         require(retry.events == ["tor", "tor", "config", "resume", "reconnect"] && activations == 1,
                 "A transient post-unlock route failure must retain incoming-only retry demand")
         retry.manager.pause()
+
+        let incoming = reset()
+        incoming.receivePending = true
+        AuthSuccessHarness().complete()
+        try await until { incoming.reconnects == 2 && incoming.manager.state == .idle }
+        require(!incoming.receivePending && incoming.summaryCount >= 2,
+                "The real unlock callback must recover stalled receive queues without an outgoing message or a new subscription event")
+        require(isChatStoreOpen() && activations == 1 && ChatReceiver.shared.starts == 1 && initializations == 0,
+                "Incoming-only recovery after unlock keeps the existing profile, receiver and store")
+        incoming.manager.pause()
 
         let cold = reset()
         controllerAvailable = false; ChatModel.shared.chatInitialized = false
