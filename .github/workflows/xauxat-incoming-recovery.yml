@@ -1,0 +1,26 @@
+name: XauXat incoming recovery
+on:
+  pull_request:
+    paths:
+      - apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift
+      - scripts/ios/tor-recovery-tests/**
+      - scripts/ios/test-incoming-only-recovery.sh
+      - .github/workflows/xauxat-incoming-recovery.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: xauxat-incoming-recovery-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  incoming-only:
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Reproduce baseline stall and verify incoming-only recovery
+        run: bash scripts/ios/test-incoming-only-recovery.sh
+        env:
+          INCOMING_RECOVERY_BASE_SHA: ${{ github.event.pull_request.base.sha }}

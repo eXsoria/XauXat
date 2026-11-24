@@ -89,18 +89,25 @@ final class ChatModel {
         checks += 1
         guard value else { fatalError(message) }
     }
-    static func until(_ condition: () -> Bool) async throws {
+    static func until(_ condition: () -> Bool, message: String = "Timed out waiting for recovery condition") async throws {
         for _ in 0..<500 {
             if condition() { return }
             try await Task.sleep(nanoseconds: 2_000_000)
         }
-        fatalError("Timed out waiting for recovery condition")
+        fatalError(message)
     }
     static func failed(_ task: Task<Void, Error>, _ message: String) async {
         do { try await task.value; fatalError(message) } catch { require(true, message) }
     }
 
     static func main() async throws {
+        try await globalRecoveryChecksWithoutSending()
+        try await preReconnectSnapshotCannotAcknowledgeForeground()
+        try await healthyGlobalRecoveryStopsAfterChecking()
+        if ProcessInfo.processInfo.environment["XAUXAT_INCOMING_ONLY_REGRESSIONS"] == "1" {
+            print("Incoming-only recovery checks passed: \(checks)")
+            return
+        }
         try await suspendedChatVerifiesTorBeforeResuming()
         try await suspendedChatCannotWidenStaleProfileTargets()
         try await blockedRequestsExplainWhy()
@@ -492,6 +499,62 @@ final class ChatModel {
         f.manager.subscriptionsNeedRecovery()
         try await until { repairs.count == 2 && f.manager.state == .idle }
         require(repairs[1] - repairs[0] == 20, "A selected reconnect schedules a check at its own deadline")
+    }
+
+    static func globalRecoveryChecksWithoutSending() async throws {
+        for reason in [Recovery.Reason.foreground, .manual, .routeRetry, .sessionRetry] {
+            let f = RecoveryFixture()
+            f.connectingGrace = 70
+            var globalAt: TimeInterval?
+            var selectiveAt: TimeInterval?
+            f.onReconnect = { scope in
+                if scope == .all {
+                    globalAt = f.clock
+                    // The native command was accepted, but receive queues have
+                    // not recovered. No outbound item or new event wakes them.
+                    f.failed = [f.first]
+                } else {
+                    selectiveAt = f.clock
+                    f.failed = []
+                }
+            }
+            f.sleep = { delay in
+                f.clock += delay
+                try await Task.sleep(nanoseconds: 2_000_000)
+            }
+            try await f.manager.reconnect(.all, reason: reason)
+            try await until({ selectiveAt != nil && f.manager.state == .idle },
+                            message: "Incoming-only global recovery stalled without an outbound message")
+            require(f.commands == [.all, .relays([f.first])], "Every global recovery must verify incoming queues and repair only the failed relay")
+            require(abs(selectiveAt! - globalAt! - 70) < 0.01, "Incoming-only recovery respects the native connection budget from the global reconnect")
+            require(f.summaryCount >= 2 && f.manager.diagnosticText.contains("subscription_scan=false"), "Only a healthy native summary completes incoming recovery")
+            f.manager.pause()
+        }
+    }
+
+    static func preReconnectSnapshotCannotAcknowledgeForeground() async throws {
+        let f = RecoveryFixture()
+        f.sleep = { delay in f.clock += delay; try await Task.sleep(nanoseconds: 2_000_000) }
+        // Foreground can request a scan before its asynchronous reconnect.
+        // Let that old snapshot finish while the previous session looks healthy.
+        f.manager.subscriptionsNeedRecovery()
+        try await until { f.summaryCount == 1 && f.manager.state == .idle }
+        f.onReconnect = { scope in f.failed = scope == .all ? [f.first] : [] }
+        try await f.manager.reconnect(.all, reason: .foreground)
+        try await until({ f.commands.count == 2 && f.manager.state == .idle },
+                        message: "A pre-reconnect healthy snapshot discarded incoming-only recovery")
+        require(f.commands == [.all, .relays([f.first])] && f.summaryCount == 3,
+                "A snapshot predating foreground reconnect cannot acknowledge its receive subscriptions")
+        f.manager.pause()
+    }
+
+    static func healthyGlobalRecoveryStopsAfterChecking() async throws {
+        let f = RecoveryFixture()
+        f.sleep = { delay in f.clock += delay; try await Task.sleep(nanoseconds: 2_000_000) }
+        try await f.manager.reconnect(.all, reason: .foreground)
+        try await until { f.summaryCount == 1 && f.manager.state == .idle }
+        require(f.commands == [.all] && f.forces == [false], "Healthy receive subscriptions stop recovery without another Tor check or reconnect")
+        f.manager.pause()
     }
 
     static func networkRecoveryChecksFromReconnectTime() async throws {
