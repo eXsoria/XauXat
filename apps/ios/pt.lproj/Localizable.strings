@@ -16,3 +16,11 @@
 "Connecting server… (error: %@)" = "Connecting to server… (error: %@)";
 "member connected" = "connected";
 "No group!" = "Group not found!";
+
+/* Call setup feedback after answering. */
+"Preparing audio…" = "A preparar o áudio…";
+"Connecting to the other device…" = "A ligar ao outro dispositivo…";
+"Connecting audio…" = "A ligar o áudio…";
+"Connecting for %lld seconds" = "A estabelecer ligação há %lld segundos";
+"The call has been answered. Connecting both devices." = "A chamada foi atendida. A estabelecer ligação entre os dois dispositivos.";
+"Still connecting. You can wait or end the call." = "Ainda a estabelecer ligação. Podes aguardar ou terminar a chamada.";

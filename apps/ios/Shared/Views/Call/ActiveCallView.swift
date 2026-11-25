@@ -423,7 +423,7 @@ struct ActiveCallOverlay: View {
                 .font(.title)
                 .frame(maxWidth: .infinity, alignment: .center)
             Group {
-                Text(call.callState.text)
+                XauXatCallSetupStatusView(call: call, alignment: .center)
                 HStack {
                     Text(call.encryptionStatus)
                     if let connInfo = call.connectionInfo {
@@ -452,7 +452,7 @@ struct ActiveCallOverlay: View {
                 }
             }
             Group {
-                Text(call.callState.text)
+                XauXatCallSetupStatusView(call: call, alignment: .leading)
                 HStack {
                     Text(call.encryptionStatus)
                     if let connInfo = call.connectionInfo {
@@ -597,6 +597,43 @@ struct ActiveCallOverlay: View {
 
     private var whiteColorWithAlpha: Color {
         get { Color(red: 204 / 255, green: 204 / 255, blue: 204 / 255) }
+    }
+}
+
+struct XauXatCallSetupStatusView: View {
+    @ObservedObject var call: Call
+    var alignment: HorizontalAlignment = .center
+
+    var body: some View {
+        if call.callState.isEstablishing {
+            VStack(alignment: alignment, spacing: 8) {
+                HStack(spacing: 8) {
+                    ProgressView().progressViewStyle(.circular).tint(.white)
+                        .frame(width: 16, height: 16).accessibilityHidden(true)
+                    Text(call.callState.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    let seconds = call.setupTimeline.elapsedSeconds
+                    VStack(alignment: alignment, spacing: 8) {
+                        Text(String(format: NSLocalizedString("Connecting for %lld seconds", comment: "call setup elapsed time"), Int64(seconds)))
+                            .monospacedDigit()
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                        Text(seconds >= 10
+                             ? LocalizedStringKey("Still connecting. You can wait or end the call.")
+                             : LocalizedStringKey("The call has been answered. Connecting both devices."))
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(alignment == .center ? .center : .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 300)
+                    }
+                }
+            }
+        } else {
+            Text(call.callState.text)
+        }
     }
 }
 

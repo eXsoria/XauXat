@@ -24,3 +24,11 @@
 
 /* No comment provided by engineer. */
 "No group!" = "Group not found!";
+
+/* Call setup feedback after answering. */
+"Preparing audio…" = "Preparing audio…";
+"Connecting to the other device…" = "Connecting to the other device…";
+"Connecting audio…" = "Connecting audio…";
+"Connecting for %lld seconds" = "Connecting for %lld seconds";
+"The call has been answered. Connecting both devices." = "The call has been answered. Connecting both devices.";
+"Still connecting. You can wait or end the call." = "Still connecting. You can wait or end the call.";

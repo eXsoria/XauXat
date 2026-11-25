@@ -83,7 +83,10 @@ class Call: ObservableObject, Equatable {
     var initialCallType: CallMediaType
     let startWithModifiedVoice: Bool
     @Published var localMediaSources: CallMediaSources
-    @Published var callState: CallState
+    @Published var callState: CallState {
+        didSet { setupTimeline.record(callState) }
+    }
+    let setupTimeline: XauXatCallSetupTimeline
     @Published var localCapabilities: CallCapabilities?
     @Published var peerMediaSources: CallMediaSources = CallMediaSources()
     @Published var sharedKey: String?
@@ -103,6 +106,7 @@ class Call: ObservableObject, Equatable {
         self.direction = direction
         self.contact = contact
         self.callUUID = callUUID
+        self.setupTimeline = XauXatCallSetupTimeline(direction: direction, state: callState)
         self.callState = callState
         self.initialCallType = initialCallType
         self.startWithModifiedVoice = startWithModifiedVoice
@@ -127,12 +131,12 @@ class Call: ObservableObject, Equatable {
     var hasVideo: Bool { get { localMediaSources.hasVideo || peerMediaSources.hasVideo } }
 }
 
-enum CallDirection {
+enum CallDirection: String {
     case incoming
     case outgoing
 }
 
-enum CallState {
+enum CallState: String {
     case waitCapabilities   // outgoing call started
     case invitationSent     // outgoing call - sent invitation
     case invitationAccepted // incoming call started
@@ -147,14 +151,85 @@ enum CallState {
         switch self {
         case .waitCapabilities: return "starting…"
         case .invitationSent: return "waiting for answer…"
-        case .invitationAccepted: return "starting…"
-        case .offerSent: return "waiting for confirmation…"
-        case .offerReceived: return "received answer…"
-        case .answerReceived: return "received confirmation…"
-        case .negotiated: return "connecting…"
+        case .invitationAccepted: return "Preparing audio…"
+        case .offerSent: return "Connecting to the other device…"
+        case .offerReceived: return "Preparing audio…"
+        case .answerReceived: return "Connecting audio…"
+        case .negotiated: return "Connecting audio…"
         case .connected: return "connected"
         case .ended: return "ended"
         }
+    }
+
+    var isEstablishing: Bool {
+        switch self {
+        case .invitationAccepted, .offerSent, .offerReceived, .answerReceived, .negotiated: true
+        default: false
+        }
+    }
+}
+
+/// Keep only the latest call's coarse stages in memory. No contact, call UUID,
+/// address, SDP, ICE candidate, key or raw error enters the exported diagnostic.
+final class XauXatCallSetupTimeline {
+    private static let latestLock = NSLock()
+    private static var latest: XauXatCallSetupTimeline?
+    private let lock = NSLock()
+    private let clock: () -> TimeInterval
+    private let startedAt: TimeInterval
+    private let direction: CallDirection
+    private var setupStartedAt: TimeInterval?
+    private var setupFinishedAt: TimeInterval?
+    private var lastState: CallState?
+    private var events: [String] = []
+
+    init(direction: CallDirection, state: CallState,
+         clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+        self.direction = direction
+        self.clock = clock
+        self.startedAt = clock()
+        record(state)
+        Self.latestLock.lock()
+        Self.latest = self
+        Self.latestLock.unlock()
+    }
+
+    func record(_ state: CallState) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard state != lastState else { return }
+        let now = clock()
+        if state.isEstablishing, setupStartedAt == nil { setupStartedAt = now }
+        if state == .connected || state == .ended, setupFinishedAt == nil { setupFinishedAt = now }
+        events.append("+\(Int(max(0, now - startedAt)))s \(state.rawValue)")
+        if events.count > 24 { events.removeFirst(events.count - 24) }
+        lastState = state
+    }
+
+    var elapsedSeconds: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return elapsedSecondsLocked()
+    }
+
+    private func elapsedSecondsLocked() -> Int {
+        guard let setupStartedAt else { return 0 }
+        return Int(min(86_400, max(0, (setupFinishedAt ?? clock()) - setupStartedAt)))
+    }
+
+    var diagnosticText: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return "Call setup (latest call, current app process)\n"
+            + "direction=\(direction.rawValue) state=\(lastState?.rawValue ?? "none") setup_elapsed_seconds=\(elapsedSecondsLocked())\n"
+            + events.joined(separator: "\n")
+    }
+
+    static var latestDiagnosticText: String {
+        latestLock.lock()
+        let timeline = latest
+        latestLock.unlock()
+        return timeline?.diagnosticText ?? "Call setup: no calls in this app process"
     }
 }
 
