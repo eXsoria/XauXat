@@ -1939,7 +1939,10 @@ func deleteChat(_ chat: Chat, chatDeleteMode: ChatDeleteMode = .full(notify: tru
 func deleteContactChat(_ chat: Chat, chatDeleteMode: ChatDeleteMode = .full(notify: true)) async -> Alert? {
     do {
         let cInfo = chat.chatInfo
-        let ct = try await apiDeleteContact(id: cInfo.apiId, chatDeleteMode: chatDeleteMode)
+        guard let contact = cInfo.contact else {
+            return mkAlert(title: "Error deleting chat!", message: "This chat is not a contact.")
+        }
+        let ct = try await apiDeleteContact(id: contact.contactId, chatDeleteMode: chatDeleteMode)
         await MainActor.run {
             switch chatDeleteMode {
             case .full:
@@ -1982,6 +1985,7 @@ func clearChat(_ chat: Chat) async {
         DispatchQueue.main.async { ChatModel.shared.clearChat(updatedChatInfo) }
     } catch {
         logger.error("clearChat apiClearChat error: \(responseError(error))")
+        AlertManager.shared.showAlertMsg(title: "Error clearing conversation", message: "\(responseError(error))")
     }
 }
 

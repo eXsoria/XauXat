@@ -19,7 +19,9 @@ theme_types = (theme / "ThemeTypes.swift").read_text(encoding="utf-8")
 colors = (theme / "Color.swift").read_text(encoding="utf-8")
 background = next(line for line in theme_types.splitlines() if line.startswith("public let xauXatDarkBackground ="))
 argb = colors[colors.index("extension Color {\n    public init(_ argb:"):colors.index("    public init(_ r: Int")]
-(out / "Rows.swift").write_text("import SwiftUI\n" + argb + "}\n" + background + "\n" + palette + rows, encoding="utf-8")
+api = (root / "apps/ios/Shared/Model/SimpleXAPI.swift").read_text()
+contact_deletion = api[api.index("func deleteContactChat("):api.index("func apiClearChat(")]
+(out / "Rows.swift").write_text("import SwiftUI\n" + argb + "}\n" + background + "\n" + palette + rows + contact_deletion, encoding="utf-8")
 
 project = out / "HomeChatHarness.xcodeproj"
 project.mkdir(exist_ok=True)
