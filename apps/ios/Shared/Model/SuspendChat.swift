@@ -12,6 +12,8 @@ import SimpleXChat
 import SwiftUI
 
 private let suspendLockQueue = DispatchQueue(label: "pt.exsoria.xauxat.suspend.lock")
+// Only accessed on suspendLockQueue.
+private var currentSuspendRequest: UUID?
 
 let bgSuspendTimeout: Int = 5 // seconds
 
@@ -43,7 +45,9 @@ private func _suspendChat(timeout: Int) {
     } else if ChatModel.ok {
         AppChatState.shared.set(.suspending)
         apiSuspendChat(timeoutMicroseconds: timeout * 1000000)
-        let endTask = beginBGTask(chatSuspended)
+        let request = UUID()
+        currentSuspendRequest = request
+        let endTask = beginBGTask { chatSuspended(request: request) }
         DispatchQueue.global().asyncAfter(deadline: .now() + Double(timeout) + 1, execute: endTask)
     } else {
         AppChatState.shared.set(.suspended)
@@ -105,8 +109,10 @@ func terminateChat() {
     }
 }
 
-func chatSuspended() {
+func chatSuspended(request: UUID? = nil) {
     suspendLockQueue.sync {
+        // An older iOS execution grant may expire during a later suspension.
+        if let request, request != currentSuspendRequest { return }
         if case .suspending = AppChatState.shared.value {
             _chatSuspended()
         }
@@ -114,6 +120,7 @@ func chatSuspended() {
 }
 
 private func _chatSuspended() {
+    currentSuspendRequest = nil
     logger.debug("_chatSuspended")
     AppChatState.shared.set(.suspended)
     if ChatModel.shared.chatRunning == true {

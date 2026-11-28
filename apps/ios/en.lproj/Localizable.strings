@@ -24,3 +24,38 @@
 
 /* No comment provided by engineer. */
 "No group!" = "Group not found!";
+
+/* Private connection diagnostics. */
+"XauXat uses its built-in Tor connection to reach messaging servers. When chat is running, this check also requests a reconnection." = "XauXat uses its built-in Tor connection to reach messaging servers. When chat is running, this check also requests a reconnection.";
+"The probe uses Tor to connect to two preset messaging relays at their onion addresses. The first successful connection completes the probe. It sends no chat content and does not look up an exit IP. Message delivery and call audio require separate tests." = "The probe uses Tor to connect to two preset messaging relays at their onion addresses. The first successful connection completes the probe. It sends no chat content and does not look up an exit IP. Message delivery and call audio require separate tests.";
+"Private connection" = "Private connection";
+"Embedded Tor" = "Embedded Tor";
+"Messaging configuration" = "Messaging configuration";
+"Last connection check" = "Last connection check";
+"Checking connection" = "Checking connection";
+"Check private connection" = "Check private connection";
+"Retry private connection" = "Retry private connection";
+"Tor proxy configured" = "Tor proxy configured";
+"Not ready" = "Not ready";
+"Not run" = "Not run";
+"Checking" = "Checking";
+"Passed" = "Passed";
+"Blocked" = "Blocked";
+"Failed" = "Failed";
+"Stopped" = "Stopped";
+"Starting" = "Starting";
+"Verifying route" = "Verifying route";
+"Ready" = "Ready";
+"Copy connection diagnostics" = "Copy connection diagnostics";
+"Copies connection states, recovery blockers and Tor failure stages from this app session. No messages, contacts, server addresses or keys are included. Nothing is uploaded automatically." = "Copies connection states, recovery blockers and Tor failure stages from this app session. No messages, contacts, server addresses or keys are included. Nothing is uploaded automatically.";
+
+"The embedded Tor process stopped. Close XauXat completely and reopen it." = "The embedded Tor process stopped. Close XauXat completely and reopen it.";
+
+"Intermediate message relay" = "Intermediate message relay";
+"Always use an intermediate relay" = "Always use an intermediate relay";
+"For unknown servers" = "For unknown servers";
+"For unknown servers when the IP address is exposed" = "For unknown servers when the IP address is exposed";
+"Never use an intermediate relay" = "Never use an intermediate relay";
+"All modes use Tor. This choice applies to messages for every profile on this installation. Changing it reconnects active messaging sessions." = "All modes use Tor. This choice applies to messages for every profile on this installation. Changing it reconnects active messaging sessions.";
+"Message relay setting could not be saved" = "Message relay setting could not be saved";
+"Check your private connection and try again." = "Check your private connection and try again.";

@@ -3344,6 +3344,8 @@ struct XauXatTorDiagnosticsView: View {
     @ObservedObject private var recovery = XauXatConnectionRecoveryManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var verification: Verification = .idle
+    @State private var relayMode = networkSMPProxyModeGroupDefault.get()
+    @State private var relayChangeFailed = false
 
     private enum Verification: Equatable {
         case idle
@@ -3358,15 +3360,15 @@ struct XauXatTorDiagnosticsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                Text("Tor is built into XauXat. Messages stay disabled until its local route is ready.")
+                Text("XauXat uses its built-in Tor connection to reach messaging servers. When chat is running, this check also requests a reconnection.")
                     .font(.system(size: 15, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
 
                 XauXatSettingsCard(palette: palette) {
                     statusRow("Embedded Tor", value: torState)
-                    statusRow("Messaging route", value: routeState)
-                    statusRow("Tor route probe", value: verificationState)
+                    statusRow("Messaging configuration", value: routeState)
+                    statusRow("Last connection check", value: verificationState)
                 }
 
                 Button {
@@ -3376,7 +3378,7 @@ struct XauXatTorDiagnosticsView: View {
                         if verification == .checking {
                             ProgressView().tint(palette.ivoryInk)
                         }
-                            Text(verification == .checking ? "Checking through Tor" : (isXauXatManagedTorConfig(getNetCfg()) ? "Verify Tor route" : "Retry private connection"))
+                        Text(checkButtonTitle)
                             .font(.system(size: 14, weight: .bold, design: .default))
                     }
                     .foregroundStyle(palette.ivoryInk)
@@ -3393,7 +3395,42 @@ struct XauXatTorDiagnosticsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Text("This check sends no chat data. It opens a fresh SOCKS5 tunnel through the same local Tor endpoint and confirms that Tor Project is reachable through it. It does not request, display or store an exit IP. A passed check does not confirm a messaging relay connection or message delivery.")
+                XauXatSettingsCard(palette: palette) {
+                    Menu {
+                        ForEach(SMPProxyMode.values, id: \.self) { mode in
+                            Button {
+                                do {
+                                    try setXauXatMessageRelayMode(mode)
+                                    relayMode = networkSMPProxyModeGroupDefault.get()
+                                } catch {
+                                    relayMode = networkSMPProxyModeGroupDefault.get()
+                                    relayChangeFailed = true
+                                }
+                            } label: {
+                                if relayMode == mode {
+                                    Label(mode.messageRelayTitle, systemImage: "checkmark")
+                                } else {
+                                    Text(verbatim: mode.messageRelayTitle)
+                                }
+                            }
+                            .accessibilityAddTraits(relayMode == mode ? .isSelected : [])
+                            .accessibilityIdentifier("privateConnection.smpRelay." + mode.rawValue)
+                        }
+                    } label: {
+                        XauXatSettingsRow(palette: palette, symbol: "point.3.connected.trianglepath.dotted",
+                                         title: "Intermediate message relay", value: relayMode.messageRelayTitle,
+                                         showSeparator: false)
+                    }
+                    .accessibilityLabel(Text("Intermediate message relay"))
+                    .accessibilityValue(Text(verbatim: relayMode.messageRelayTitle))
+                    .accessibilityIdentifier("privateConnection.smpRelay")
+                }
+                Text("All modes use Tor. This choice applies to messages for every profile on this installation. Changing it reconnects active messaging sessions.")
+                    .font(.system(size: 12, weight: .regular, design: .default))
+                    .foregroundStyle(palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("The probe uses Tor to connect to two preset messaging relays at their onion addresses. The first successful connection completes the probe. It sends no chat content and does not look up an exit IP. Message delivery and call audio require separate tests.")
                     .font(.system(size: 12, weight: .regular, design: .default))
                     .foregroundStyle(palette.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -3417,6 +3454,12 @@ struct XauXatTorDiagnosticsView: View {
             .padding(22)
         }
         .background(palette.background.ignoresSafeArea())
+        .onAppear { relayMode = networkSMPProxyModeGroupDefault.get() }
+        .alert("Message relay setting could not be saved", isPresented: $relayChangeFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Check your private connection and try again.")
+        }
         .navigationTitle("Private connection")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -3427,15 +3470,20 @@ struct XauXatTorDiagnosticsView: View {
                 .font(.system(size: 14, weight: .regular, design: .default))
                 .foregroundStyle(palette.ink)
             Spacer()
-            Text(value)
+            Text(LocalizedStringKey(value))
                 .font(.system(size: 12, weight: .bold, design: .default))
-                .foregroundStyle(value == "Ready" || value == "Forced through Tor" || value == "Passed" ? palette.success : palette.muted)
+                .foregroundStyle(value == "Ready" || value == "Tor proxy configured" || value == "Passed" ? palette.success : palette.muted)
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 59)
         .overlay(alignment: .bottom) {
             Rectangle().fill(palette.line).frame(height: 1).padding(.leading, 16)
         }
+    }
+
+    private var checkButtonTitle: LocalizedStringKey {
+        if verification == .checking { return "Checking connection" }
+        return isXauXatManagedTorConfig(getNetCfg()) ? "Check private connection" : "Retry private connection"
     }
 
     private var torState: String {
@@ -3450,7 +3498,7 @@ struct XauXatTorDiagnosticsView: View {
     }
 
     private var routeState: String {
-        isXauXatManagedTorConfig(getNetCfg()) ? "Forced through Tor" : "Not ready"
+        isXauXatManagedTorConfig(getNetCfg()) ? "Tor proxy configured" : "Not ready"
     }
 
     private var verificationState: String {
@@ -3487,6 +3535,17 @@ struct XauXatTorDiagnosticsView: View {
             else { verification = .failed(error.localizedDescription) }
         } catch {
             verification = .failed(error.localizedDescription)
+        }
+    }
+}
+
+private extension SMPProxyMode {
+    var messageRelayTitle: String {
+        switch self {
+        case .always: return String(localized: "Always use an intermediate relay")
+        case .unknown: return String(localized: "For unknown servers")
+        case .unprotected: return String(localized: "For unknown servers when the IP address is exposed")
+        case .never: return String(localized: "Never use an intermediate relay")
         }
     }
 }

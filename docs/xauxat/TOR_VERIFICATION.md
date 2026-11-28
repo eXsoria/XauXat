@@ -14,8 +14,8 @@ The three expected results are:
 - `SimpleX route: Forced through Tor`: the current `NetCfg` uses the dynamic
   `127.0.0.1` SOCKS endpoint in `always` mode and prefers onion endpoints.
 - `Tor route probe: Passed`: a fresh SOCKS5 tunnel through that exact endpoint
-  reached `check.torproject.org`. The probe sends no chat data and neither
-  requests nor stores an exit IP.
+  reached at least one preset messaging relay onion address. This test sends
+  no chat data. Verify authenticated messaging separately with a test contact.
 
 If the managed route is not ready, XauXat refuses to configure or start the
 SimpleX controller. The placeholder proxy is deliberately closed, so failure

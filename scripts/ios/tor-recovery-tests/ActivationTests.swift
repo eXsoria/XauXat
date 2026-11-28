@@ -3,7 +3,10 @@ import Dispatch
 
 // Minimal app collaborators for the actual production activation functions.
 // The NSE waiter is held so lifecycle changes can happen before its callback.
-enum AppState { case active, activating, bgRefresh, suspending, suspended, stopped }
+enum AppState: String {
+    case active, activating, bgRefresh, suspending, suspended, stopped
+    var canSuspend: Bool { self == .active || self == .activating || self == .bgRefresh }
+}
 enum NSEState {
     case active, suspended
     var inactive: Bool { self == .suspended }
@@ -45,6 +48,8 @@ final class AppSheetState {
 final class ChatReceiver {
     static let shared = ChatReceiver()
     var starts = 0
+    var stops = 0
+    func stop() { stops += 1 }
     func start() { starts += 1 }
 }
 final class Key {
@@ -62,6 +67,12 @@ var activations = 0
 var torReady = true
 func isXauXatTorReady() -> Bool { torReady }
 let suspendLockQueue = DispatchQueue(label: "activation-test")
+var suspensionExpirations: [() -> Void] = []
+func apiSuspendChat(timeoutMicroseconds: Int) {}
+func beginBGTask(_ onExpiration: @escaping () -> Void) -> () -> Void {
+    suspensionExpirations.append(onExpiration)
+    return {}
+}
 let chatStoreStateLock = NSLock()
 var chatStoreOpen = false
 var reopenSucceeds = true
@@ -114,6 +125,21 @@ let logger = Logger()
         nseWaiter = nil
     }
     static func main() {
+        reset()
+        setAppState(.active)
+        _suspendChat(timeout: 15)
+        startChatAndActivate {}
+        require(AppChatState.shared.value == .active && ChatReceiver.shared.starts == 1, "Foreground must resume the first suspension")
+        _suspendChat(timeout: 45)
+        require(suspensionExpirations.count == 2, "Two distinct delivery windows must have been granted")
+        suspensionExpirations[0]()
+        require(AppChatState.shared.value == .suspending && isChatStoreOpen() && ChatReceiver.shared.stops == 0,
+                "An old background expiration closed the newer delivery window")
+        suspensionExpirations[1]()
+        require(AppChatState.shared.value == .suspended && !isChatStoreOpen() && ChatReceiver.shared.stops == 1,
+                "The current expiration must still close the stores and stop the reader")
+        suspensionExpirations.removeAll()
+
         reset()
         require(xauXatRecoverySessionState() == .suspended, "A foreground app may have a resumable suspended core")
         setAppState(.active)

@@ -108,6 +108,7 @@ final class ChatModel {
             print("Incoming-only recovery checks passed: \(checks)")
             return
         }
+        try await freshSubscriptionDoesNotWaitForOldOutboxBackoff()
         try await suspendedChatVerifiesTorBeforeResuming()
         try await suspendedChatCannotWidenStaleProfileTargets()
         try await blockedRequestsExplainWhy()
@@ -187,7 +188,7 @@ final class ChatModel {
     }
 
     static func blockedRequestsExplainWhy() async throws {
-        for blocker in [Recovery.Blocker.appInactive, .networkOffline, .noActiveProfile, .chatStopped, .unlockRequired, .chatUninitialized] {
+        for blocker in [Recovery.Blocker.appInactive, .networkOffline, .noActiveProfile, .chatStopped, .unlockRequired, .chatUninitialized, .torStopped] {
             let f = RecoveryFixture()
             switch blocker {
             case .appInactive: f.context.active = false
@@ -196,6 +197,11 @@ final class ChatModel {
             case .chatStopped: f.sessionState = .stopped
             case .unlockRequired: f.sessionState = .unlockRequired
             case .chatUninitialized: f.sessionState = .uninitialized
+            case .torStopped:
+                f.context.torRequiresRelaunch = true
+                f.manager.routeUnavailable()
+                f.manager.setOutboundPending(true)
+                require(!f.manager.diagnosticText.contains("routeRetry scheduled"), "A stopped runtime cannot recover by retrying in-process")
             default: fatalError("Unexpected fixture blocker")
             }
             do { try await f.manager.reconnect(); fatalError("Unavailable context must fail") }
@@ -423,6 +429,47 @@ final class ChatModel {
             try await Task.sleep(nanoseconds: 15_000_000)
             require(g.forces.isEmpty && g.commands.isEmpty, "Session retries cannot cross lifecycle/profile/network/store gates")
             g.manager.pause()
+        }
+    }
+
+    static func freshSubscriptionDoesNotWaitForOldOutboxBackoff() async throws {
+        for selectedChat in [false, true] {
+            let f = RecoveryFixture()
+            var waitingOnOldBackoff = false
+            var signaledAt: TimeInterval?
+            var firstNewCheck: TimeInterval?
+            var repairedAt: TimeInterval?
+            f.connectingGrace = 20
+            f.summary = {
+                if signaledAt != nil && firstNewCheck == nil { firstNewCheck = f.clock }
+                return Dictionary(uniqueKeysWithValues: f.failed.map { ($0, f.connectingGrace) })
+            }
+            f.onReconnect = { _ in
+                repairedAt = f.clock
+                f.failed = []
+            }
+            f.sleep = { delay in
+                if delay == 90 && !waitingOnOldBackoff {
+                    waitingOnOldBackoff = true
+                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                }
+                f.clock += delay
+                try await Task.sleep(nanoseconds: 2_000_000)
+            }
+            f.manager.setOutboundPending(true)
+            try await until { waitingOnOldBackoff }
+            f.failed = [f.first]
+            signaledAt = f.clock
+            if selectedChat {
+                f.manager.setSubscriptionPending(true)
+            } else {
+                f.manager.subscriptionsNeedRecovery()
+            }
+            try await until({ repairedAt != nil }, message: "A new subscription stall was held behind an older 90-second outbox check")
+            require(firstNewCheck == signaledAt! + 8, "The new demand must get the first normal summary interval")
+            require(repairedAt == firstNewCheck! + 20 && f.commands == [.relays([f.first])],
+                    "Only the eligible relay is repaired after its full native connection budget")
+            f.manager.pause()
         }
     }
 
