@@ -24,7 +24,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - name: Reproduce baseline stall and verify incoming-only recovery
+      - name: Reproduce the pre-359 stall with its matching regression harness
+        if: runner.os == 'Linux'
+        run: |
+          fixture="$RUNNER_TEMP/incoming-recovery-359"
+          git worktree add --detach "$fixture" 02794be9d6ccecccbc78d3074137e180d8fd66d4
+          INCOMING_RECOVERY_BASE_SHA="$(git -C "$fixture" rev-parse HEAD^)" \
+            bash "$fixture/scripts/ios/test-incoming-only-recovery.sh"
+      - name: Verify incoming-only recovery on this revision
         run: bash scripts/ios/test-incoming-only-recovery.sh
-        env:
-          INCOMING_RECOVERY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
