@@ -249,6 +249,14 @@ struct ComposeState {
         }
     }
 
+    var retryableMessageDraft: Bool {
+        guard liveMessage == nil, !editing, !forwarding, !reporting else { return false }
+        switch preview {
+        case .noPreview, .linkPreview, .chatLinkPreview, .voicePreview: return true
+        case .mediaPreviews, .filePreview: return false
+        }
+    }
+
     var manyMediaPreviews: Bool {
         switch preview {
         case let .mediaPreviews(mediaPreviews): return mediaPreviews.count > 1
@@ -439,7 +447,6 @@ private func saveXauXatCodeLockedAudio(
             protectedFileName,
             encrypted: privacyEncryptLocalFilesGroupDefault.get()
         ) else { return nil }
-        removeFile(source)
         return protectedFile
     } catch {
         logger.error("Unable to protect XauXat audio: \(error.localizedDescription)")
@@ -2189,7 +2196,10 @@ struct ComposeView: View {
     // Spec: spec/client/compose.md#sendMessageAsync
     private func sendMessageAsync(_ text: String?, live: Bool, ttl: Int?, sign: Bool = false) async -> ChatItem? {
         guard !live || !composeState.voicePreview else { return nil }
+        let submittedDraftRevision = !live && composeState.retryableMessageDraft ? chatModel.draftRevision : nil
+        let submittedChatId = draftChatId(chat.id, chat.chatInfo.groupChatScope())
         let attachmentPreparationStarted = ProcessInfo.processInfo.systemUptime
+        let voiceDraftFileName = composeState.voiceMessageRecordingFileName
         var sent: ChatItem?
         let msgText = text ?? composeState.message
         let liveMessage = composeState.liveMessage
@@ -2311,6 +2321,7 @@ struct ComposeView: View {
                     }
                     return nil
                 }
+                let outgoingFile: CryptoFile
                 if let code = codeLockCode {
                     guard let file = await saveXauXatCodeLockedAudio(
                         recordingFileName: recordingFileName,
@@ -2329,6 +2340,7 @@ struct ComposeView: View {
                         }
                         return nil
                     }
+                    outgoingFile = file
                     sent = await send(
                         .voice(text: XauXatCodeLockedEnvelope.fileWireText(kind: .audio), duration: 0),
                         quoted: quoted,
@@ -2346,13 +2358,14 @@ struct ComposeView: View {
                         }
                         return nil
                     }
+                    outgoingFile = file
                     sent = await send(.voice(text: msgText, duration: duration), quoted: quoted, file: file, ttl: ttl, mentions: mentions, sign: sign)
-                    if listenOnce && sent != nil { removeFile(recordingFileName) }
-                    if listenOnce && sent == nil {
-                        await MainActor.run { composeState.inProgress = false }
-                        return nil
-                    }
                 }
+                guard sent != nil else {
+                    await MainActor.run { composeState.inProgress = false }
+                    return nil
+                }
+                if outgoingFile.filePath != recordingFileName { removeFile(recordingFileName) }
             case let .filePreview(_, file):
                 if let code = codeLockCode {
                     guard let savedFile = await saveXauXatCodeLockedFile(
@@ -2386,6 +2399,16 @@ struct ComposeView: View {
             }
         }
         await MainActor.run {
+            if let submittedDraftRevision {
+                if sent != nil, chatModel.draftRevision == submittedDraftRevision {
+                    clearCurrentDraft(for: submittedChatId)
+                }
+                guard submittedChatId == draftChatId(chat.id, chat.chatInfo.groupChatScope()) else { return }
+                guard sent != nil else {
+                    composeState.inProgress = false
+                    return
+                }
+            }
             let wasForwarding = composeState.forwarding
             clearState(live: live)
             if wasForwarding,
@@ -2548,7 +2571,6 @@ struct ComposeView: View {
             do {
                 if encrypt {
                     let cfArgs = try encryptCryptoFile(fromPath: url.path, toPath: toUrl.path)
-                    if !listenOnce { removeFile(url) }
                     return CryptoFile(filePath: toFile, cryptoArgs: cfArgs)
                 }
                 try FileManager.default.copyItem(at: url, to: toUrl)
@@ -2633,7 +2655,7 @@ struct ComposeView: View {
                 return chatItems
             }
             for msg in msgs {
-                if let file = msg.fileSource {
+                if let file = msg.fileSource, file.filePath != voiceDraftFileName {
                     removeFile(file.filePath)
                 }
             }
@@ -3003,8 +3025,8 @@ struct ComposeView: View {
     }
 
     // Spec: spec/client/compose.md#clearCurrentDraft
-    private func clearCurrentDraft() {
-        if chatModel.draftChatId == draftChatId(chat.id, chat.chatInfo.groupChatScope()) {
+    private func clearCurrentDraft(for submittedChatId: String? = nil) {
+        if chatModel.draftChatId == (submittedChatId ?? draftChatId(chat.id, chat.chatInfo.groupChatScope())) {
             chatModel.draft = nil
             chatModel.draftChatId = nil
         }
