@@ -321,7 +321,7 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
                     reportPipelineFailure("invalid input format")
                     return
                 }
-                let channels = AVAudioChannelCount(min(2, inputFormat.channelCount))
+                let channels = inputFormat.xauxatWebRTCChannels
                 guard let rtcRecordFormat = AVAudioFormat(
                     commonFormat: .pcmFormatInt16,
                     sampleRate: inputFormat.sampleRate,
@@ -444,7 +444,7 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
                       let rtcPlayFormat = AVAudioFormat(
                         commonFormat: .pcmFormatInt16,
                         sampleRate: outputFormat.sampleRate,
-                        channels: outputFormat.channelCount,
+                        channels: outputFormat.xauxatWebRTCChannels,
                         interleaved: true
                       ) else {
                     reportPipelineFailure("invalid output format")
@@ -459,9 +459,10 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
                     return result
                 }
                 engine.attach(source)
-                engine.connect(source, to: engine.mainMixerNode, format: outputFormat)
+                let sourceFormat = AVAudioFormat(standardFormatWithSampleRate: outputFormat.sampleRate, channels: rtcPlayFormat.channelCount)
+                engine.connect(source, to: engine.mainMixerNode, format: sourceFormat)
                 audioSourceNode = source
-                audioOutputFormat = rtcPlayFormat
+                audioOutputFormat = outputFormat
                 cachedOutputLatency = audioSession.outputLatency
                 delegate.notifyAudioOutputParametersChange()
             }
@@ -528,7 +529,7 @@ final class XauXatRealtimeAudioDevice: NSObject, RTCAudioDevice {
     var inputLatency: TimeInterval { cachedInputLatency }
     var deviceOutputSampleRate: Double { audioOutputFormat?.sampleRate ?? max(8_000, audioSession.sampleRate) }
     var outputIOBufferDuration: TimeInterval { max(0.005, audioSession.ioBufferDuration) }
-    var outputNumberOfChannels: Int { Int(audioOutputFormat?.channelCount ?? 1) }
+    var outputNumberOfChannels: Int { Int(audioOutputFormat?.xauxatWebRTCChannels ?? 1) }
     var outputLatency: TimeInterval { cachedOutputLatency }
     var isInitialized: Bool { delegate != nil }
 
@@ -789,6 +790,9 @@ private extension AVAudioSession {
 }
 
 private extension AVAudioFormat {
+    // WebRTC uses mono or stereo PCM even when the hardware mixer has more channels.
+    var xauxatWebRTCChannels: AVAudioChannelCount { min(2, channelCount) }
+
     var xauxatIsUsable: Bool {
         sampleRate > 0 && sampleRate.isFinite && channelCount > 0
     }

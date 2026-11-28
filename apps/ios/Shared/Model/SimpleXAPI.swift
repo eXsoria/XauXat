@@ -3703,7 +3703,7 @@ func processReceivedMsg(_ res: ChatEvent) async {
             let iceServers = getIceServers()
             logger.debug(".callOffer useRelay \(useRelay)")
             logger.debug(".callOffer iceServers \(String(describing: iceServers))")
-            await m.callCommand.processCommand(.offer(
+            await call.callCommand.processCommand(.offer(
                 offer: offer.rtcSession,
                 iceCandidates: offer.rtcIceCandidates,
                 media: callType.media, aesKey: sharedKey,
@@ -3717,11 +3717,11 @@ func processReceivedMsg(_ res: ChatEvent) async {
             await MainActor.run {
                 call.callState = .answerReceived
             }
-            await m.callCommand.processCommand(.answer(answer: answer.rtcSession, iceCandidates: answer.rtcIceCandidates))
+            await call.callCommand.processCommand(.answer(answer: answer.rtcSession, iceCandidates: answer.rtcIceCandidates))
         }
     case let .callExtraInfo(_, contact, extraInfo):
-        await withCall(contact) { _ in
-            await m.callCommand.processCommand(.ice(iceCandidates: extraInfo.rtcIceCandidates))
+        await withCall(contact) { call in
+            await call.callCommand.processCommand(.ice(iceCandidates: extraInfo.rtcIceCandidates))
         }
     case let .callEnded(_, contact):
         XauXatCallTiming.mark("end.received")
@@ -4044,7 +4044,7 @@ func refreshCallInvitations() async throws {
            let invitation = m.callInvitations[chatId] {
             m.ntfCallInvitationAction = nil
             CallController.shared.callAction(invitation: invitation, action: ntfAction)
-        } else if let invitation = callInvitations.last(where: { $0.user.showNotifications }) {
+        } else if let invitation = m.callInvitations.values.filter({ $0.user.showNotifications }).max(by: { $0.callTs < $1.callTs }) {
             activateCall(invitation)
         }
     }
@@ -4070,11 +4070,21 @@ private func callsByChat(_ callInvitations: [RcvCallInvitation]) -> [ChatId: Rcv
 func activateCall(_ callInvitation: RcvCallInvitation) {
     let m = ChatModel.shared
     logger.debug("reportNewIncomingCall activeCallUUID \(String(describing: m.activeCall?.callUUID)) invitationUUID \(String(describing: callInvitation.callUUID))")
-    if !callInvitation.user.showNotifications || m.activeCall?.callUUID == callInvitation.callUUID { return }
+    guard callInvitation.user.showNotifications, xauXatContactInvitePermissions(callInvitation.contact).calls,
+          m.callInvitations[callInvitation.contact.id]?.matches(callInvitation) == true else { return }
+    if let active = m.activeCall, active.callUUID == callInvitation.callUUID,
+       active.callUUID != nil || active.contact.id == callInvitation.contact.id { return }
     CallController.shared.reportNewIncomingCall(invitation: callInvitation) { error in
         if let error = error {
-            DispatchQueue.main.async {
-                m.callInvitations[callInvitation.contact.id]?.callUUID = nil
+            if CallController.allowsInAppFallback(after: error) {
+                DispatchQueue.main.async {
+                    let id = callInvitation.contact.id
+                    guard m.callInvitations[id]?.matches(callInvitation) == true else { return }
+                    var fallback = callInvitation
+                    fallback.callUUID = nil
+                    m.callInvitations[id] = fallback
+                    CallController.shared.presentIncomingCallInApp(fallback)
+                }
             }
             logger.error("reportNewIncomingCall error: \(error.localizedDescription)")
         } else {

@@ -77,6 +77,15 @@ class Call: ObservableObject, Equatable {
         lhs.contact.apiId == rhs.contact.apiId
     }
 
+    let callCommand = WebRTCCommandProcessor()
+    @Published var webRTCClient: WebRTCClient?
+    @Published var localRendererAspectRatio: CGFloat?
+    var didConnectWebRTC = false
+    var microphoneRequested = true
+
+    func updateMicrophonePermission(_ authorized: Bool) {
+        localMediaSources.mic = microphoneRequested && authorized
+    }
     var direction: CallDirection
     var contact: Contact
     var callUUID: String?
@@ -112,6 +121,9 @@ class Call: ObservableObject, Equatable {
             camera: initialCallType == .video && AVCaptureDevice.authorizationStatus(for: .video) == .authorized)
     }
 
+    var usesCallKit: Bool {
+        CallController.useCallKit() && callUUID.flatMap(UUID.init(uuidString:)) != nil
+    }
     var encrypted: Bool { get { localEncrypted && sharedKey != nil } }
     private var localEncrypted: Bool { get { localCapabilities?.encryption ?? false } }
     var encryptionStatus: LocalizedStringKey {
@@ -428,34 +440,41 @@ actor WebRTCCommandProcessor {
     private var commands: [WCallCommand] = []
     private var running: Bool = false
 
-    func setClient(_ client: WebRTCClient?) async {
-        logger.debug("WebRTC: setClient, commands count \(self.commands.count)")
+    private var finished = false
+
+    func setClient(_ client: WebRTCClient) async {
+        guard !finished else { client.endCall(); return }
+        guard self.client == nil else { return }
         self.client = client
-        if client != nil {
-            await processAllCommands()
-        } else {
-            commands.removeAll()
+        await processAllCommands()
+    }
+
+    func processCommand(_ command: WCallCommand) async {
+        guard !finished else { return }
+        commands.append(command)
+        await processAllCommands()
+    }
+
+    func finish() {
+        finished = true
+        commands.removeAll()
+        if !running {
+            client?.endCall()
+            client = nil
         }
     }
 
-    func processCommand(_ c: WCallCommand) async {
-//        logger.debug("WebRTC: process command \(c.cmdType)")
-        commands.append(c)
-        if !running && client != nil {
-            await processAllCommands()
+    private func processAllCommands() async {
+        guard !running, let client else { return }
+        running = true
+        while !finished, let next = commands.firstIndex(where: { shouldRunCommand(client, $0) }) {
+            let command = commands.remove(at: next)
+            await client.sendCallCommand(command: command)
         }
-    }
-
-    func processAllCommands() async {
-        logger.debug("WebRTC: process all commands, commands count \(self.commands.count), client == nil \(self.client == nil)")
-        if let client = client {
-            running = true
-            while let c = commands.first, shouldRunCommand(client, c) {
-                commands.remove(at: 0)
-                await client.sendCallCommand(command: c)
-                logger.debug("WebRTC: processed cmd \(c.cmdType)")
-            }
-            running = false
+        running = false
+        if finished {
+            client.endCall()
+            self.client = nil
         }
     }
 

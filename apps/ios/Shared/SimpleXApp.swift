@@ -134,7 +134,7 @@ struct SimpleXApp: App {
                         chatModel.contentViewAccessAuthenticated = false
                         // authentication ---
 
-                        if CallController.useCallKit() && chatModel.activeCall != nil {
+                        if chatModel.activeCall?.usesCallKit == true {
                             CallController.shared.shouldSuspendChat = true
                         } else {
                             suspendChat()

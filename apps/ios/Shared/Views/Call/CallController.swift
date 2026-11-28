@@ -44,7 +44,10 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
     private let callManager = CallManager()
     @Published var activeCallInvitation: RcvCallInvitation?
     var shouldSuspendChat: Bool = false
-    var fulfillOnConnect: CXAnswerCallAction? = nil
+    // One live call per provider. Retain its UUID for a late native end action.
+    private var lastNativeCallUUID: UUID?
+    private var fulfillOnConnect: CXAnswerCallAction?
+    private var pendingPushes: [UUID: Date] = [:]
 
     // PKPushRegistry is used from notification service extension
     private let registry = PKPushRegistry(queue: nil)
@@ -58,12 +61,17 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
 
     func providerDidReset(_ provider: CXProvider) {
         logger.debug("CallController.providerDidReset")
+        _ = WebRTCClient.callKitAudioChanged(AVAudioSession.sharedInstance(), active: false)
+        fulfillOnConnect = nil
+        pendingPushes.removeAll()
+        lastNativeCallUUID = nil
     }
 
     // Spec: spec/services/calls.md#CXStartCallAction
     func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
         logger.debug("CallController.provider CXStartCallAction")
         if callManager.startOutgoingCall(callUUID: action.callUUID.uuidString.lowercased()) {
+            lastNativeCallUUID = action.callUUID
             action.fulfill()
             provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: nil)
         } else {
@@ -74,29 +82,24 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
     // Spec: spec/services/calls.md#CXAnswerCallAction
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         logger.debug("CallController.provider CXAnswerCallAction")
-        Task {
-            let chatIsReady = await waitUntilChatStarted(timeoutMs: 30_000, stepMs: 500)
-            logger.debug("CallController chat started \(chatIsReady) \(ChatModel.shared.chatInitialized) \(ChatModel.shared.chatRunning == true) \(String(describing: AppChatState.shared.value))")
+        fulfillOnConnect = action
+        Task { @MainActor in
+            let chatIsReady = await waitUntilChatStarted(for: action)
+            guard canAnswer(action) else { return }
             if !chatIsReady {
-                action.fail()
+                finishAnswer(for: action.callUUID, connected: false)
                 return
             }
-            if !ChatModel.shared.callInvitations.values.contains(where: { inv in inv.callUUID == action.callUUID.uuidString.lowercased() }) {
+            let callUUID = action.callUUID.uuidString.lowercased()
+            if !ChatModel.shared.callInvitations.values.contains(where: { $0.callUUID == callUUID }) {
                 try? await justRefreshCallInvitations()
-                logger.debug("CallController: updated call invitations chat")
             }
-            await MainActor.run {
-                logger.debug("CallController.provider will answer on call")
-
-                if callManager.answerIncomingCall(callUUID: action.callUUID.uuidString.lowercased()) {
-                    logger.debug("CallController.provider answered on call")
-                    // WebRTC call should be in connected state to fulfill.
-                    // Otherwise no audio and mic working on lockscreen
-                    fulfillOnConnect = action
-                } else {
-                    logger.debug("CallController.provider will fail the call")
-                    action.fail()
-                }
+            guard canAnswer(action) else { return }
+            // CallKit activates lock-screen audio after WebRTC connects.
+            if callManager.answerIncomingCall(callUUID: callUUID) {
+                lastNativeCallUUID = action.callUUID
+            } else {
+                finishAnswer(for: action.callUUID, connected: false)
             }
         }
     }
@@ -104,11 +107,10 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
     // Spec: spec/services/calls.md#CXEndCallAction
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
         logger.debug("CallController.provider CXEndCallAction")
-        // Should be nil here if connection was in connected state
-        fulfillOnConnect?.fail()
-        fulfillOnConnect = nil
+        let reportedPush = pendingPushes[action.callUUID] != nil
+        finishAnswer(for: action.callUUID, connected: false)
         callManager.endCall(callUUID: action.callUUID.uuidString.lowercased()) { ok in
-            if ok {
+            if ok || reportedPush || self.lastNativeCallUUID == action.callUUID {
                 action.fulfill()
             } else {
                 action.fail()
@@ -128,13 +130,17 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
 
     func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {
         logger.debug("timed out: \(String(describing: action))")
-        action.fulfill()
+        if let answer = fulfillOnConnect, answer.uuid == action.uuid {
+            fulfillOnConnect = nil
+            pendingPushes.removeValue(forKey: answer.callUUID)
+            callManager.endCall(callUUID: answer.callUUID.uuidString.lowercased()) { _ in }
+        }
     }
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
         logger.debug("CallController: activating audioSession and audio in WebRTCClient")
-        RTCAudioSession.sharedInstance().audioSessionDidActivate(audioSession)
-        RTCAudioSession.sharedInstance().isAudioEnabled = true
+        guard WebRTCClient.callKitAudioChanged(audioSession, active: true) else { return }
+        let callAtActivation = ChatModel.shared.activeCall
         do {
             let hasVideo = ChatModel.shared.activeCall?.hasVideo == true
             if hasVideo {
@@ -143,19 +149,19 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
                 try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.mixWithOthers, .allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
             }
             // Without any delay sound is not playing from speaker or external device in incoming call
-            Task {
+            Task { @MainActor in
                 for i in 0 ... 3 {
                     try? await Task.sleep(nanoseconds: UInt64(i) * 300_000000)
+                    guard let callAtActivation, ChatModel.shared.activeCall === callAtActivation,
+                          WebRTCClient.callKitAudioActive else { return }
                     if let preferred = audioSession.preferredInputDevice() {
-                        await MainActor.run { try? audioSession.setPreferredInput(preferred) }
+                        try? audioSession.setPreferredInput(preferred)
                     } else if hasVideo {
-                        await MainActor.run { try? audioSession.overrideOutputAudioPort(.speaker) }
+                        try? audioSession.overrideOutputAudioPort(.speaker)
                     }
                 }
             }
             logger.debug("audioSession category set")
-            try audioSession.setActive(true)
-            logger.debug("audioSession activated")
         } catch {
             logger.error("failed activating audio session")
         }
@@ -163,14 +169,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
 
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
         logger.debug("CallController: deactivating audioSession and audio in WebRTCClient")
-        RTCAudioSession.sharedInstance().audioSessionDidDeactivate(audioSession)
-        RTCAudioSession.sharedInstance().isAudioEnabled = false
-        do {
-            try audioSession.setActive(false)
-            logger.debug("audioSession deactivated")
-        } catch {
-            logger.error("failed deactivating audio session")
-        }
+        _ = WebRTCClient.callKitAudioChanged(audioSession, active: false)
         suspendOnEndCall()
     }
 
@@ -189,16 +188,33 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
         }
     }
 
-    private func waitUntilChatStarted(timeoutMs: UInt64, stepMs: UInt64) async -> Bool {
-        logger.debug("CallController waiting until chat started")
-        var t: UInt64 = 0
-        repeat {
-            if ChatModel.shared.chatInitialized, ChatModel.shared.chatRunning == true, case .active = AppChatState.shared.value {
-                return true
+    @MainActor
+    private func waitUntilChatStarted(for action: CXAnswerCallAction) async -> Bool {
+        let deadline = min(action.timeoutDate, Date().addingTimeInterval(30))
+        var requestedActivation = false
+        let model = ChatModel.shared
+        while canAnswer(action), Date() < deadline {
+            let state = AppChatState.shared.value
+            if state == .stopped || xauXatRecoverySessionState() == .unlockRequired { return false }
+            if let expiry = pendingPushes[action.callUUID], expiry <= Date() { return false }
+            if model.chatInitialized, model.chatRunning == true {
+                if state == .active && isChatStoreOpen() { return true }
+                // A foreground invitation can reach CallKit without a PushKit wake.
+                if pendingPushes[action.callUUID] == nil, !requestedActivation, state != .activating,
+                   xauXatRecoverySessionState() == .suspended, isXauXatTorReady(),
+                   let userId = model.currentUser?.userId {
+                    let scope = xauXatStorageScope()
+                    requestedActivation = true
+                    if !xauXatAppIsForeground() { shouldSuspendChat = true }
+                    startChatAndActivate(ifAllowed: {
+                        self.canAnswer(action) && xauXatRecoverySessionState().canRecover && isXauXatTorReady()
+                            && model.currentUser?.userId == userId && xauXatStorageScope() == scope
+                    }) {}
+                    if AppChatState.shared.value == .active && isChatStoreOpen() { return true }
+                }
             }
-            _ = try? await Task.sleep(nanoseconds: stepMs * 1000000)
-            t += stepMs
-        } while t < timeoutMs
+            do { try await Task.sleep(nanoseconds: 500_000_000) } catch { return false }
+        }
         return false
     }
 
@@ -231,12 +247,21 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
             let callTs = Date(timeIntervalSince1970: callTsInterval)
             if callTs.timeIntervalSinceNow >= -180 {
                 logger.debug("CallController: report pushkit call via CallKit")
-                self.provider.reportNewIncomingCall(with: uuid, update: update) { error in
-                    if error != nil {
-                        m.callInvitations.removeValue(forKey: contactId)
-                    }
-                    // Tell PushKit that the notification is handled.
+                pendingPushes = pendingPushes.filter { $0.value > Date() }
+                let expires = min(callTs, Date()).addingTimeInterval(180)
+                pendingPushes[uuid] = expires
+                provider.reportNewIncomingCall(with: uuid, update: update) { error in
                     completion()
+                    Task { @MainActor in
+                        guard self.pendingPushes[uuid] == expires else { return }
+                        if let error, !Self.alreadyReported(error) {
+                            self.pendingPushes.removeValue(forKey: uuid)
+                            guard m.callInvitations[contactId]?.callUUID == callUUID else { return }
+                            m.callInvitations.removeValue(forKey: contactId)
+                        } else {
+                            await self.prepareChatForPush(uuid, expires: expires)
+                        }
+                    }
                 }
             } else {
                 logger.debug("CallController will expire call 1")
@@ -246,24 +271,47 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
             logger.debug("CallController will expire call 2")
             self.reportExpiredCall(payload: payload, completion)
         }
+    }
 
-        //DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-        if (!ChatModel.shared.chatInitialized) {
-            logger.debug("CallController: initializing chat")
-            do {
-                try initializeChat(start: true, refreshInvitations: false)
-            } catch let error {
-                logger.error("CallController: initializing chat error: \(error)")
-                if let call = ChatModel.shared.activeCall {
-                    self.endCall(call: call, completed: completion)
-                }
-                return
-            }
+    @MainActor
+    private func prepareChatForPush(_ uuid: UUID, expires: Date) async {
+        let model = ChatModel.shared
+        let scope = xauXatStorageScope()
+        var userId = model.currentUser?.userId
+        func canPrepare() -> Bool {
+            if let answer = fulfillOnConnect, answer.callUUID == uuid, !canAnswer(answer) { return false }
+            return pendingPushes[uuid] == expires && Date() < expires && AppChatState.shared.value != .stopped
+                && xauXatStorageScope() == scope && model.currentUser?.userId == userId
+                && !model.ctrlInitInProgress && model.migrationState == nil && !xauXatStoragePromotionPending()
+                && xauXatRecoverySessionState() != .unlockRequired
+                && (model.chatInitialized || !xauXatRequiresUnlockBeforeInitialization())
         }
-        logger.debug("CallController: initialized chat")
-        startChatForCall()
-        logger.debug("CallController: started chat")
-        self.shouldSuspendChat = true
+        guard canPrepare() else { return }
+        do {
+            let deadline = ProcessInfo.processInfo.systemUptime + expires.timeIntervalSinceNow
+            _ = try await EmbeddedTorManager.shared.readyBefore(deadline, maxAge: 15)
+            guard canPrepare(), isXauXatTorReady() else { return }
+            if !model.chatInitialized {
+                guard v3DBMigrationDefault.get().startChat else { return }
+                if !nseStateGroupDefault.get().inactive {
+                    let suspended = await withCheckedContinuation { continuation in
+                        waitNSESuspended(timeout: nseSuspendTimeout) { continuation.resume(returning: $0) }
+                    }
+                    guard suspended, nseStateGroupDefault.get().inactive,
+                          canPrepare(), isXauXatTorReady() else { return }
+                }
+                try initializeChat(start: true, refreshInvitations: false)
+                userId = model.currentUser?.userId
+            } else {
+                guard model.chatRunning == true else { return }
+                _ = try applyXauXatRecoveryConfiguration()
+            }
+            guard canPrepare(), userId != nil, model.chatRunning == true else { return }
+            if !xauXatAppIsForeground() { shouldSuspendChat = true }
+            startChatAndActivate(ifAllowed: { canPrepare() && isXauXatTorReady() }) {}
+        } catch {
+            logger.error("CallController: could not prepare the private connection for the incoming call")
+        }
     }
 
     // This function fulfils the requirement to always report a call when PushKit notification is received,
@@ -292,6 +340,16 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
         reportExpiredCall(update: update, completion)
     }
 
+    static func alreadyReported(_ error: Error) -> Bool {
+        (error as? CXErrorCodeIncomingCallError)?.code == .callUUIDAlreadyExists
+    }
+
+    static func allowsInAppFallback(after error: Error) -> Bool {
+        guard let callKitError = error as? CXErrorCodeIncomingCallError else { return true }
+        // Keep the native UUID for duplicates and calls suppressed by system policy.
+        return callKitError.code == .unknown || callKitError.code == .unentitled
+    }
+
     // Spec: spec/services/calls.md#reportNewIncomingCall
     func reportNewIncomingCall(invitation: RcvCallInvitation, completion: @escaping (Error?) -> Void) {
         logger.debug("CallController.reportNewIncomingCall, UUID=\(String(describing: invitation.callUUID))")
@@ -301,10 +359,14 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
                 provider.reportNewIncomingCall(with: uuid, update: update, completion: completion)
             }
         } else {
-            NtfManager.shared.notifyCallInvitation(invitation)
-            if invitation.callTs.timeIntervalSinceNow >= -180 {
-                activeCallInvitation = invitation
-            }
+            presentIncomingCallInApp(invitation)
+        }
+    }
+
+    func presentIncomingCallInApp(_ invitation: RcvCallInvitation) {
+        NtfManager.shared.notifyCallInvitation(invitation)
+        if invitation.callTs.timeIntervalSinceNow >= -180 {
+            activeCallInvitation = invitation
         }
     }
 
@@ -326,12 +388,22 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
         return update
     }
 
+    private func canAnswer(_ action: CXAnswerCallAction) -> Bool {
+        fulfillOnConnect?.uuid == action.uuid && !action.isComplete && action.timeoutDate > Date()
+    }
+
+    private func finishAnswer(for callUUID: UUID, connected: Bool) {
+        pendingPushes.removeValue(forKey: callUUID)
+        guard let action = fulfillOnConnect, action.callUUID == callUUID else { return }
+        guard canAnswer(action) else { return }
+        fulfillOnConnect = nil
+        if connected { action.fulfill() } else { action.fail() }
+    }
+
     func reportIncomingCall(call: Call, connectedAt dateConnected: Date?) {
         logger.debug("CallController: reporting incoming call connected")
-        if CallController.useCallKit() {
-            // Fulfilling this action only after connect, otherwise there are no audio and mic on lockscreen
-            fulfillOnConnect?.fulfill()
-            fulfillOnConnect = nil
+        if CallController.useCallKit(), let callUUID = call.callUUID, let uuid = UUID(uuidString: callUUID) {
+            finishAnswer(for: uuid, connected: true)
         }
     }
 
@@ -346,8 +418,9 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
     func reportCallRemoteEnded(invitation: RcvCallInvitation) {
         logger.debug("CallController: reporting remote ended")
         if CallController.useCallKit(), let callUUID = invitation.callUUID, let uuid = UUID(uuidString: callUUID) {
+            finishAnswer(for: uuid, connected: false)
             provider.reportCall(with: uuid, endedAt: nil, reason: .remoteEnded)
-        } else if invitation.contact.id == activeCallInvitation?.contact.id {
+        } else if activeCallInvitation?.matches(invitation) == true {
             activeCallInvitation = nil
         }
     }
@@ -355,6 +428,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
     func reportCallRemoteEnded(call: Call) {
         logger.debug("CallController: reporting remote ended")
         if CallController.useCallKit(), let callUUID = call.callUUID, let uuid = UUID(uuidString: callUUID) {
+            finishAnswer(for: uuid, connected: false)
             provider.reportCall(with: uuid, endedAt: nil, reason: .remoteEnded)
         }
     }
@@ -363,10 +437,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
     func endCallAfterSignalingFailure(_ call: Call) -> Bool {
         guard ChatModel.shared.activeCall === call else { return false }
         if CallController.useCallKit(), let callUUID = call.callUUID, let uuid = UUID(uuidString: callUUID) {
-            if let action = fulfillOnConnect, action.callUUID == uuid {
-                action.fail()
-                fulfillOnConnect = nil
-            }
+            finishAnswer(for: uuid, connected: false)
             provider.reportCall(with: uuid, endedAt: nil, reason: .failed)
         }
         let cleared = CallManager.clearActiveCall(call)
@@ -447,8 +518,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
 
     func answerCall(invitation: RcvCallInvitation, startWithModifiedVoice: Bool = false) {
         logger.debug("CallController: answering a call")
-        guard let current = ChatModel.shared.callInvitations[invitation.contact.id],
-              current.callUUID == invitation.callUUID, current.callTs == invitation.callTs else { return }
+        guard ChatModel.shared.callInvitations[invitation.contact.id]?.matches(invitation) == true else { return }
         if CallController.useCallKit(), let callUUID = invitation.callUUID, let uuid = UUID(uuidString: callUUID) {
             requestTransaction(with: CXAnswerCallAction(call: uuid))
         } else {
@@ -459,13 +529,21 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
         }
     }
 
+    func endCallAfterTransportClosed(_ call: Call) {
+        guard ChatModel.shared.activeCall === call else { return }
+        if let uuid = call.callUUID.flatMap(UUID.init(uuidString:)), lastNativeCallUUID == uuid {
+            finishAnswer(for: uuid, connected: false)
+            provider.reportCall(with: uuid, endedAt: nil, reason: .failed)
+        }
+        callManager.endCall(call: call) {}
+        suspendOnEndCall()
+    }
+
     func endCall(callUUID: String) {
         let uuid = UUID(uuidString: callUUID)
         logger.debug("CallController: ending the call with UUID \(callUUID)")
-        if CallController.useCallKit() {
-            if let uuid {
-                requestTransaction(with: CXEndCallAction(call: uuid))
-            }
+        if CallController.useCallKit(), let uuid {
+            requestTransaction(with: CXEndCallAction(call: uuid))
         } else {
             callManager.endCall(callUUID: callUUID) { ok in
                 if ok {
@@ -479,8 +557,7 @@ class CallController: NSObject, CXProviderDelegate, PKPushRegistryDelegate, Obse
 
     func endCall(invitation: RcvCallInvitation) {
         logger.debug("CallController: ending the call with invitation")
-        if let activeCallInvitation, activeCallInvitation.contact.id == invitation.contact.id,
-           activeCallInvitation.callTs == invitation.callTs, activeCallInvitation.callUUID == invitation.callUUID {
+        if activeCallInvitation?.matches(invitation) == true {
             self.activeCallInvitation = nil
         }
         callManager.endCall(invitation: invitation) {}

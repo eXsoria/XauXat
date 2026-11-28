@@ -33,7 +33,9 @@ Path(sys.argv[1], 'Info.plist').write_bytes(plistlib.dumps({
  'CFBundleName':'CallAudioLive','CFBundlePackageType':'APPL','CFBundleVersion':'1',
  'CFBundleShortVersionString':'1.0','MinimumOSVersion':'15.0',
  'NSMicrophoneUsageDescription':'Exercise synthetic call audio',
- 'UIBackgroundModes':['audio'],'UILaunchScreen':{},'UIDeviceFamily':[1]
+ 'UIBackgroundModes':['audio'],'UILaunchScreen':{},'UIDeviceFamily':[1],
+ 'UIApplicationSceneManifest':{'UIApplicationSupportsMultipleScenes':False,'UISceneConfigurations':{
+     'UIWindowSceneSessionRoleApplication':[{'UISceneConfigurationName':'Test','UISceneDelegateClassName':'CallAudioScene'}]}}
 }))
 PY
 sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
@@ -51,8 +53,16 @@ xcrun coremlcompiler compile "$root/apps/ios/Shared/Views/Call/XauXatLLVC.mlpack
 xcrun actool "$temp/source/Ambience.xcassets" --compile "$app" --platform iphonesimulator \
   --minimum-deployment-target 15.0 --target-device iphone --output-partial-info-plist "$temp/assets.plist"
 codesign --force --deep --sign - "$app"
-runtime=$(xcrun simctl list runtimes available --json | python3 -c 'import json,sys; r=[r for r in json.load(sys.stdin)["runtimes"] if r["name"].startswith("iOS")]; print(max(r,key=lambda x:tuple(map(int,x["version"].split("."))))["identifier"])')
-udid=$(xcrun simctl create XauXat-CallAudioLive com.apple.CoreSimulator.SimDeviceType.iPhone-14-Pro "$runtime")
+read -r runtime model < <(xcrun simctl list runtimes available --json | python3 -c '
+import json, sys
+phones = [
+    (tuple(map(int, runtime["version"].split("."))), runtime["identifier"], device["identifier"])
+    for runtime in json.load(sys.stdin)["runtimes"] if runtime["name"].startswith("iOS")
+    for device in runtime["supportedDeviceTypes"] if device["productFamily"] == "iPhone"
+]
+_, runtime, model = max(phones, key=lambda row: row[0])
+print(runtime, model)')
+udid=$(xcrun simctl create XauXat-CallAudioLive "$model" "$runtime")
 xcrun simctl boot "$udid"
 xcrun simctl bootstatus "$udid" -b
 xcrun simctl install "$udid" "$app"
