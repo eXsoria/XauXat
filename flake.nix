@@ -63,6 +63,7 @@
           {
             packages.simplexmq.patches = [
               ./scripts/nix/simplexmq-smp-proxy-failover.patch
+              ./scripts/nix/simplexmq-smp-proxy-setup-result.patch
               ./scripts/nix/simplexmq-redundant-contact-relays.patch
             ];
           }

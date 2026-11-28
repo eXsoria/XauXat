@@ -1,0 +1,54 @@
+--- a/src/Simplex/Messaging/Agent/Client.hs
++++ b/src/Simplex/Messaging/Agent/Client.hs
+@@ -696,24 +696,33 @@
+   proxySrv <- maybe (getNextServer c userId proxySrvs [destSrv]) pure proxySrv_
+   selected@(ProtoServerWithAuth srv _) <- atomically $
+     TM.lookup destSess smpProxiedRelays >>= maybe (TM.insert destSess proxySrv smpProxiedRelays $> proxySrv) pure
+-  connectProxy selected `catchAllErrors` \e -> do
+-    cfg <- getNetworkConfig c
+-    -- Only retry setup here. No message has been handed to the forwarding relay yet.
+-    if isNothing proxySrv_ && isJust (socksProxy cfg) && socksMode cfg == SMAlways && temporaryOrHostError e
+-      then do
+-        servers <- getUserServers_ c userId proxySrvs
+-        let usedHosts = S.union (serverHosts srv) (serverHosts destSrv)
+-        case L.nonEmpty $ L.filter (isUnusedServer usedHosts) servers of
+-          Nothing -> throwE e
+-          Just alternatives -> do
+-            (_, next) <- getNextServer_ alternatives (usedOperatorsHosts servers [destSrv])
+-            retrySrv <- atomically $ do
+-              current <- TM.lookup destSess smpProxiedRelays
+-              case current of
+-                Just alternative@(ProtoServerWithAuth currentSrv _) | currentSrv /= srv -> pure alternative
+-                _ -> TM.insert destSess next smpProxiedRelays $> next
+-            connectProxy retrySrv
+-      else throwE e
++  let retrySetup e original = do
++        cfg <- getNetworkConfig c
++        if isNothing proxySrv_ && isJust (socksProxy cfg) && socksMode cfg == SMAlways && temporaryOrHostError e
++          then do
++            alternative <- tryAllErrors $ do
++              servers <- getUserServers_ c userId proxySrvs
++              let usedHosts = S.union (serverHosts srv) (serverHosts destSrv)
++              case L.nonEmpty $ L.filter (isUnusedServer usedHosts) servers of
++                Nothing -> throwE e
++                Just alternatives -> do
++                  (_, next) <- getNextServer_ alternatives (usedOperatorsHosts servers [destSrv])
++                  retrySrv <- atomically $ do
++                    current <- TM.lookup destSess smpProxiedRelays
++                    case current of
++                      Just other@(ProtoServerWithAuth currentSrv _) | currentSrv /= srv -> pure other
++                      _ -> TM.insert destSess next smpProxiedRelays $> next
++                  connectProxy retrySrv
++            case alternative of
++              Right ready@(_, Right _) -> pure ready
++              _ -> original
++          else original
++  -- Socket setup throws in AM; a failed PRXY negotiation is returned with the client.
++  -- Neither branch has issued PFWD. Preserve the original error and its client if retry fails.
++  tryAllErrors (connectProxy selected) >>= \case
++    Right ready@(_, Right _) -> pure ready
++    Right result@(_, Left e) -> retrySetup e (pure result)
++    Left e -> retrySetup e (throwE e)
+   where
+     connectProxy (ProtoServerWithAuth srv auth) = do
+       ts <- liftIO getCurrentTime
