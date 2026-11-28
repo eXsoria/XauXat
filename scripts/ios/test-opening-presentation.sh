@@ -26,7 +26,12 @@ def declaration(source, marker):
         end += 1
     return source[start:end]
 
-assert 'else if showsInitializationView {' in content
+layers = declaration(content, 'func allViews()')
+assert 'let isInitializing = showsInitializationView' in layers and 'else if isInitializing {' in layers
+base = declaration(layers, 'if !isInitializing || hasPresentedBaseScreen {')
+assert 'contentView()' in base and 'lockButton()' in base and '.onAppear { hasPresentedBaseScreen = true }' in base
+assert all(modifier in base for modifier in ['.disabled(isInitializing)', '.accessibilityHidden(isInitializing)',
+                                            '.allowsHitTesting(!isInitializing)'])
 assert '.modifier(XauXatAppSwitcherProtection(showsOpeningAnimation: true))' in content
 assert 'if !prefPerformLA || accessAuthenticated {' in content
 assert '.accessibilityHidden(!appSheetState.scenePhaseActive)' in sheet

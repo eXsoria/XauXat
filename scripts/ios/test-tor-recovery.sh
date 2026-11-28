@@ -12,7 +12,7 @@ swiftc -swift-version 5 -parse-as-library -I "$temp" -L "$temp" -lTor -lSimpleXC
   -Xlinker -rpath -Xlinker "$temp" "$tests/AppAdapters.swift" \
   "$root/apps/ios/Shared/Model/EmbeddedTorManager.swift" \
   "$root/apps/ios/Shared/Model/XauXatOutboundDeliveryPolicy.swift" \
-  "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" "$tests/Tests.swift" \
+  "$root/apps/ios/Shared/Model/XauXatConnectionRecoveryManager.swift" "$tests/Tests.swift" "$tests/ListenerRecoveryTests.swift" "$tests/EarlyCircuitDemandTests.swift" "$tests/StartupAuthenticationTests.swift" \
   -o "$temp/tor-recovery-tests"
 for run in {1..10}; do
   echo "Tor recovery repeat $run/10"

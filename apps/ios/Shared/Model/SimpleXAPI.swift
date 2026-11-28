@@ -143,15 +143,10 @@ extension XauXatConnectionRecoveryManager {
             Context(userId: ChatModel.shared.currentUser?.userId,
                     online: ChatModel.shared.networkInfo.online,
                     active: UIApplication.shared.applicationState == .active && AppSheetState.shared.scenePhaseActive,
-                    alternateStore: xauXatStorageScope() == .decoy)
+                    alternateStore: xauXatStorageScope() == .decoy,
+                    torRequiresRelaunch: EmbeddedTorManager.shared.requiresRelaunch)
         },
-        ensureTor: { force in
-            let previousPort: UInt16?
-            if case let .ready(port) = EmbeddedTorManager.shared.state { previousPort = port }
-            else { previousPort = nil }
-            let port = try await EmbeddedTorManager.shared.ensureReady(maxAge: force ? 0 : 15)
-            return Route(port: port, replaced: previousPort != port)
-        },
+        ensureTor: { force in try await EmbeddedTorManager.shared.verifiedRecoveryRoute(force: force) },
         invalidateTor: { EmbeddedTorManager.shared.invalidateReadiness() },
         updateTorNetwork: { EmbeddedTorManager.shared.networkAvailabilityChanged(online: $0) },
         refreshStartup: { EmbeddedTorManager.shared.refreshPendingStartup() },
@@ -1446,6 +1441,43 @@ func setNetworkConfig(_ cfg: NetCfg, ctrl: chat_ctrl? = nil) throws {
     let r: ChatResponse2 = try chatSendCmdSync(.apiSetNetworkConfig(networkConfig: managedCfg), ctrl: ctrl)
     if case .cmdOk = r { return }
     throw r.unexpected
+}
+
+@MainActor
+func setXauXatMessageRelayMode(_ mode: SMPProxyMode) throws {
+    guard mode != networkSMPProxyModeGroupDefault.get() else { return }
+    switch xauXatRecoverySessionState() {
+    case .running:
+        func currentConfig() throws -> NetCfg {
+            let response: ChatResponse0 = try chatSendCmdSync(.apiGetNetworkConfig, log: false)
+            guard case let .networkConfig(config) = response else { throw response.unexpected }
+            return config
+        }
+        let current = try currentConfig()
+        // Only the relay preference may change. Recovery owns route and port changes.
+        guard isXauXatManagedTorConfig(current), xauXatManagedTorConfig(current) == current else {
+            throw RuntimeError("The current private connection is not ready.")
+        }
+        if current.smpProxyMode != mode {
+            var next = current
+            next.smpProxyMode = mode
+            do {
+                try setNetworkConfig(next)
+            } catch {
+                // A lost acknowledgement can follow an applied command.
+                if let observed = try? currentConfig(), observed == next,
+                   isXauXatManagedTorConfig(observed), xauXatManagedTorConfig(observed) == observed {
+                    try setNetworkConfig(current)
+                }
+                throw error
+            }
+        }
+    case .unlockRequired:
+        throw RuntimeError("Unlock the app to change message routing.")
+    case .suspended, .stopped, .uninitialized:
+        break // Startup and foreground recovery read this preference when applying Tor.
+    }
+    networkSMPProxyModeGroupDefault.set(mode)
 }
 
 func apiSetNetworkInfo(_ networkInfo: UserNetworkInfo) throws {

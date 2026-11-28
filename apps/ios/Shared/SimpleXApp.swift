@@ -122,6 +122,9 @@ struct SimpleXApp: App {
                     AppSheetState.shared.scenePhaseActive = phase == .active
                     switch (phase) {
                     case .background:
+                        EmbeddedTorManager.shared.pauseStartupAuthenticationRecovery()
+                        // Cancel applies to the current foreground visit.
+                        EmbeddedTorManager.shared.allowStartupAuthentication()
                         XauXatConnectionRecoveryManager.shared.pause()
                         // --- authentication
                         // see ContentView .onChange(of: scenePhase) for remaining authentication logic
@@ -138,6 +141,8 @@ struct SimpleXApp: App {
                             BGManager.shared.schedule()
                         }
                         NtfManager.shared.setNtfBadgeCount(chatModel.totalUnreadCountForAllUsers())
+                    case .inactive:
+                        EmbeddedTorManager.shared.pauseStartupAuthenticationRecovery()
                     case .active:
                         CallController.shared.shouldSuspendChat = false
                         initializeNewInstallation()
@@ -188,6 +193,7 @@ struct SimpleXApp: App {
             case .success:
                 completion()
             case let .failure(error):
+                guard !(error is CancellationError) else { return }
                 XauXatConnectionRecoveryManager.shared.routeUnavailable()
                 #if DEBUG
                 if XauXatDirectCallTest.shared.canOpenLocalProfile { return }

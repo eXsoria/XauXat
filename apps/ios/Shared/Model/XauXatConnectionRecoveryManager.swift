@@ -64,6 +64,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         // A local store switch can reuse numeric profile IDs. Keep it in the
         // operation identity, but never include this flag in diagnostics.
         var alternateStore: Bool = false
+        var torRequiresRelaunch: Bool = false
     }
 
     enum SessionState: String {
@@ -73,10 +74,11 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
 
     enum Blocker: String {
         case appInactive, networkOffline, noActiveProfile, chatStopped
-        case unlockRequired, chatUninitialized, chatSuspended
+        case unlockRequired, chatUninitialized, chatSuspended, torStopped
 
         var message: String {
             switch self {
+            case .torStopped: NSLocalizedString("The embedded Tor process stopped. Close XauXat completely and reopen it.", comment: "connection recovery error")
             case .appInactive: NSLocalizedString("Open XauXat to recover the private connection.", comment: "connection recovery error")
             case .networkOffline: NSLocalizedString("Waiting for a network connection. Try Wi-Fi or mobile data.", comment: "connection recovery error")
             case .noActiveProfile: NSLocalizedString("Open a chat profile before reconnecting messages.", comment: "connection recovery error")
@@ -134,6 +136,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     private var subscriptionScan: (id: UUID, epoch: Int, userId: Int64, alternateStore: Bool, reconnectStartedAt: TimeInterval?)?
     private var loop: Task<Void, Never>?
     private var loopId: UUID?
+    private var scheduledSummary: (loop: UUID, at: TimeInterval)?
     private var networkTask: Task<Void, Never>?
     private var networkSettling = false
     private var network: Network = .unknown
@@ -200,7 +203,10 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     }
 
     private func requireForegroundNetwork(_ context: Context, reason: Reason) throws {
-        let blocker: Blocker? = !context.active ? .appInactive : (!context.online ? .networkOffline : nil)
+        let blocker: Blocker?
+        if !context.active { blocker = .appInactive }
+        else if context.torRequiresRelaunch { blocker = .torStopped }
+        else { blocker = context.online ? nil : .networkOffline }
         if let blocker {
             record(reason, "blocked_" + blocker.rawValue)
             throw RecoveryError.blocked(blocker)
@@ -437,7 +443,22 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     }
 
     func setOutboundPending(_ pending: Bool) { outboundPending = pending; updateLoop() }
-    func setSubscriptionPending(_ pending: Bool) { subscriptionPending = pending; updateLoop() }
+    func setSubscriptionPending(_ pending: Bool) {
+        if pending && !subscriptionPending { wakeForSubscriptionChange() }
+        subscriptionPending = pending
+        updateLoop()
+    }
+
+    private func wakeForSubscriptionChange() {
+        // An outbox or an earlier stall may already be sleeping for 90 seconds.
+        // Wake only the scheduler; keep the native connection budgets and any active repair.
+        guard let wake = scheduledSummary, wake.loop == loopId,
+              wake.at - dependencies.now() > XauXatOutboundDeliveryPolicy.recoveryDelay(attempt: 0) else { return }
+        loop?.cancel()
+        loop = nil
+        loopId = nil
+        scheduledSummary = nil
+    }
     private var hasPendingWork: Bool { outboundPending || subscriptionPending || needsSubscriptionScan }
     private var needsSubscriptionScan: Bool {
         guard let subscriptionScan else { return false }
@@ -462,6 +483,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 ? global.time : nil
         }
         let startedAt = reconnectStartedAt ?? (needsSubscriptionScan ? subscriptionScan?.reconnectStartedAt : nil) ?? recentGlobal
+        wakeForSubscriptionChange()
         subscriptionScan = (UUID(), epoch, userId, context.alternateStore, startedAt)
         record(.pendingWork, "subscription_scan_requested")
         updateLoop()
@@ -474,13 +496,15 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
         guard let sessionRetry else { return false }
         return sessionRetry.epoch == epoch && sessionRetry.context == dependencies.context()
     }
-    private var hasRecoveryWork: Bool { hasPendingWork || needsRouteRetry || needsSessionRetry }
+    private var hasRecoveryWork: Bool {
+        !dependencies.context().torRequiresRelaunch && (hasPendingWork || needsRouteRetry || needsSessionRetry)
+    }
 
     /// A verified Tor route does not prove that configuration/store activation
     /// succeeded. Incoming-only sessions need a retry even with an empty outbox.
     func sessionUnavailable() {
         let context = dependencies.context()
-        guard context.active, context.online, context.userId != nil,
+        guard !context.torRequiresRelaunch, context.active, context.online, context.userId != nil,
               dependencies.sessionState().canRecover else { return }
         if !needsSessionRetry && !needsRouteRetry {
             loop?.cancel()
@@ -501,7 +525,7 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
     /// it in the foreground even when no outbound message has been queued.
     func routeUnavailable() {
         let context = dependencies.context()
-        guard context.active, context.online, context.userId != nil,
+        guard !context.torRequiresRelaunch, context.active, context.online, context.userId != nil,
               dependencies.sessionState().canRecover else { return }
         if !needsRouteRetry && !needsSessionRetry {
             // An old outbox check may be sleeping for 90 seconds. Promoting
@@ -561,8 +585,12 @@ final class XauXatConnectionRecoveryManager: ObservableObject {
                 }
                 if self.needsRouteRetry { self.record(.routeRetry, "backoff", count: Int(delay.rounded(.up))) }
                 else if retryingSession { self.record(.sessionRetry, "backoff", count: Int(delay.rounded(.up))) }
+                if !retryingRoute && !retryingSession {
+                    self.scheduledSummary = (id, self.dependencies.now() + delay)
+                }
                 do { try await self.dependencies.sleep(delay) }
                 catch { break }
+                if self.scheduledSummary?.loop == id { self.scheduledSummary = nil }
                 // The path, profile and pending work can change during backoff.
                 guard self.hasRecoveryWork, !Task.isCancelled else { break }
                 guard self.epoch == operationEpoch, self.dependencies.context() == context, !self.networkSettling else { continue }

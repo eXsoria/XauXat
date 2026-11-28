@@ -44,6 +44,8 @@ import Tor
     }
 
     static func main() async throws {
+        try await selectiveRecoveryDuringForegroundVerification()
+        try await handoverDuringAuthenticationChecksTheCurrentCircuitOnce()
         try await readyMustBeRevalidated()
         try await freshnessLeaseIsExplicitAndInvalidatable()
         try await invalidationDuringCheckCannotCreateFreshLease()
@@ -55,6 +57,15 @@ import Tor
         try await offlineStartupResumesOnMobile()
         try await transientColdStartupRetriesKeepItsCompletion()
         try await coldStartupRetriesStopAtTheirBudgetAndAvailabilityGate()
+        try await staggeredStartupCannotAuthenticateAfterCancel()
+        try await delayedStartupAuthenticationSharesForegroundBackoff()
+        try await startupAuthenticationRetryRespectsUserAndLifecycle()
+        try await slowControlPrecedesBootstrapWatch()
+        try await slowRelayKeepsOutstandingRequest()
+        try await warmCircuitDemandUsesOneStallBudget()
+        try await pathLossDuringEarlyDemandCannotPublishTheOldListener()
+        try await dormantRuntimeWakesBeforeListenerRepair()
+        try await previouslyVerifiedIdleRuntimeRequestsACircuitAfterRepair()
         try await bootstrapStallGetsOneEarlyRepair()
         try await bootstrapProgressKeepsItsOwnTimeBudget()
         try await repeatedBootstrapEventsCannotHideAStall()
@@ -158,6 +169,27 @@ import Tor
         do { _ = try await privateManager.ensureReady(); fatalError("Synthetic failure must not become ready") } catch { }
         let text = privateManager.diagnosticText
         require(text.contains("failure=other") && !text.contains("private-address") && !text.contains("PRIVATE_MESSAGE") && !text.contains("/key"), "Raw error messages, addresses and secrets must never enter the exported journal")
+    }
+
+    static func handoverDuringAuthenticationChecksTheCurrentCircuitOnce() async throws {
+        reset()
+        TorTestState.holdAuthentication = true
+        let probe = ScriptedProbe(), manager = probe.manager()
+        var held: CheckedContinuation<Bool, Error>?
+        probe.handler = { _ in try await withCheckedThrowingContinuation { held = $0 } }
+        let startup = Task { try await manager.ensureReady() }
+        try await until { TorTestState.pendingAuthentication != nil }
+        manager.networkAvailabilityChanged(online: true)
+        manager.refreshPendingStartup()
+        TorTestState.pendingAuthentication?()
+        try await until { held != nil }
+        let commands = TorTestState.commands
+        let circuitChecks = commands.filter { $0 == "GETINFO status/circuit-established" }.count
+        require(circuitChecks == 1, "Expected one post-handover circuit query, got \(circuitChecks) in \(commands.count) control commands")
+        require(publishedPorts.isEmpty && probe.calls == 1, "The current path must reach a relay before publishing")
+        held?.resume(returning: true)
+        let port = try await startup.value
+        require(publishedPorts == [port] && TorTestState.threadStarts == 1, "Publish the verified route once using the same runtime")
     }
 
     static func readyMustBeRevalidated() async throws {
@@ -406,7 +438,98 @@ import Tor
         var stoppedResult: Result<UInt16, Error>?
         stoppedManager.startRetrying(whileAvailable: { true }) { stoppedResult = $0 }
         try await until { stoppedResult != nil }
-        require(TorTestState.threadStarts == 1 && !stoppedManager.diagnosticText.contains("startupRetry"), "Cold retry cannot re-enter a terminated C-Tor runtime")
+        require(stoppedManager.requiresRelaunch && TorTestState.threadStarts == 1 && !stoppedManager.diagnosticText.contains("startupRetry"), "Cold retry cannot re-enter a terminated C-Tor runtime")
+    }
+
+    static func slowControlPrecedesBootstrapWatch() async throws {
+        reset()
+        TorTestState.holdAuthentication = true
+        let probe = ScriptedProbe(), clock = BootstrapClock()
+        let manager = clock.manager(probe)
+        let operation = Task { try await manager.ensureReady() }
+        try await until { TorTestState.pendingAuthentication != nil }
+        clock.time += 61
+        try await Task.sleep(nanoseconds: 30_000_000)
+        require(!manager.diagnosticText.contains("bootstrapStalled") && publishedTorPort == nil,
+                "Bootstrap watchdog must not interrupt pending control authentication")
+        TorTestState.pendingAuthentication?()
+        let port = try await operation.value
+        require(port == 19050 && probe.calls == 1, "Verified first connection should keep its listener")
+    }
+
+    static func slowRelayKeepsOutstandingRequest() async throws {
+        reset()
+        var attempts = 0
+        let manager = EmbeddedTorManager(routeProbe: { _, budget in
+            attempts += 1
+            guard budget >= 18 else { throw TorSOCKSProbeError.timedOut(.destination) }
+            return true
+        }, retryDelay: 0)
+        let port = try await manager.ensureReady()
+        require(port == 19050 && attempts == 1, "A relay taking 18 seconds must fit the initial verification budget")
+    }
+
+    static func dormantRuntimeWakesBeforeListenerRepair() async throws {
+        for previouslyReady in [false, true] {
+            reset()
+            let probe = ScriptedProbe(), manager = probe.manager(timeout: 1_000_000_000)
+            let originalPort = TorTestState.port
+            if previouslyReady { _ = try await manager.ensureReady() }
+            TorTestState.circuitEstablished = false
+            TorTestState.dormant = true
+            manager.invalidateReadiness()
+            probe.handler = { _ in
+                require(TorTestState.dormant && !TorTestState.circuitEstablished && publishedTorPort == nil, "A dormant Tor may require actual private stream demand before making a circuit")
+                require(TorTestState.completedCommands.contains("SIGNAL ACTIVE"), "Wake the controlled Tor runtime before requesting its private stream")
+                TorTestState.dormant = false
+                TorTestState.circuitEstablished = true
+                return true
+            }
+            let result = try? await manager.ensureReady()
+            require(result == originalPort && probe.calls == (previouslyReady ? 2 : 1), "Persisted or warm dormancy must immediately trigger the normal SOCKS probe without waiting for a circuit event")
+            require(!TorTestState.commands.contains("SETCONF SocksPort=0"), "A usable listener must survive waking the client")
+            require(TorTestState.threadStarts == 1 && !TorTestState.dormant, "A successful private stream must retain the existing Tor process")
+        }
+    }
+
+    static func previouslyVerifiedIdleRuntimeRequestsACircuitAfterRepair() async throws {
+        for (reachable, circuitConfirmed) in [(true, true), (false, true), (true, false)] {
+            let recovered = reachable && circuitConfirmed
+            reset()
+            let probe = ScriptedProbe(), clock = BootstrapClock()
+            let manager = clock.manager(probe, timeout: 2_000_000_000)
+            let oldPort = try await manager.ensureReady()
+            TorTestState.circuitEstablished = false
+            TorTestState.enoughDirectory = false
+            manager.networkAvailabilityChanged(online: false)
+            manager.networkAvailabilityChanged(online: true)
+            var heldProbe: CheckedContinuation<Bool, Error>?
+            probe.handler = { port in
+                require(port != oldPort && publishedTorPort == nil, "Only the replacement loopback listener may be tested, before publication")
+                require(TorTestState.completedCommands.contains("SIGNAL ACTIVE"), "A repaired dormant Tor must be woken before requesting the private stream")
+                if probe.calls == 2 {
+                    return try await withCheckedThrowingContinuation { heldProbe = $0 }
+                }
+                return reachable
+            }
+            var result: Result<UInt16, Error>?
+            manager.start { result = $0 }
+            try await until { TorTestState.completedCommands.filter { $0 == "GETINFO status/circuit-established" }.count == 2 }
+            try await until { TorTestState.completedCommands.contains("GETINFO status/enough-dir-info") }
+            require(probe.calls == 1, "Insufficient directory information must preserve the bootstrap grace period")
+            clock.time += 61
+            try await until { heldProbe != nil || result != nil }
+            require(heldProbe != nil, "The repaired warm runtime must request a private stream even if no circuit event arrives")
+            TorTestState.circuitEstablished = circuitConfirmed
+            if circuitConfirmed { TorTestState.emitCircuit() }
+            heldProbe?.resume(returning: reachable)
+            try await until { result != nil }
+            let port = try? result!.get()
+            require(recovered ? port == TorTestState.port : port == nil, "Warm recovery requires a successful relay probe and confirmation from the running Tor circuit")
+            require(publishedTorPort == port && publishedPorts == (recovered ? [oldPort, TorTestState.port] : [oldPort]), "A failed warm recovery must keep the proxy closed")
+            require(TorTestState.threadStarts == 1 && TorTestState.commands.filter { $0 == "SIGNAL ACTIVE" }.count == 1, "One repair must wake exactly one runtime once")
+            require(probe.calls == (recovered ? 2 : 4), "Circuit events arriving during the warm probe must not duplicate it")
+        }
     }
 
     static func bootstrapStallGetsOneEarlyRepair() async throws {
@@ -470,17 +593,18 @@ import Tor
         TorTestState.circuitEstablished = false
         let probe = ScriptedProbe(), clock = BootstrapClock()
         let manager = clock.manager(probe)
+        var held: CheckedContinuation<Bool, Error>?
+        probe.handler = { _ in try await withCheckedThrowingContinuation { held = $0 } }
         let operation = Task { try await manager.ensureReady() }
         try await until { !TorTestState.statusObservers.isEmpty && TorTestState.completedCommands.contains("GETINFO status/circuit-established") }
         clock.time += 61
         try await until { TorTestState.commands.contains("SETCONF SocksPort=0") }
-        try await until { !TorTestState.statusObservers.isEmpty && TorTestState.completedCommands.contains("GETINFO status/circuit-established") }
+        try await until { held != nil }
         clock.time += 1000
-        require(TorTestState.commands.filter { $0 == "SETCONF SocksPort=0" }.count == 1 && probe.calls == 0, "A persistent stall gets only one repair before its original startup deadline")
-        require(publishedTorPort == nil && TorTestState.threadStarts == 1, "No-progress bootstrap must remain fail-closed")
-        // Finish the fixture through the current observer after proving that
-        // elapsed virtual time cannot trigger another repair.
-        TorTestState.emitCircuit()
+        require(TorTestState.commands.filter { $0 == "SETCONF SocksPort=0" }.count == 1 && probe.calls == 1, "A cold runtime gets one repair and a private stream even before its first verified circuit")
+        require(publishedTorPort == nil && TorTestState.threadStarts == 1, "A cold runtime with no proven circuit must remain closed")
+        TorTestState.circuitEstablished = true
+        held?.resume(returning: true)
         _ = try await operation.value
     }
 

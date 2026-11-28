@@ -16,3 +16,41 @@
 "Connecting server… (error: %@)" = "Connecting to server… (error: %@)";
 "member connected" = "connected";
 "No group!" = "Group not found!";
+
+/* Private connection diagnostics. */
+"XauXat uses its built-in Tor connection to reach messaging servers. When chat is running, this check also requests a reconnection." = "O XauXat usa o Tor integrado para contactar os servidores de mensagens. Quando o chat está ativo, esta verificação também pede o restabelecimento da ligação.";
+"The probe uses Tor to connect to two preset messaging relays at their onion addresses. The first successful connection completes the probe. It sends no chat content and does not look up an exit IP. Message delivery and call audio require separate tests." = "A sonda usa o Tor para contactar dois servidores de retransmissão de mensagens predefinidos através dos respetivos endereços onion. A primeira ligação bem-sucedida conclui a sondagem. A sonda não envia conteúdo das conversas nem consulta o endereço IP de saída. A entrega de mensagens e o áudio das chamadas exigem testes separados.";
+"Private connection" = "Ligação privada";
+"Embedded Tor" = "Tor integrado";
+"Messaging configuration" = "Configuração das mensagens";
+"Last connection check" = "Última verificação da ligação";
+"Checking connection" = "A verificar a ligação";
+"Check private connection" = "Verificar ligação privada";
+"Retry private connection" = "Tentar restabelecer a ligação privada";
+"Tor proxy configured" = "Proxy Tor configurado";
+"Not ready" = "Por configurar";
+"Not run" = "Por executar";
+"Checking" = "A verificar";
+"Passed" = "Com sucesso";
+"Blocked" = "Bloqueada";
+"Failed" = "Falhou";
+"Stopped" = "Parado";
+"Starting" = "A iniciar";
+"Verifying route" = "A verificar a rota";
+"Ready" = "Pronto";
+"Copy connection diagnostics" = "Copiar diagnóstico da ligação";
+"Copies connection states, recovery blockers and Tor failure stages from this app session. No messages, contacts, server addresses or keys are included. Nothing is uploaded automatically." = "Copia os estados da ligação, os impedimentos à recuperação e as etapas em que o Tor falhou nesta sessão. O diagnóstico exclui mensagens, contactos, endereços de servidores e chaves. A aplicação não envia o diagnóstico automaticamente.";
+
+"The embedded Tor process stopped. Close XauXat completely and reopen it." = "O Tor parou. Fecha completamente o XauXat e volta a abri-lo.";
+
+"Private connection unavailable" = "Ligação privada indisponível";
+"XauXat is waiting for its local Tor controller and will retry while the app is open." = "O XauXat aguarda uma resposta do controlador Tor local. Voltará a tentar enquanto a aplicação estiver aberta.";
+
+"Intermediate message relay" = "Relay intermédio de mensagens";
+"Always use an intermediate relay" = "Usar sempre um relay intermédio";
+"For unknown servers" = "Para servidores desconhecidos";
+"For unknown servers when the IP address is exposed" = "Para servidores desconhecidos quando o endereço IP está exposto";
+"Never use an intermediate relay" = "Nunca usar um relay intermédio";
+"All modes use Tor. This choice applies to messages for every profile on this installation. Changing it reconnects active messaging sessions." = "Todos os modos usam Tor. Esta escolha aplica-se às mensagens de todos os perfis desta instalação. Alterá-la volta a ligar as sessões de mensagens ativas.";
+"Message relay setting could not be saved" = "Não foi possível guardar a preferência de relay";
+"Check your private connection and try again." = "Verifique a ligação privada e tente novamente.";

@@ -38,6 +38,7 @@ struct ContentView: View {
 
     @Environment(\.scenePhase) var scenePhase
     @State private var automaticAuthenticationAttempted = false
+    @State private var hasPresentedBaseScreen = false
     @State private var canConnectViewCall = false
     @State private var lastSuccessfulUnlock: TimeInterval? = nil
 
@@ -108,20 +109,29 @@ struct ContentView: View {
     func allViews() -> some View {
         ZStack {
             let showCallArea = chatModel.activeCall != nil && chatModel.activeCall?.callState != .waitCapabilities && chatModel.activeCall?.callState != .invitationAccepted
+            let isInitializing = showsInitializationView
             // contentView() has to be in a single branch, so that enabling authentication doesn't trigger re-rendering and close settings.
             // i.e. with separate branches like this settings are closed: `if prefPerformLA { ... contentView() ... } else { contentView() }
-            if !prefPerformLA || accessAuthenticated {
-                contentView()
-                    .padding(.top, showCallArea ? callTopPadding : 0)
-            } else {
-                ZStack {
-                    XauXatOpeningView(showsProgress: false)
-                    VStack {
-                        Spacer()
-                        lockButton().padding(.bottom, 40)
+            // Keep an existing conversation and its draft mounted across controller restarts.
+            if !isInitializing || hasPresentedBaseScreen {
+                Group {
+                    if !prefPerformLA || accessAuthenticated {
+                        contentView()
+                    } else {
+                        ZStack {
+                            XauXatOpeningView(showsProgress: false)
+                            VStack {
+                                Spacer()
+                                lockButton().padding(.bottom, 40)
+                            }
+                        }
                     }
                 }
                 .padding(.top, showCallArea ? callTopPadding : 0)
+                .disabled(isInitializing)
+                .accessibilityHidden(isInitializing)
+                .allowsHitTesting(!isInitializing)
+                .onAppear { hasPresentedBaseScreen = true }
             }
 
             if showCallArea, let call = chatModel.activeCall {
@@ -154,8 +164,18 @@ struct ContentView: View {
                     showSetPasscode = false
                     alertManager.showAlert(laPasscodeNotSetAlert())
                 }
-            } else if showsInitializationView {
+            } else if isInitializing {
                 initializationView()
+            }
+        }
+        .background {
+            Color.clear.alert(isPresented: $tor.presentsStartupAuthenticationRetry) {
+                Alert(
+                    title: Text("Private connection unavailable"),
+                    message: Text("XauXat is waiting for its local Tor controller and will retry while the app is open."),
+                    primaryButton: .default(Text("Retry")) { tor.retryStartupAuthenticationNow() },
+                    secondaryButton: .cancel { tor.cancelStartupAuthentication() }
+                )
             }
         }
         .alert(isPresented: $alertManager.presentAlert) { alertManager.alertView! }

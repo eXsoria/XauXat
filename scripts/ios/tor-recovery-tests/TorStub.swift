@@ -4,12 +4,15 @@ import Foundation
 public enum TorTestState {
     public static var commands: [String] = []
     public static var completedCommands: [String] = []
+    public static var reusePortOnRepair = false
     public static var threadStarts = 0
     public static var controllers = 0
     public static var port: UInt16 = 19050
     public static var failNextCommand = false
     public static var failCommandContaining: String?
     public static var networkDisabled = false
+    public static var enoughDirectory = true
+    public static var dormant = false
     public static var circuitEstablished = true
     public static var establishAfterRepair = false
     public static var statusObservers: [UUID: (String, String, String, [String: String]?) -> Bool] = [:]
@@ -22,8 +25,10 @@ public enum TorTestState {
     public static var pendingAuthentication: (() -> Void)?
     public static var dropCommandContaining: String?
     public static func reset() {
+        reusePortOnRepair = false
         commands = []; completedCommands = []; threadStarts = 0; controllers = 0; port = 19050
         failNextCommand = false; failCommandContaining = nil; networkDisabled = false; injectStatusBeforeReply = false; lastThread = nil
+        dormant = false; enoughDirectory = true
         circuitEstablished = true; establishAfterRepair = false; statusObservers = [:]
         lastController = nil; closedControllers = 0; refuseConnections = false
         holdAuthentication = false; pendingAuthentication = nil; dropCommandContaining = nil
@@ -105,7 +110,7 @@ public final class TorController {
         if !fail, arguments?.contains("DisableNetwork=1") == true { TorTestState.networkDisabled = true }
         if !fail, arguments?.contains("DisableNetwork=0") == true { TorTestState.networkDisabled = false }
         if !fail, arguments?.contains("SocksPort=\"127.0.0.1:auto\"") == true {
-            TorTestState.port += 1
+            if !TorTestState.reusePortOnRepair { TorTestState.port += 1 }
             if TorTestState.establishAfterRepair { TorTestState.circuitEstablished = true }
         }
         DispatchQueue.main.async {
@@ -117,7 +122,13 @@ public final class TorController {
             let codes: [NSNumber]
             let lines: [Data]
             if !fail, command == "GETINFO", let key = arguments?.first {
-                let value = key == "status/circuit-established" ? (TorTestState.networkDisabled || !TorTestState.circuitEstablished ? "0" : "1") : "\"127.0.0.1:\(TorTestState.port)\""
+                let value: String
+                switch key {
+                case "status/circuit-established": value = TorTestState.networkDisabled || !TorTestState.circuitEstablished ? "0" : "1"
+                case "status/enough-dir-info": value = TorTestState.enoughDirectory ? "1" : "0"
+                case "dormant": value = TorTestState.dormant ? "1" : "0"
+                default: value = "\"127.0.0.1:\(TorTestState.port)\""
+                }
                 codes = [250, 250]; lines = [Data((key + "=" + value).utf8), Data("OK".utf8)]
             } else {
                 codes = [NSNumber(value: fail ? 551 : 250)]

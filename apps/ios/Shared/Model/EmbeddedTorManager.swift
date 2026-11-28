@@ -31,9 +31,19 @@ final class EmbeddedTorManager: ObservableObject {
     @Published private(set) var hasVerifiedStartupRoute = false
     @Published private(set) var refreshingConnection = false
 
+    @Published var presentsStartupAuthenticationRetry = false
+    private var startupAuthenticationCancelled = false
+    private var startupRetryID: UUID?
+    private var startupCompletions: [(Result<UInt16, Error>) -> Void] = []
+    private var authenticationRecovery: (id: UUID, task: Task<UInt16, Error>)?
+    private var authenticationBackoff: Task<Void, Error>?
+    private let authenticationSleep: @MainActor (UInt64) async throws -> Void
+
+    private enum ProbeMode { case established, demand, earlyDemand }
+
     private enum DiagnosticStage: String {
         case start, joined, invalidated, superseded, waiterCancelled, startupRetry, controlReopened, authenticated, bootstrap
-        case bootstrapStalled
+        case bootstrapStalled, runtimeActivated, circuitDemand, controlAuthBackoff
         case controlPortWait, controlCookieWait, controlSocketWait, authenticating
         case circuitCheck, probe, probeFailed, repair, failed, ready, manualProbe, manualProbeFailed, manualVerified, manualRefresh
     }
@@ -104,6 +114,7 @@ final class EmbeddedTorManager: ObservableObject {
         return "other"
     }
 
+    private(set) var requiresRelaunch = false
     private var thread: TorThread?
     private var controller: TorController?
     private var configuration: TorConfiguration?
@@ -122,6 +133,13 @@ final class EmbeddedTorManager: ObservableObject {
     private var recoveryAttempted = false
     private var refreshNetworkRequested = false
     private var readinessGeneration = UUID()
+    // The listener can survive another route check or be rebuilt on the same port.
+    private struct VerifiedListener: Equatable {
+        let port: UInt16
+        let generation: UUID
+    }
+    private var listenerGeneration = UUID()
+    private var lastVerifiedListener: VerifiedListener?
     private var verifiedAt: TimeInterval?
     private var routeRevision = 0
     private var attemptRevision = 0
@@ -146,7 +164,8 @@ final class EmbeddedTorManager: ObservableObject {
         bootstrapSleep: @escaping @MainActor (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
         controlReplyTimeout: TimeInterval = 5,
         initialAuthenticationTimeout: TimeInterval = 22,
-        controlPollDelay: UInt64 = 100_000_000
+        controlPollDelay: UInt64 = 100_000_000,
+        authenticationSleep: @escaping @MainActor (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) }
     ) {
         self.routeProbe = routeProbe
         self.retryDelay = retryDelay
@@ -157,6 +176,7 @@ final class EmbeddedTorManager: ObservableObject {
         self.controlReplyTimeout = controlReplyTimeout
         self.initialAuthenticationTimeout = initialAuthenticationTimeout
         self.controlPollDelay = controlPollDelay
+        self.authenticationSleep = authenticationSleep
     }
 
     func start(_ completion: @escaping (Result<UInt16, Error>) -> Void) {
@@ -168,6 +188,14 @@ final class EmbeddedTorManager: ObservableObject {
     /// timeout or a stopped runtime still reaches the existing Retry UI.
     func startRetrying(whileAvailable: @escaping @MainActor () -> Bool,
                        _ completion: @escaping (Result<UInt16, Error>) -> Void) {
+        guard !startupAuthenticationCancelled || hasVerifiedStartupRoute else {
+            completion(.failure(CancellationError()))
+            return
+        }
+        startupCompletions.append(completion)
+        guard startupRetryID == nil else { return }
+        let id = UUID()
+        startupRetryID = id
         Task {
             let expires = ProcessInfo.processInfo.systemUptime + Double(startupTimeout) / 1_000_000_000
             for retry in 0...2 {
@@ -175,32 +203,119 @@ final class EmbeddedTorManager: ObservableObject {
                     // Another foreground caller may have recovered the same
                     // path during backoff. Reuse only its explicit short lease.
                     let port = try await readyBefore(expires, maxAge: 15)
-                    completion(.success(port))
+                    finishStartup(.success(port), id: id)
                     return
                 } catch {
+                    if error as? EmbeddedTorError == .controlAuthenticationTimeout, !hasVerifiedStartupRoute {
+                        guard !startupAuthenticationCancelled, whileAvailable() else {
+                            finishStartup(.failure(CancellationError()), id: id)
+                            return
+                        }
+                        if retry == 2 {
+                            do { finishStartup(.success(try await recoverStartupAuthentication(whileAvailable)), id: id) }
+                            catch { finishStartup(.failure(error), id: id) }
+                            return
+                        }
+                    }
                     let terminal: Bool
                     if let failure = error as? EmbeddedTorError {
                         switch failure {
-                        case .backupProtection, .processStopped, .timeout: terminal = true
+                        case .authentication, .backupProtection, .processStopped, .timeout: terminal = true
                         default: terminal = false
                         }
                     } else { terminal = error is CancellationError }
                     guard retry < 2, !terminal, whileAvailable() else {
-                        completion(.failure(error))
+                        finishStartup(.failure(error), id: id)
                         return
                     }
                     record(.startupRetry, count: retry + 1)
                     let remaining = max(0, expires - ProcessInfo.processInfo.systemUptime)
                     let delay = min(retryDelay * UInt64(retry + 1), UInt64(remaining * 1_000_000_000))
                     do { try await Task.sleep(nanoseconds: delay) }
-                    catch { completion(.failure(error)); return }
-                    guard whileAvailable() else { completion(.failure(error)); return }
+                    catch { finishStartup(.failure(error), id: id); return }
+                    guard whileAvailable() else { finishStartup(.failure(error), id: id); return }
                 }
             }
         }
     }
 
-    private func readyBefore(_ expires: TimeInterval, maxAge: TimeInterval) async throws -> UInt16 {
+    private func finishStartup(_ result: Result<UInt16, Error>, id: UUID) {
+        guard startupRetryID == id else { return }
+        startupRetryID = nil
+        let pending = startupCompletions
+        startupCompletions.removeAll()
+        pending.forEach { $0(result) }
+    }
+
+    // All cold-start callers share one foreground recovery. Only a missing
+    // AUTHENTICATE reply may schedule another socket; a rejection is terminal.
+    private func recoverStartupAuthentication(_ whileAvailable: @escaping @MainActor () -> Bool) async throws -> UInt16 {
+        let id = UUID()
+        let task = Task<UInt16, Error> {
+            defer {
+                if authenticationRecovery?.id == id {
+                    authenticationRecovery = nil
+                    authenticationBackoff = nil
+                    presentsStartupAuthenticationRetry = false
+                }
+            }
+            let delays: [UInt64] = [5, 15, 30, 60, 90]
+            var index = 0
+            while true {
+                try Task.checkCancellation()
+                guard whileAvailable() else { throw CancellationError() }
+                let delay = delays[index]
+                record(.controlAuthBackoff, count: Int(delay))
+                let sleep = Task { try await authenticationSleep(delay * 1_000_000_000) }
+                authenticationBackoff = sleep
+                if !presentsStartupAuthenticationRetry { presentsStartupAuthenticationRetry = true }
+                // Retry on the alert interrupts only this delay.
+                do { try await sleep.value } catch { try Task.checkCancellation() }
+                try Task.checkCancellation()
+                guard whileAvailable() else { throw CancellationError() }
+                authenticationBackoff = nil
+                do {
+                    let port = try await ensureReady(maxAge: 15)
+                    try Task.checkCancellation()
+                    guard whileAvailable() else { throw CancellationError() }
+                    return port
+                }
+                catch EmbeddedTorError.controlAuthenticationTimeout {
+                    index = min(index + 1, delays.count - 1)
+                }
+            }
+        }
+        authenticationRecovery = (id, task)
+        return try await task.value
+    }
+
+    func retryStartupAuthenticationNow() {
+        presentsStartupAuthenticationRetry = false
+        authenticationBackoff?.cancel()
+    }
+
+    func cancelStartupAuthentication() {
+        guard authenticationRecovery != nil else { return }
+        startupAuthenticationCancelled = true
+        pauseStartupAuthenticationRecovery()
+    }
+
+    func allowStartupAuthentication() { startupAuthenticationCancelled = false }
+
+    func pauseStartupAuthenticationRecovery() {
+        guard let recovery = authenticationRecovery else { return }
+        recovery.task.cancel()
+        authenticationBackoff?.cancel()
+        authenticationRecovery = nil
+        authenticationBackoff = nil
+        presentsStartupAuthenticationRetry = false
+        if !hasVerifiedStartupRoute, let attempt {
+            finish(.failure(CancellationError()), id: attempt, allowRecovery: false)
+        }
+        if let id = startupRetryID { finishStartup(.failure(CancellationError()), id: id) }
+    }
+
+    func readyBefore(_ expires: TimeInterval, maxAge: TimeInterval) async throws -> UInt16 {
         let remaining = expires - ProcessInfo.processInfo.systemUptime
         guard remaining > 0 else { throw EmbeddedTorError.timeout }
         return try await withThrowingTaskGroup(of: UInt16.self) { group in
@@ -227,6 +342,7 @@ final class EmbeddedTorManager: ObservableObject {
         waitingForNetwork = !online
         invalidateReadiness()
         guard !online else { return }
+        pauseStartupAuthenticationRecovery()
         setXauXatTorSocksPort(nil)
         attempt = nil
         deadline?.cancel()
@@ -245,6 +361,7 @@ final class EmbeddedTorManager: ObservableObject {
     /// never shut down/re-enter Tor or publish an unverified SOCKS endpoint.
     func refreshConnection() async throws -> UInt16 {
         try Task.checkCancellation()
+        allowStartupAuthentication()
         if refreshingConnection { return try await ensureReady() }
         refreshingConnection = true
         defer { refreshingConnection = false }
@@ -308,6 +425,14 @@ final class EmbeddedTorManager: ObservableObject {
         }
     }
 
+    func verifiedRecoveryRoute(force: Bool) async throws -> XauXatConnectionRecoveryManager.Route {
+        let previous = lastVerifiedListener
+        let port = try await ensureReady(maxAge: force ? 0 : 15)
+        guard case .ready(port) = state, let listener = lastVerifiedListener,
+              listener.port == port else { throw EmbeddedTorError.routeNotReady }
+        return .init(port: port, replaced: previous != listener)
+    }
+
     func invalidateReadiness() {
         record(.invalidated)
         routeRevision += 1
@@ -358,7 +483,6 @@ final class EmbeddedTorManager: ObservableObject {
         state = .starting
         lastBootstrapBucket = nil
         bootstrapProgress = 0
-        bootstrapProgressAt = bootstrapNow()
         record(.start)
         routeTask?.cancel()
         routeTask = nil
@@ -378,23 +502,6 @@ final class EmbeddedTorManager: ObservableObject {
         }
 
         bootstrapWatch?.cancel()
-        bootstrapWatch = Task { [weak self] in
-            guard let self else { return }
-            while self.attempt == id {
-                let elapsed = self.bootstrapNow() - self.bootstrapProgressAt
-                let remaining = max(0, Double(self.bootstrapStallTimeout) / 1_000_000_000 - elapsed)
-                do { try await self.bootstrapSleep(max(1, UInt64(remaining * 1_000_000_000))) }
-                catch { return }
-                guard self.attempt == id, !Task.isCancelled,
-                      !self.requestingPort, !self.recoveryAttempted else { return }
-                if self.bootstrapNow() - self.bootstrapProgressAt >= Double(self.bootstrapStallTimeout) / 1_000_000_000 {
-                    self.record(.bootstrapStalled)
-                    self.finish(.failure(EmbeddedTorError.bootstrapStalled), id: id)
-                    return
-                }
-            }
-        }
-
         Task { await startTor(id: id) }
     }
 
@@ -566,8 +673,33 @@ final class EmbeddedTorManager: ObservableObject {
         }
     }
 
+    private func watchBootstrap(id: UUID) {
+        guard !recoveryAttempted else { return }
+        bootstrapProgressAt = bootstrapNow()
+        bootstrapWatch = Task { [weak self] in
+            guard let self else { return }
+            while self.attempt == id {
+                let elapsed = self.bootstrapNow() - self.bootstrapProgressAt
+                let remaining = max(0, Double(self.bootstrapStallTimeout) / 1_000_000_000 - elapsed)
+                do { try await self.bootstrapSleep(max(1, UInt64(remaining * 1_000_000_000))) }
+                catch { return }
+                guard self.attempt == id, !Task.isCancelled,
+                      !self.requestingPort, !self.recoveryAttempted else { return }
+                if self.bootstrapNow() - self.bootstrapProgressAt >= Double(self.bootstrapStallTimeout) / 1_000_000_000 {
+                    self.record(.bootstrapStalled)
+                    self.finish(.failure(EmbeddedTorError.bootstrapStalled), id: id)
+                    return
+                }
+            }
+        }
+    }
+
     private func observeCircuit(_ control: TorController, id: UUID) {
+        // Local authentication and control commands do not verify a network path.
+        // Bind the circuit check and subsequent relay probe to the current path.
+        attemptRevision = routeRevision
         record(.circuitCheck)
+        watchBootstrap(id: id)
         removeObservers()
         statusObserver = control.addObserver(forStatusEvents: { [weak self] type, _, action, arguments in
             guard type == "STATUS_CLIENT" else { return false }
@@ -604,6 +736,31 @@ final class EmbeddedTorManager: ObservableObject {
                 if established == "1" {
                     requestingPort = true
                     requestSocksPort(control, id: id)
+                } else if established == "0" {
+                    // Dormancy can survive a process restart. After a repair, a
+                    // circuit may also need demand even if Tor reports active.
+                    var mode = ProbeMode.demand
+                    if !recoveryAttempted {
+                        let dormant = try await info(control, "dormant")
+                        guard attempt == id, !requestingPort else { return }
+                        if dormant != "1" {
+                            // A recently used Tor can report dormant=0 even with no
+                            // circuits. Keep its listener if one private stream works.
+                            guard dormant == "0", hasVerifiedStartupRoute,
+                                  try await info(control, "status/enough-dir-info") == "1" else { return }
+                            guard attempt == id, !requestingPort else { return }
+                            mode = .earlyDemand
+                        }
+                    }
+                    try await command(control, "SIGNAL", ["ACTIVE"])
+                    guard attempt == id, !requestingPort else { return }
+                    record(.runtimeActivated)
+                    // ACTIVE can be acknowledged without producing a circuit
+                    // event. Request a real private relay stream, then confirm
+                    // the circuit on this controller before publishing its port.
+                    requestingPort = true
+                    record(.circuitDemand)
+                    requestSocksPort(control, id: id, mode: mode)
                 }
             } catch {
                 // An established-circuit event may already have advanced this
@@ -614,7 +771,7 @@ final class EmbeddedTorManager: ObservableObject {
         }
     }
 
-    private func requestSocksPort(_ control: TorController, id: UUID) {
+    private func requestSocksPort(_ control: TorController, id: UUID, mode: ProbeMode = .established) {
         Task {
             do {
                 let value = try await info(control, "net/listeners/socks")
@@ -626,28 +783,40 @@ final class EmbeddedTorManager: ObservableObject {
                 guard attemptRevision == routeRevision else { begin(); return }
                 guard let port = Self.loopbackPort(value) else { throw EmbeddedTorError.invalidSocksPort }
                 state = .verifying
-                routeTask = Task { await self.verifyStartupRoute(port: port, id: id) }
+                routeTask = Task { await self.verifyStartupRoute(port: port, id: id, control: control, mode: mode) }
             } catch {
                 finish(.failure(error), id: id)
             }
         }
     }
 
-    private func verifyStartupRoute(port: UInt16, id: UUID) async {
+    private func verifyStartupRoute(port: UInt16, id: UUID, control: TorController, mode: ProbeMode) async {
         var lastError: Error = EmbeddedTorError.checkFailed
 
         // A Tor circuit event only proves that the embedded process built a
         // circuit. Verify that it can reach a messaging relay before allowing
         // the core to negotiate its authenticated SMP sessions.
-        let budgets: [TimeInterval] = [6, 10, 16]
-        for (index, budget) in budgets.enumerated() {
+        // Keep a slow onion connection alive while retrying explicit failures within one deadline.
+        // Before a repair, spend at most the existing stall window on one
+        // stream. Failure immediately hands off to the normal repair.
+        let attempts = mode == .earlyDemand ? 1 : 3
+        let seconds = mode == .earlyDemand ? min(32, Double(bootstrapStallTimeout) / 1_000_000_000) : 32
+        let expires = ProcessInfo.processInfo.systemUptime + seconds
+        for attemptNumber in 1...attempts {
             guard attempt == id else { return }
             guard attemptRevision == routeRevision else { begin(); return }
-            let attemptNumber = index + 1
+            let budget = expires - ProcessInfo.processInfo.systemUptime
+            guard budget > 0 else { break }
             record(.probe, count: attemptNumber)
             do {
                 guard try await routeProbe(port, budget) else {
                     throw EmbeddedTorError.checkFailed
+                }
+                if mode != .established {
+                    guard attempt == id else { return }
+                    guard try await info(control, "status/circuit-established") == "1" else {
+                        throw EmbeddedTorError.circuitReset
+                    }
                 }
                 finish(.success(port), id: id)
                 return
@@ -659,7 +828,7 @@ final class EmbeddedTorManager: ObservableObject {
                 logger.error("XauXat Tor: startup route probe \(attemptNumber, privacy: .public) failed: \(Self.diagnosticFailure(error), privacy: .public)")
             }
 
-            if attemptNumber < budgets.count {
+            if attemptNumber < attempts {
                 do {
                     try await Task.sleep(nanoseconds: retryDelay)
                 } catch {
@@ -715,10 +884,14 @@ final class EmbeddedTorManager: ObservableObject {
             record(.ready)
             if attemptRevision == routeRevision { verifiedAt = ProcessInfo.processInfo.systemUptime }
             setXauXatTorSocksPort(port)
+            lastVerifiedListener = VerifiedListener(port: port, generation: listenerGeneration)
             state = .ready(port)
             hasVerifiedStartupRoute = true
+            authenticationBackoff?.cancel()
             logger.notice("XauXat Tor: embedded client is ready")
         case let .failure(error):
+            lastVerifiedListener = nil
+            if let failure = error as? EmbeddedTorError, failure == .processStopped { requiresRelaunch = true }
             record(.failed, error: error)
             setXauXatTorSocksPort(nil)
             controller?.xauxatCloseControlSocket()
@@ -734,6 +907,8 @@ final class EmbeddedTorManager: ObservableObject {
     }
 
     private func recover(_ control: TorController, id: UUID) async {
+        guard attempt == id else { return }
+        listenerGeneration = UUID()
         record(.repair)
         do {
             logger.notice("XauXat Tor: rebuilding private connection after failed route check")

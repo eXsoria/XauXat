@@ -22,26 +22,24 @@ progress. Releasing a stale control socket deliberately avoids the framework's
 also recoverable: after reauthentication, networking is re-enabled before
 waiting for a circuit again.
 
-Each attempt has a four-minute overall deadline, covering bootstrap, control
-commands, probes and repair. Each probe has a 30-second deadline and each control
-command a five-second deadline. Probe retries allow three checks before and three
-after the single repair; the overall deadline takes precedence. Late callbacks
-cannot publish readiness for an expired or superseded attempt. Outstanding probes
-are cancelled when their attempt expires. Manual failures
-withdraw readiness without invalidating a newer successful check.
+Startup has a four-minute overall deadline. Local control setup and initial
+authentication have their own timeouts. Once the authenticated controller
+starts observing the circuit, the bootstrap watchdog times progress. A
+startup verification round shares 32 seconds across up to three probes. A
+pending connection can use the remaining time, while explicit failures can
+retry. One controlled repair can start a new round within the overall deadline.
+Expired and superseded probes cannot publish readiness. The manual diagnostic
+uses a 30-second probe by default.
 
 The chat core receives the current verified configuration before app resume and
 relay reconnect. Active Wi-Fi/mobile connectivity changes trigger revalidation
 through the existing network observer. The diagnostics button remains usable
 when the route is unhealthy, so it can retry/recover instead of being disabled.
 
-The route probe uses only the local SOCKS endpoint and sends the destination
-hostname through SOCKS. It reads a complete bounded HTTP status line, including
-fragmented replies. It requests `HEAD /` from Tor Project, not the exit-IP API,
-and does not log message data, contact identifiers, destinations of chats or an
-exit IP. Errors distinguish the local socket, SOCKS handshake, destination reply
-code, response and timeout stage. HTTP reachability is a diagnostic, not a proof
-that every messaging relay is reachable or an independent anonymity audit.
+The route probe opens parallel SOCKS connections through the local Tor listener
+to two preset messaging relay onion addresses. The first successful SOCKS
+connection completes the check. It sends no chat data. Authenticated SMP
+sessions and message delivery are separate steps.
 
 ## Regression checks
 

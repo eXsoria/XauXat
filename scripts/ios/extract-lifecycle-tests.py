@@ -36,6 +36,10 @@ observer = (root / "apps/ios/Shared/Model/NetworkObserver.swift").read_text(enco
 assert "guard monitor == nil" in observer and "restartMonitor" not in api, "Opening the core must not synthesize another path change"
 text = "import Foundation\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "startChatAndActivate")
 text += "\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "activateChat")
+suspend_source = (root / "apps/ios/Shared/Model/SuspendChat.swift").read_text(encoding="utf-8")
+text += "\n" + next(line for line in suspend_source.splitlines() if line.startswith("private var currentSuspendRequest:"))
+for name in ["_suspendChat", "chatSuspended", "_chatSuspended"]:
+    text += "\n" + function("apps/ios/Shared/Model/SuspendChat.swift", name)
 text += "\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "xauXatAppIsForeground")
 text += "\n@MainActor\n" + function("apps/ios/Shared/Model/SuspendChat.swift", "reopenChatStoreForHistory")
 text += "\n" + function("apps/ios/Shared/Model/SimpleXAPI.swift", "apiActivateChat")
