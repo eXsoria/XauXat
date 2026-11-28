@@ -1,4 +1,4 @@
-"""Run both production microphone-format queries against native audio nodes."""
+"""Test microphone bus queries and the WebRTC playout format on native audio nodes."""
 from pathlib import Path
 import re
 import sys
@@ -27,6 +27,21 @@ for bus in buses {
 }
 print("Native microphone format checks passed: \\(buses.count)")
 '''
-(out / "Current.swift").write_text(template.replace("BUSES", ", ".join(queries)), encoding="utf-8")
+# Exercise the production playout initializer on a real four-channel layout.
+playout = re.search(r"let rtcPlayFormat = (AVAudioFormat\(.*?\)) else", source, re.S)
+channels = re.search(r"    var xauxatWebRTCChannels: AVAudioChannelCount .*", source)
+if not playout or not channels:
+    raise RuntimeError("Missing production playout format")
+output_test = """
+extension AVAudioFormat {
+CHANNELS
+}
+let quad = AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_Quadraphonic)!
+let outputFormat = AVAudioFormat(standardFormatWithSampleRate: 48000, channelLayout: quad)
+let playback = PLAYOUT
+precondition(outputFormat.channelCount == 4 && playback?.channelCount == 2)
+print("Quadraphonic route uses stereo WebRTC playout.")
+""".replace("CHANNELS", channels[0]).replace("PLAYOUT", playout[1])
+(out / "Current.swift").write_text(template.replace("BUSES", ", ".join(queries)) + output_test, encoding="utf-8")
 # The regression is sensitive to the previous invalid bus at either call site.
 (out / "InvalidBus.swift").write_text(template.replace("BUSES", "1"), encoding="utf-8")

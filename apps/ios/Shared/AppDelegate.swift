@@ -15,6 +15,7 @@ import SwiftUI
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         logger.debug("AppDelegate: didFinishLaunchingWithOptions")
+        _ = CallController.shared // Register PushKit even when iOS launches without a scene.
         removeStaleXauXatProtectedFiles()
         removePasscodesIfReinstalled()
         prepareForLaunch()

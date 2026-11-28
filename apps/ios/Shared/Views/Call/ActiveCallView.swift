@@ -18,13 +18,12 @@ struct ActiveCallView: View {
     @Environment(\.colorScheme) var colorScheme
     @ObservedObject var call: Call
     @Environment(\.scenePhase) var scenePhase
-    @State private var client: WebRTCClient? = nil
-    @State private var localRendererAspectRatio: CGFloat? = nil
+    private var client: WebRTCClient? { call.webRTCClient }
+    private var localRendererAspectRatio: CGFloat? { call.localRendererAspectRatio }
     @State var remoteContentMode: UIView.ContentMode = .scaleAspectFill
     @Binding var canConnectCall: Bool
     @State var prevColorScheme: ColorScheme = .dark
     @State var pipShown = false
-    @State var wasConnected = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -47,9 +46,9 @@ struct ActiveCallView: View {
                             Group {
                                 let localVideoTrack = client.activeCall?.localVideoTrack ?? client.notConnectedCall?.localCameraAndTrack?.1
                                 if localVideoTrack != nil {
-                                    CallViewLocal(client: client, localRendererAspectRatio: $localRendererAspectRatio, pipShown: $pipShown)
+                                    CallViewLocal(client: client, localRendererAspectRatio: $call.localRendererAspectRatio, pipShown: $pipShown)
                                         .onDisappear {
-                                            localRendererAspectRatio = nil
+                                            call.localRendererAspectRatio = nil
                                         }
                                 } else {
                                     Rectangle().fill(.black)
@@ -74,56 +73,95 @@ struct ActiveCallView: View {
             Task {
                 await askRequiredPermissions()
             }
-            createWebRTCClient()
+            if canConnectCall { call.attachWebRTC() }
             dismissAllSheets()
             hideKeyboard()
             prevColorScheme = colorScheme
         }
         .onChange(of: canConnectCall) { _ in
             logger.debug("ActiveCallView: canConnectCall changed to \(canConnectCall)")
-            createWebRTCClient()
+            if canConnectCall { call.attachWebRTC() }
         }
         .onChange(of: m.activeCallViewIsCollapsed) { _ in
             hideKeyboard()
         }
         .onDisappear {
             logger.debug("ActiveCallView: disappear")
-            Task { await m.callCommand.setClient(nil) }
-            AppDelegate.keepScreenOn(false)
-            XauXatRealtimeVoiceMasking.shared.endCall(call)
-            CallSoundsPlayer.shared.stop()
-            if let client {
-                DispatchQueue.global(qos: .utility).async { client.endCall() }
-            }
-            if (wasConnected) {
-                CallSoundsPlayer.shared.vibrate(long: true)
+            if !m.showCallView || m.activeCall == nil || m.activeCall === call {
+                AppDelegate.keepScreenOn(false)
             }
         }
         .background(m.activeCallViewIsCollapsed ? .clear : .black)
         // Quite a big delay when opening/closing the view when a scheme changes (globally) this way. It's not needed when CallKit is used since status bar is green with white text on it
-        .preferredColorScheme(m.activeCallViewIsCollapsed || CallController.useCallKit() ? prevColorScheme : .dark)
+        .preferredColorScheme(m.activeCallViewIsCollapsed || call.usesCallKit ? prevColorScheme : .dark)
     }
 
-    private func createWebRTCClient() {
-        if client == nil && canConnectCall && m.activeCall === call {
-            XauXatRealtimeVoiceMasking.shared.beginCall(call)
-            client = WebRTCClient({ msg in await MainActor.run { processRtcMessage(msg: msg) } }, $localRendererAspectRatio)
-            Task {
-                await m.callCommand.setClient(client)
+    private func askRequiredPermissions() async {
+        let mic = await WebRTCClient.isAuthorized(for: .audio)
+        await MainActor.run {
+            guard m.activeCall === call else { return }
+            call.updateMicrophonePermission(mic)
+            if !mic { WebRTCClient.showUnauthorizedAlert(for: .audio) }
+        }
+        guard XauXatProductPolicy.videoCallsEnabled else { return }
+        let cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+        var camera = call.initialCallType == .audio || cameraAuthorized
+        if call.initialCallType == .video && !cameraAuthorized {
+            camera = await WebRTCClient.isAuthorized(for: .video)
+            await MainActor.run {
+                if camera, let client {
+                    client.setCameraEnabled(true)
+                }
             }
+        }
+        if !camera {
+            WebRTCClient.showUnauthorizedAlert(for: .video)
         }
     }
 
+
+}
+
+extension Call {
     @MainActor
-    private func processRtcMessage(msg: WVAPIMessage) {
-        if call === m.activeCall,
-           let call = m.activeCall,
-           let client = client {
-            logger.debug("ActiveCallView: response \(msg.resp.respType)")
+    func attachWebRTC() {
+        guard ChatModel.shared.activeCall === self, webRTCClient == nil else { return }
+        XauXatRealtimeVoiceMasking.shared.beginCall(self)
+        let aspect = Binding<CGFloat?>(get: { [weak self] in self?.localRendererAspectRatio }, set: { [weak self] value in
+            DispatchQueue.main.async { self?.localRendererAspectRatio = value }
+        })
+        let client = WebRTCClient({ [weak self] message in await self?.processRtcMessage(msg: message) }, aspect, usesCallKitAudio: usesCallKit)
+        client.setCaptureAllowed(microphoneRequested)
+        webRTCClient = client
+        Task { await callCommand.setClient(client) }
+    }
+
+    func finishWebRTC() {
+        if let client = webRTCClient {
+            client.stopSendingAudio()
+            XauXatRealtimeAudioDevice.shared.suspendCapture()
+            webRTCClient = nil
+            DispatchQueue.main.async {
+                XauXatRealtimeVoiceMasking.shared.endCall(self)
+                guard ChatModel.shared.activeCall == nil else { return }
+                CallSoundsPlayer.shared.stop()
+                if self.didConnectWebRTC { CallSoundsPlayer.shared.vibrate(long: true) }
+            }
+        }
+        Task { await callCommand.finish() }
+    }
+
+    @MainActor
+    private func processRtcMessage(msg: WVAPIMessage) async {
+        let m = ChatModel.shared
+        if m.activeCall === self, let client = webRTCClient {
+            let call = self
+            logger.debug("Call: response \(msg.resp.respType)")
             switch msg.resp {
             case let .capabilities(capabilities):
                 let callType = CallType(media: call.initialCallType, capabilities: capabilities)
                 Task {
+                    guard m.activeCall === call, call.webRTCClient === client else { return }
                     XauXatCallTiming.mark("invitation.sending")
                     do {
                         try await apiSendCallInvitation(call.contact, callType)
@@ -134,11 +172,9 @@ struct ActiveCallView: View {
                         showSignalingError(for: call)
                         return
                     }
-                    guard m.activeCall === call else { return }
-                    await MainActor.run {
-                        if call.callState == .waitCapabilities { call.callState = .invitationSent }
-                        call.localCapabilities = capabilities
-                    }
+                    guard m.activeCall === call, call.webRTCClient === client else { return }
+                    if call.callState == .waitCapabilities { call.callState = .invitationSent }
+                    call.localCapabilities = capabilities
                     if call.hasVideo && !AVAudioSession.sharedInstance().hasExternalAudioDevice() {
                         try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
                     }
@@ -148,7 +184,9 @@ struct ActiveCallView: View {
                     }
                 }
             case let .offer(offer, iceCandidates, capabilities):
+                guard let localCandidates = client.activeCall?.iceCandidates else { return }
                 Task {
+                    guard m.activeCall === call, call.webRTCClient === client else { return }
                     XauXatCallTiming.mark("offer.sending")
                     do {
                         try await apiSendCallOffer(call.contact, offer, iceCandidates,
@@ -160,14 +198,15 @@ struct ActiveCallView: View {
                         showSignalingError(for: call)
                         return
                     }
-                    await MainActor.run {
-                        guard m.activeCall === call else { return }
-                        if call.callState == .invitationAccepted { call.callState = .offerSent }
-                        call.localCapabilities = capabilities
-                    }
+                    guard m.activeCall === call, call.webRTCClient === client else { return }
+                    if call.callState == .invitationAccepted { call.callState = .offerSent }
+                    call.localCapabilities = capabilities
+                    await client.sendRemainingIceCandidates(localCandidates)
                 }
             case let .answer(answer, iceCandidates):
+                guard let localCandidates = client.activeCall?.iceCandidates else { return }
                 Task {
+                    guard m.activeCall === call, call.webRTCClient === client else { return }
                     XauXatCallTiming.mark("answer.sending")
                     do {
                         try await apiSendCallAnswer(call.contact, answer, iceCandidates)
@@ -178,43 +217,38 @@ struct ActiveCallView: View {
                         showSignalingError(for: call)
                         return
                     }
-                    await MainActor.run {
-                        guard m.activeCall === call else { return }
-                        if call.callState == .offerReceived { call.callState = .negotiated }
-                        CallSoundsPlayer.shared.stop()
-                    }
+                    guard m.activeCall === call, call.webRTCClient === client else { return }
+                    if call.callState == .offerReceived { call.callState = .negotiated }
+                    CallSoundsPlayer.shared.stop()
+                    await client.sendRemainingIceCandidates(localCandidates)
                 }
             case let .ice(iceCandidates):
-                Task {
-                    do {
-                        try await apiSendCallExtraInfo(call.contact, iceCandidates)
-                    } catch {
-                        logger.error("apiSendCallExtraInfo \(responseError(error))")
-                    }
+                do {
+                    try await apiSendCallExtraInfo(call.contact, iceCandidates)
+                } catch {
+                    logger.error("apiSendCallExtraInfo \(responseError(error))")
                 }
             case let .connection(state):
                 if let callStatus = WebRTCCallStatus.init(rawValue: state.connectionState),
                    case .connected = callStatus {
                     CallSoundsPlayer.shared.stop()
-                    call.direction == .outgoing
-                    ? CallController.shared.reportOutgoingCall(call: call, connectedAt: nil)
-                    : CallController.shared.reportIncomingCall(call: call, connectedAt: nil)
+                    if call.connectedAt == nil {
+                        call.connectedAt = .now
+                        call.direction == .outgoing
+                        ? CallController.shared.reportOutgoingCall(call: call, connectedAt: nil)
+                        : CallController.shared.reportIncomingCall(call: call, connectedAt: nil)
+                    }
                     call.callState = .connected
-                    call.connectedAt = .now
-                    if !wasConnected {
+                    if !didConnectWebRTC {
                         CallSoundsPlayer.shared.vibrate(long: false)
-                        wasConnected = true
+                        didConnectWebRTC = true
                     }
                 }
                 if state.connectionState == "closed" {
-                    closeCallView(client)
-                    if let callUUID = m.activeCall?.callUUID {
-                        CallController.shared.endCall(callUUID: callUUID)
-                    }
-                    m.activeCall = nil
-                    m.activeCallViewIsCollapsed = false
+                    CallController.shared.endCallAfterTransportClosed(call)
                 }
                 Task {
+                    guard m.activeCall === call || (state.connectionState == "closed" && m.activeCall == nil) else { return }
                     do {
                         try await apiCallStatus(call.contact, state.connectionState)
                     } catch {
@@ -225,10 +259,9 @@ struct ActiveCallView: View {
                 CallSoundsPlayer.shared.stop()
                 call.callState = .connected
                 call.connectionInfo = connectionInfo
-                call.connectedAt = .now
-                if !wasConnected {
+                if !didConnectWebRTC {
                     CallSoundsPlayer.shared.vibrate(long: false)
-                    wasConnected = true
+                    didConnectWebRTC = true
                 }
             case let .peerMedia(source, enabled):
                 switch source {
@@ -239,19 +272,20 @@ struct ActiveCallView: View {
                     case .unknown: ()
                 }
             case .ended:
-                closeCallView(client)
+                m.showCallView = false
                 call.callState = .ended
-                if let uuid = call.callUUID {
+                if call.usesCallKit, let uuid = call.callUUID {
                     CallController.shared.endCall(callUUID: uuid)
+                } else {
+                    CallController.shared.endCall(call: call) {}
                 }
             case .ok:
                 switch msg.command {
                 case .answer:
                     if call.callState == .answerReceived { call.callState = .negotiated }
                 case .end:
-                    closeCallView(client)
-                    m.activeCall = nil
-                    m.activeCallViewIsCollapsed = false
+                    m.showCallView = false
+                    CallManager.clearActiveCall(call)
                 default: ()
                 }
             case let .error(message):
@@ -272,8 +306,9 @@ struct ActiveCallView: View {
     }
 
     private func activeCallWaitDeliveryReceipt() {
-        ChatReceiver.shared.messagesChannel = { msg in
-            guard let call = ChatModel.shared.activeCall, call.callState == .invitationSent else {
+        ChatReceiver.shared.messagesChannel = { [weak self] msg in
+            guard let call = self, ChatModel.shared.activeCall === call else { return }
+            guard call.callState == .invitationSent else {
                 ChatReceiver.shared.messagesChannel = nil
                 return
             }
@@ -289,35 +324,6 @@ struct ActiveCallView: View {
         }
     }
 
-    private func askRequiredPermissions() async {
-        let mic = await WebRTCClient.isAuthorized(for: .audio)
-        await MainActor.run {
-            call.localMediaSources.mic = mic
-        }
-        if !mic {
-            WebRTCClient.showUnauthorizedAlert(for: .audio)
-        }
-        guard XauXatProductPolicy.videoCallsEnabled else { return }
-        let cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
-        var camera = call.initialCallType == .audio || cameraAuthorized
-        if call.initialCallType == .video && !cameraAuthorized {
-            camera = await WebRTCClient.isAuthorized(for: .video)
-            await MainActor.run {
-                if camera, let client {
-                    client.setCameraEnabled(true)
-                }
-            }
-        }
-        if !camera {
-            WebRTCClient.showUnauthorizedAlert(for: .video)
-        }
-    }
-
-    private func closeCallView(_ client: WebRTCClient) {
-        if m.activeCall != nil {
-            m.showCallView = false
-        }
-    }
 }
 
 // Spec: spec/services/calls.md#ActiveCallOverlay
@@ -699,9 +705,9 @@ private struct XauXatRealtimeVoiceMaskingView: View {
 struct ActiveCallOverlay_Previews: PreviewProvider {
     static var previews: some View {
         Group{
-            ActiveCallOverlay(call: Call(direction: .incoming, contact: Contact.sampleData, callUUID: UUID().uuidString.lowercased(), callState: .offerSent, initialCallType: .video), client: WebRTCClient({ _ in }, Binding.constant(nil)))
+            ActiveCallOverlay(call: Call(direction: .incoming, contact: Contact.sampleData, callUUID: UUID().uuidString.lowercased(), callState: .offerSent, initialCallType: .video), client: WebRTCClient({ _ in }, Binding.constant(nil), usesCallKitAudio: false))
                 .background(.black)
-            ActiveCallOverlay(call: Call(direction: .incoming, contact: Contact.sampleData, callUUID: UUID().uuidString.lowercased(), callState: .offerSent, initialCallType: .audio), client: WebRTCClient({ _ in }, Binding.constant(nil)))
+            ActiveCallOverlay(call: Call(direction: .incoming, contact: Contact.sampleData, callUUID: UUID().uuidString.lowercased(), callState: .offerSent, initialCallType: .audio), client: WebRTCClient({ _ in }, Binding.constant(nil), usesCallKitAudio: false))
                 .background(.black)
         }
     }

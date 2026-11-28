@@ -240,13 +240,14 @@ struct ContentView: View {
 
     // Spec: spec/client/navigation.md#callView
     @ViewBuilder private func callView(_ call: Call) -> some View {
-        if CallController.useCallKit() {
+        if call.usesCallKit {
             ActiveCallView(call: call, canConnectCall: Binding.constant(true))
                 .onDisappear {
                     if prefPerformLA && !accessAuthenticated { authenticateContentViewAccess() }
                 }
         } else {
             ActiveCallView(call: call, canConnectCall: $canConnectViewCall)
+                .id(ObjectIdentifier(call))
             if prefPerformLA && !accessAuthenticated {
                 Rectangle()
                     .fill(colorScheme == .dark ? .black : .white)
@@ -442,7 +443,7 @@ struct ContentView: View {
             chatModel.contentViewAccessAuthenticated = true
             recoverXauXatSessionAfterAuthentication()
         } else if contentAuthenticationReady && !automaticAuthenticationAttempted &&
-                    !(CallController.useCallKit() && chatModel.showCallView && chatModel.activeCall != nil) {
+                    !(chatModel.showCallView && chatModel.activeCall?.usesCallKit == true) {
             authenticateContentViewAccess()
         }
     }

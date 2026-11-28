@@ -199,17 +199,6 @@ func initChatAndMigrate(refreshInvitations: Bool = true, start: Bool = true) {
     }
 }
 
-func startChatForCall() {
-    logger.debug("DEBUGGING: startChatForCall")
-    if .active != AppChatState.shared.value || !isChatStoreOpen() {
-        guard activateChat() else { return }
-    }
-    if ChatModel.shared.chatRunning == true {
-        ChatReceiver.shared.start()
-        logger.debug("DEBUGGING: startChatForCall: after ChatReceiver.shared.start")
-    }
-}
-
 func startChatAndActivate(ifAllowed: @escaping () -> Bool = { true }, _ completion: @escaping () -> Void) {
     // Callers and NSE callbacks run on the main queue. Complete this operation
     // only once, even if a late/duplicate extension callback reaches it.

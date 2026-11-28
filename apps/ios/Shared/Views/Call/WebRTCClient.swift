@@ -52,25 +52,61 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
         var device: AVCaptureDevice.Position = .front
     }
 
-    actor IceCandidates {
+    final class IceCandidates {
+        private let lock = NSLock()
         private var candidates: [RTCIceCandidate] = []
+        private let updates = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
 
-        func getAndClear() async -> [RTCIceCandidate] {
-            let cs = candidates
-            candidates = []
-            return cs
+        func append(_ candidate: RTCIceCandidate) {
+            lock.lock()
+            candidates.append(candidate)
+            lock.unlock()
+            signal()
         }
 
-        func append(_ c: RTCIceCandidate) async {
-            candidates.append(c)
+        func signal() { updates.continuation.yield(()) }
+        func finish() { updates.continuation.finish() }
+
+        private func takeBatch() -> [RTCIceCandidate] {
+            lock.lock()
+            defer { lock.unlock() }
+            let batch = candidates
+            candidates.removeAll()
+            return batch
+        }
+
+        func initial() async -> [RTCIceCandidate] {
+            // Slow TURN gathering must not block SDP. Later candidates travel as call extras.
+            let timeout = Task {
+                try await Task.sleep(nanoseconds: 750_000_000)
+                signal()
+            }
+            defer { timeout.cancel() }
+            var iterator = updates.stream.makeAsyncIterator()
+            _ = await iterator.next()
+            return takeBatch()
+        }
+
+        func sendRemaining(_ send: ([RTCIceCandidate]) async -> Void) async {
+            for await _ in updates.stream {
+                do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
+                let batch = takeBatch()
+                if !batch.isEmpty { await send(batch) }
+            }
         }
     }
 
     private let rtcAudioSession =  RTCAudioSession.sharedInstance()
     private static let audioQueue = DispatchQueue(label: "pt.exsoria.xauxat.audio")
+    private static var nativeAudioActive = false
     private static weak var audioSessionOwner: WebRTCClient?
-    private let usesCallKitAudio = CallController.useCallKit()
-    private var activatedAudioSession = false
+    private let usesCallKitAudio: Bool
+    // Serialized on audioQueue. Each app activation is balanced once, even across consecutive calls.
+    private static var activatedAudioSession = false
+    private let captureLock = NSLock()
+    private weak var ownedAudioTrack: RTCAudioTrack?
+    private var captureEnded = false
+    private var captureAllowed = true
     private var sendCallResponse: (WVAPIMessage) async -> Void
     var activeCall: Call?
     var notConnectedCall: NotConnectedCall?
@@ -84,13 +120,36 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
         fatalError("Unimplemented")
     }
 
-    required init(_ sendCallResponse: @escaping (WVAPIMessage) async -> Void, _ localRendererAspectRatio: Binding<CGFloat?>) {
+    required init(_ sendCallResponse: @escaping (WVAPIMessage) async -> Void, _ localRendererAspectRatio: Binding<CGFloat?>, usesCallKitAudio: Bool) {
+        self.usesCallKitAudio = usesCallKitAudio
         self.sendCallResponse = sendCallResponse
         self.localRendererAspectRatio = localRendererAspectRatio
-        rtcAudioSession.useManualAudio = usesCallKitAudio
-        rtcAudioSession.isAudioEnabled = !usesCallKitAudio
-        logger.debug("WebRTCClient: rtcAudioSession has manual audio \(self.rtcAudioSession.useManualAudio) and audio enabled \(self.rtcAudioSession.isAudioEnabled)")
         super.init()
+        claimAudioSession()
+    }
+
+    private func claimAudioSession() {
+        Self.audioQueue.async {
+            Self.audioSessionOwner = self
+            self.rtcAudioSession.useManualAudio = self.usesCallKitAudio
+            self.rtcAudioSession.isAudioEnabled = !self.usesCallKitAudio || Self.nativeAudioActive
+            if self.usesCallKitAudio { self.releaseAppAudioActivation() }
+        }
+    }
+
+    static var callKitAudioActive: Bool { audioQueue.sync { nativeAudioActive } }
+
+    static func callKitAudioChanged(_ session: AVAudioSession, active: Bool) -> Bool {
+        audioQueue.sync {
+            let rtc = RTCAudioSession.sharedInstance()
+            if nativeAudioActive != active {
+                nativeAudioActive = active
+                if active { rtc.audioSessionDidActivate(session) } else { rtc.audioSessionDidDeactivate(session) }
+            }
+            guard audioSessionOwner?.usesCallKitAudio != false else { return false }
+            rtc.isAudioEnabled = active
+            return true
+        }
     }
 
     let defaultIceServers: [WebRTC.RTCIceServer] = [
@@ -205,10 +264,9 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
                 setupEncryptionForLocalTracks(call)
                 resp = .offer(
                     offer: compressToBase64(input: encodeJSON(CustomRTCSessionDescription(type: offer.type.toSdpType(), sdp: offer.sdp))),
-                    iceCandidates: compressToBase64(input: encodeJSON(await self.getInitialIceCandidates())),
+                    iceCandidates: compressToBase64(input: encodeJSON(await call.iceCandidates.initial())),
                     capabilities: CallCapabilities(encryption: encryption)
                 )
-                self.waitForMoreIceCandidates()
             } else {
                 resp = .error(message: "offer error: \(error?.localizedDescription ?? "unknown error")")
             }
@@ -235,9 +293,8 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
                             self.addIceCandidates(pc, remoteIceCandidates)
                             resp = .answer(
                                 answer: compressToBase64(input: encodeJSON(CustomRTCSessionDescription(type: answer.type.toSdpType(), sdp: answer.sdp))),
-                                iceCandidates: compressToBase64(input: encodeJSON(await self.getInitialIceCandidates()))
+                                iceCandidates: compressToBase64(input: encodeJSON(await call.iceCandidates.initial()))
                             )
-                            self.waitForMoreIceCandidates()
                         } else {
                             resp = .error(message: "answer error: \(error?.localizedDescription ?? "unknown error")")
                         }
@@ -292,32 +349,15 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
         }
     }
 
-    func getInitialIceCandidates() async -> [RTCIceCandidate] {
-        await untilIceComplete(timeoutMs: 750, stepMs: 150) {}
-        let candidates = await activeCall?.iceCandidates.getAndClear() ?? []
-        logger.debug("WebRTCClient: sending initial ice candidates: \(candidates.count)")
-        return candidates
-    }
-
-    func waitForMoreIceCandidates() {
-        Task {
-            await untilIceComplete(timeoutMs: 12000, stepMs: 1500) {
-                let candidates = await self.activeCall?.iceCandidates.getAndClear() ?? []
-                if candidates.count > 0 {
-                    logger.debug("WebRTCClient: sending more ice candidates: \(candidates.count)")
-                    await self.sendIceCandidates(candidates)
-                }
-            }
+    func sendRemainingIceCandidates(_ localCandidates: IceCandidates) async {
+        guard activeCall?.iceCandidates === localCandidates else { return }
+        await localCandidates.sendRemaining { candidates in
+            guard self.activeCall?.iceCandidates === localCandidates else { return }
+            await self.sendCallResponse(.init(
+                corrId: nil,
+                resp: .ice(iceCandidates: compressToBase64(input: encodeJSON(candidates))),
+                command: nil))
         }
-    }
-
-    // Spec: spec/services/calls.md#sendIceCandidates
-    func sendIceCandidates(_ candidates: [RTCIceCandidate]) async {
-        await self.sendCallResponse(.init(
-            corrId: nil,
-            resp: .ice(iceCandidates: compressToBase64(input: encodeJSON(candidates))),
-            command: nil)
-        )
     }
 
     func setupMuteUnmuteListener(_ transceiver: RTCRtpTransceiver, _ track: RTCMediaStreamTrack) {
@@ -356,7 +396,7 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
 
     @MainActor
     func onMediaMuteUnmute(_ transceiverMid: String?, _ mute: Bool) {
-        guard let activeCall = ChatModel.shared.activeCall else { return }
+        guard let activeCall = ChatModel.shared.activeCall, activeCall.webRTCClient === self else { return }
         let source = mediaSourceFromTransceiverMid(transceiverMid)
         logger.log("Mute/unmute \(source.rawValue) track = \(mute) with mid = \(transceiverMid ?? "nil")")
         if source == .mic && activeCall.peerMediaSources.mic == mute {
@@ -374,11 +414,16 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
     @MainActor
     func enableMedia(_ source: CallMediaSource, _ enable: Bool) {
         logger.debug("WebRTCClient: enabling media \(source.rawValue) \(enable)")
-        source == .camera ? setCameraEnabled(enable) : setAudioEnabled(enable)
+        if source == .camera {
+            setCameraEnabled(enable)
+        } else if ChatModel.shared.activeCall?.microphoneRequested == enable {
+            setAudioEnabled(enable)
+        }
     }
 
     @MainActor
     func adaptToOldVersion(_ peerHasOldVersion: Bool) {
+        guard ChatModel.shared.activeCall?.webRTCClient === self else { return }
         activeCall?.peerHasOldVersion = peerHasOldVersion
         if peerHasOldVersion {
             logger.debug("The peer has an old version. Remote audio track is nil = \(self.activeCall?.remoteAudioTrack == nil), video = \(self.activeCall?.remoteVideoTrack == nil)")
@@ -634,7 +679,26 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
         let audioConstrains = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
         let audioSource = WebRTCClient.factory.audioSource(with: audioConstrains)
         let audioTrack = WebRTCClient.factory.audioTrack(with: audioSource, trackId: "audio0")
+        captureLock.lock()
+        defer { captureLock.unlock() }
+        ownedAudioTrack?.isEnabled = false
+        audioTrack.isEnabled = !captureEnded && captureAllowed
+        ownedAudioTrack = audioTrack
         return audioTrack
+    }
+
+    func setCaptureAllowed(_ allowed: Bool) {
+        captureLock.lock()
+        defer { captureLock.unlock() }
+        captureAllowed = allowed
+        ownedAudioTrack?.isEnabled = !captureEnded && allowed
+    }
+
+    func stopSendingAudio() {
+        captureLock.lock()
+        defer { captureLock.unlock() }
+        captureEnded = true
+        ownedAudioTrack?.isEnabled = false
     }
 
     private func createVideoTrackAndStartCapture(_ device: AVCaptureDevice.Position) -> (RTCVideoCapturer, RTCVideoTrack) {
@@ -673,6 +737,7 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
         }
         logger.debug("WebRTCClient: ending the call")
         activeCall = nil
+        call.iceCandidates.finish()
         call.connection.close()
         call.connection.delegate = nil
         call.frameEncryptor?.delegate = nil
@@ -681,14 +746,6 @@ final class WebRTCClient: NSObject, RTCVideoViewDelegate, RTCFrameEncryptorDeleg
         audioSessionToDefaults()
     }
 
-    func untilIceComplete(timeoutMs: UInt64, stepMs: UInt64, action: @escaping () async -> Void) async {
-        var t: UInt64 = 0
-        repeat {
-            _ = try? await Task.sleep(nanoseconds: stepMs * 1000000)
-            t += stepMs
-            await action()
-        } while t < timeoutMs && activeCall?.connection.iceGatheringState != .complete
-    }
 }
 
 
@@ -791,6 +848,8 @@ extension WebRTCClient: RTCPeerConnectionDelegate {
         if XauXatCallTiming.enabled {
             XauXatCallTiming.mark("ice.\(connectionStateString)")
         }
+        // WebRTC can recover from disconnected. The chat core treats that status as a final hangup.
+        guard newState != .disconnected else { return }
         Task {
             await sendCallResponse(.init(
                 corrId: nil,
@@ -816,7 +875,7 @@ extension WebRTCClient: RTCPeerConnectionDelegate {
                 let enableSpeaker: Bool = ChatModel.shared.activeCall?.localMediaSources.hasVideo == true
                 setSpeakerEnabledAndConfigureSession(enableSpeaker)
             case .connected: sendConnectedEvent(connection)
-            case .disconnected, .failed: endCall()
+            case .failed: endCall()
             default: ()
             }
         }
@@ -860,13 +919,15 @@ extension WebRTCClient: RTCPeerConnectionDelegate {
     #endif
 
     func peerConnection(_ connection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
+        if newState == .complete, let call = activeCall, call.connection === connection {
+            call.iceCandidates.signal()
+        }
         logger.debug("connection new gathering state: \(newState.toString() ?? "" + newState.rawValue.description)")
     }
 
     func peerConnection(_ connection: RTCPeerConnection, didGenerate candidate: WebRTC.RTCIceCandidate) {
-//        logger.debug("Connection generated candidate \(candidate.debugDescription)")
-        Task {
-            await self.activeCall?.iceCandidates.append(candidate.toCandidate(nil, nil))
+        if let call = activeCall, call.connection === connection {
+            call.iceCandidates.append(candidate.toCandidate(nil, nil))
         }
     }
 
@@ -959,8 +1020,7 @@ extension WebRTCClient {
     func setSpeakerEnabledAndConfigureSession( _ enabled: Bool, skipExternalDevice: Bool = false) {
         logger.debug("WebRTCClient: configuring session with speaker enabled \(enabled)")
         Self.audioQueue.async { [weak self] in
-            guard let self = self else { return }
-            Self.audioSessionOwner = self
+            guard let self, Self.audioSessionOwner === self else { return }
             self.rtcAudioSession.lockForConfiguration()
             defer {
                 self.rtcAudioSession.unlockForConfiguration()
@@ -983,9 +1043,9 @@ extension WebRTCClient {
                 if hasExternalAudioDevice && !skipExternalDevice {
                     logger.debug("WebRTCClient: configuring session with external device available, skip configuring speaker")
                 }
-                if !self.usesCallKitAudio, !self.activatedAudioSession {
+                if !self.usesCallKitAudio, !Self.activatedAudioSession {
                     try self.rtcAudioSession.setActive(true)
-                    self.activatedAudioSession = true
+                    Self.activatedAudioSession = true
                 }
                 logger.debug("WebRTCClient: configuring session with speaker enabled \(enabled) success")
             } catch let error {
@@ -994,23 +1054,27 @@ extension WebRTCClient {
         }
     }
 
+    // Called on audioQueue. CallKit owns its system activation separately.
+    private func releaseAppAudioActivation() {
+        guard Self.activatedAudioSession else { return }
+        rtcAudioSession.lockForConfiguration()
+        defer { rtcAudioSession.unlockForConfiguration() }
+        do {
+            try rtcAudioSession.setActive(false)
+            Self.activatedAudioSession = false
+        } catch {
+            logger.error("Error deactivating call audio: \(error)")
+        }
+    }
+
     func audioSessionToDefaults() {
         logger.debug("WebRTCClient: audioSession to defaults")
         Self.audioQueue.async {
-            self.rtcAudioSession.lockForConfiguration()
-            defer {
-                self.rtcAudioSession.unlockForConfiguration()
-            }
-            if self.activatedAudioSession {
-                do {
-                    try self.rtcAudioSession.setActive(false)
-                    self.activatedAudioSession = false
-                } catch {
-                    logger.error("Error deactivating call audio: \(error)")
-                }
-            }
             guard Self.audioSessionOwner === self else { return }
+            self.releaseAppAudioActivation()
             Self.audioSessionOwner = nil
+            self.rtcAudioSession.lockForConfiguration()
+            defer { self.rtcAudioSession.unlockForConfiguration() }
             do {
                 try self.rtcAudioSession.setCategory(AVAudioSession.Category.ambient.rawValue)
                 try self.rtcAudioSession.setMode(AVAudioSession.Mode.default.rawValue)
@@ -1023,17 +1087,21 @@ extension WebRTCClient {
 
     @MainActor
     func setAudioEnabled(_ enabled: Bool) {
+        guard let owner = ChatModel.shared.activeCall, owner.webRTCClient === self else { return }
+        owner.microphoneRequested = enabled
+        setCaptureAllowed(enabled)
         if activeCall != nil {
             activeCall?.localAudioTrack = enabled ? createAudioTrack() : nil
             activeCall?.connection.transceivers.first(where: { t in mediaSourceFromTransceiverMid(t.mid) == .mic })?.sender.track = activeCall?.localAudioTrack
         } else if notConnectedCall != nil {
             notConnectedCall?.audioTrack = enabled ? createAudioTrack() : nil
         }
-        ChatModel.shared.activeCall?.localMediaSources.mic = enabled
+        owner.updateMicrophonePermission(AVCaptureDevice.authorizationStatus(for: .audio) == .authorized)
     }
 
     @MainActor
     func setCameraEnabled(_ enabled: Bool) {
+        guard ChatModel.shared.activeCall?.webRTCClient === self else { return }
         if let call = activeCall {
             if enabled {
                 if call.localVideoTrack == nil {

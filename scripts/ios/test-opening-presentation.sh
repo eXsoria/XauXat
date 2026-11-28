@@ -84,6 +84,7 @@ final class AppChatState {
 }
 struct Migration { var startChat = true }
 struct NetworkInfo { var online = true }
+struct TestCall { let usesCallKit: Bool }
 final class Model {
     var networkInfo = NetworkInfo()
     var migrationState: Int?
@@ -95,7 +96,7 @@ final class Model {
     var contentViewAccessAuthenticated = false
     var chatInitialized = false
     var showCallView = false
-    var activeCall: Int?
+    var activeCall: TestCall?
 }
 var activeModel: Model?
 var initializations = 0
@@ -106,9 +107,6 @@ func initChatAndMigrate() {
     precondition(activeModel?.contentViewAccessAuthenticated == true)
     initializations += 1
     activeModel?.chatInitialized = true
-}
-struct CallController {
-    static func useCallKit() -> Bool { true }
 }
 enum LAResult { case success, failed, unavailable }
 enum Mode: Equatable { case system, passcode }
@@ -267,7 +265,7 @@ checks_source = r'''
         expect(requests == busyRequests, "restart initialization also delays auth")
         chatModel.ctrlInitInProgress = false
         chatModel.showCallView = true
-        chatModel.activeCall = 1
+        chatModel.activeCall = TestCall(usesCallKit: true)
         authenticateContentWhenReady()
         expect(requests == busyRequests, "CallKit view retains authentication exception")
         chatModel.showCallView = false
@@ -285,10 +283,20 @@ checks_source = r'''
         result = .unavailable
         authenticateContentViewAccess()
         expect(!prefPerformLA && AlertManager.shared.alerts.last == "unavailable", "existing unavailable fallback is preserved")
+        prefPerformLA = true
+        contentAccessAuthenticationExtended = false
+        chatModel.contentViewAccessAuthenticated = false
+        automaticAuthenticationAttempted = false
+        chatModel.showCallView = true
+        chatModel.activeCall = TestCall(usesCallKit: false)
+        result = nil
+        let inAppRequests = requests
+        authenticateContentWhenReady()
+        expect(requests == inAppRequests + 1, "in-app call still prompts for authentication")
     }
 }
 '''
-(temp / 'main.swift').write_text(adapters + predicate + '\n' + readiness + '\n' + automatic + '\n' + callback + '\n' + checks_source + '\n' + selection + '\nHarness().run()\nprint("\(checks) opening/authentication transition checks passed.")\n')
+(temp / 'main.swift').write_text(adapters + predicate + '\n' + readiness + '\n' + automatic + '\n' + callback + '\n' + checks_source + '\n' + selection + '\nHarness().run()\nprint("\\(checks) opening/authentication transition checks passed.")\n')
 ui = 'import SwiftUI\n' + declaration(sheet, 'class AppSheetState: ObservableObject')
 ui += '''
 @MainActor final class EmbeddedTorManager: ObservableObject {

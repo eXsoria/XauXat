@@ -91,7 +91,7 @@ struct IncomingCallView: View {
             callButton("Accept", Image(systemName: "phone.fill"), Color(red: 0.08, green: 0.50, blue: 0.25)) {
                 answer(invitation, startWithModifiedVoice: false)
             }
-            if !CallController.useCallKit() || invitation.callUUID == nil {
+            if !CallController.useCallKit() || invitation.callUUID.flatMap(UUID.init(uuidString:)) == nil {
                 callButton("Answer with voice mask", Image("xauxat-mask"),
                            Color(red: 0.87, green: 0.81, blue: 0.69), foreground: .black) {
                     answer(invitation, startWithModifiedVoice: true)
@@ -102,6 +102,13 @@ struct IncomingCallView: View {
     }
 
     private func answer(_ invitation: RcvCallInvitation, startWithModifiedVoice: Bool) {
+        guard m.callInvitations[invitation.contact.id]?.matches(invitation) == true else { return }
+        if let previous = m.activeCall, previous.contact.id == invitation.contact.id {
+            // The core already replaced this contact's call; sending an end would cancel the new invitation.
+            guard previous.callUUID == nil || previous.callUUID != invitation.callUUID,
+                  CallManager.clearActiveCall(previous) else { return }
+            cc.reportCallRemoteEnded(call: previous)
+        }
         if let call = m.activeCall {
             cc.endCall(call: call) {
                 DispatchQueue.main.async {

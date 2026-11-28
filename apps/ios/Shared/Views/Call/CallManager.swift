@@ -17,6 +17,12 @@ enum XauXatProductPolicy {
     }
 }
 
+extension RcvCallInvitation {
+    func matches(_ other: RcvCallInvitation) -> Bool {
+        user.userId == other.user.userId && contact.id == other.contact.id && callTs == other.callTs && callUUID == other.callUUID
+    }
+}
+
 class CallManager {
     func newOutgoingCall(_ contact: Contact, _ media: CallMediaType, startWithModifiedVoice: Bool) -> String {
         let media = XauXatProductPolicy.callMedia(media)
@@ -26,6 +32,7 @@ class CallManager {
             callState: .waitCapabilities, initialCallType: media, startWithModifiedVoice: startWithModifiedVoice
         )
         call.speakerEnabled = media == .video
+        if let previous = ChatModel.shared.activeCall { Self.clearActiveCall(previous) }
         ChatModel.shared.activeCall = call
         return uuid
     }
@@ -34,7 +41,11 @@ class CallManager {
         let m = ChatModel.shared
         if let call = m.activeCall, call.callUUID == callUUID {
             m.showCallView = true
-            Task { await m.callCommand.processCommand(.capabilities(media: call.initialCallType)) }
+            Task { @MainActor in
+                guard m.activeCall === call else { return }
+                if call.usesCallKit { call.attachWebRTC() }
+                await call.callCommand.processCommand(.capabilities(media: call.initialCallType))
+            }
             return true
         }
         return false
@@ -52,7 +63,6 @@ class CallManager {
         XauXatCallTiming.mark("incoming.accept")
         let m = ChatModel.shared
         let media = XauXatProductPolicy.callMedia(invitation.callType.media)
-        m.callInvitations.removeValue(forKey: invitation.contact.id)
         let call = Call(
             direction: .incoming,
             contact: invitation.contact,
@@ -69,11 +79,15 @@ class CallManager {
         logger.debug("answerIncomingCall iceServers: \(String(describing: iceServers))")
         // When in active call user wants to accept another call, this can only work after delay (to hide and show activeCallView)
         DispatchQueue.main.asyncAfter(deadline: .now() + (m.activeCall == nil ? 0 : 1)) {
+            guard m.callInvitations[invitation.contact.id]?.matches(invitation) == true else { return }
+            m.callInvitations.removeValue(forKey: invitation.contact.id)
+            if let previous = m.activeCall { Self.clearActiveCall(previous) }
             m.activeCall = call
+            if call.usesCallKit { call.attachWebRTC() }
             m.showCallView = true
 
             Task {
-                await m.callCommand.processCommand(.start(
+                await call.callCommand.processCommand(.start(
                 media: media,
                 aesKey: invitation.sharedKey,
                 iceServers: iceServers,
@@ -85,8 +99,11 @@ class CallManager {
 
     func enableMedia(source: CallMediaSource, enable: Bool, callUUID: String) -> Bool {
         if let call = ChatModel.shared.activeCall, call.callUUID == callUUID {
-            let m = ChatModel.shared
-            Task { await m.callCommand.processCommand(.media(source: source, enable: enable)) }
+            if source == .mic {
+                call.microphoneRequested = enable
+                call.webRTCClient?.setCaptureAllowed(enable)
+            }
+            Task { await call.callCommand.processCommand(.media(source: source, enable: enable)) }
             return true
         }
         return false
@@ -123,6 +140,7 @@ class CallManager {
     static func clearActiveCall(_ call: Call) -> Bool {
         let m = ChatModel.shared
         guard m.activeCall === call else { return false }
+        call.finishWebRTC()
         call.callState = .ended
         m.showCallView = false
         m.activeCallViewIsCollapsed = false
@@ -133,8 +151,7 @@ class CallManager {
     func endCall(invitation: RcvCallInvitation, completed: @escaping () -> Void) {
         let m = ChatModel.shared
         let id = invitation.contact.id
-        guard let current = m.callInvitations[id], current.callTs == invitation.callTs,
-              current.callUUID == invitation.callUUID else {
+        guard m.callInvitations[id]?.matches(invitation) == true else {
             completed()
             return
         }
