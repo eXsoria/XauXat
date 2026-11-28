@@ -5,13 +5,20 @@ import SwiftUI
 typealias ChatId = String
 enum ContactStatus { case active, deleted, deletedByUser }
 struct Contact {
+    let contactId: Int64 = 7
     var contactStatus: ContactStatus
     var active: Bool { contactStatus == .active }
     var isContactCard = false
 }
 enum ChatInfo {
-    case direct(Contact), group, local, contactConnection
-    var chatViewName: String { "Test contact" }
+    case direct(contact: Contact), group, local, contactConnection
+    var id: String { contact == nil ? "#7" : "@7" }
+    var apiId: Int64 { 7 }
+    var contact: Contact? {
+        if case let .direct(contact) = self { return contact }
+        return nil
+    }
+    var chatViewName: String { contact == nil ? "Test group" : "Test contact" }
     var shortDescr: String? { nil }
     var chatTs: Date { Date(timeIntervalSince1970: 1_800_000_000) }
     var nextNtfMode: NtfMode? { nil }
@@ -29,13 +36,16 @@ struct ChatItem {
 }
 struct ChatStats { var unreadCount = 0 }
 final class Chat: ObservableObject, Identifiable {
-    let id = "@7"
+    var id: String { chatInfo.id }
     @Published var chatInfo: ChatInfo
-    var chatItems = [ChatItem()]
+    @Published var chatItems = [ChatItem()]
     var chatStats = ChatStats()
-    init(_ status: ContactStatus) { chatInfo = .direct(Contact(contactStatus: status)) }
+    init(chatInfo: ChatInfo, chatItems: [ChatItem] = [ChatItem()]) {
+        self.chatInfo = chatInfo
+        self.chatItems = chatItems
+    }
 }
-enum ChatDeleteMode { case full(notify: Bool), messages }
+enum ChatDeleteMode { case full(notify: Bool), entity, messages }
 final class ChatModel: ObservableObject {
     static let shared = ChatModel()
     var chatRunning: Bool? = true
@@ -44,6 +54,10 @@ final class ChatModel: ObservableObject {
     @Published var result = "No deletion"
     @Published var opens = 0
     var failOnce = false
+    var clearCalls = 0
+    var deleteCalls = 0
+    func removeChat(_ id: String) { chats.removeAll { $0.id == id } }
+    func addChat(_ chat: Chat) { chats.append(chat) }
 }
 final class ItemsModel {
     static let shared = ItemsModel()
@@ -93,12 +107,22 @@ extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
 
+struct FixtureLog { func error(_ message: String) {} }
+let logger = FixtureLog()
+func responseError(_ error: Error) -> String { error.localizedDescription }
+func mkAlert(title: LocalizedStringKey, message: LocalizedStringKey) -> Alert {
+    Alert(title: Text(title), message: Text(message))
+}
 @MainActor
-func deleteContactChat(_ chat: Chat, chatDeleteMode: ChatDeleteMode) async -> Alert? {
+func apiDeleteContact(id: Int64, chatDeleteMode: ChatDeleteMode) async throws -> Contact {
     let m = ChatModel.shared
+    m.deleteCalls += 1
     if m.failOnce {
         m.failOnce = false
-        return Alert(title: Text("Error deleting chat!"), message: Text("Local store unavailable"))
+        throw NSError(domain: "fixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "Local store unavailable"])
+    }
+    guard let contact = m.chats.compactMap({ $0.chatInfo.contact }).first(where: { $0.contactId == id }) else {
+        throw NSError(domain: "fixture", code: 2)
     }
     switch chatDeleteMode {
     case let .full(notify):
@@ -106,9 +130,17 @@ func deleteContactChat(_ chat: Chat, chatDeleteMode: ChatDeleteMode) async -> Al
         UserDefaults.standard.set(true, forKey: "fixture.deleted")
     case .messages:
         m.result = "Messages deleted; contact retained"
+    case .entity:
+        m.result = "Contact entity removed"
     }
-    m.chats.removeAll { $0.id == chat.id }
-    return nil
+    return contact
+}
+
+@MainActor
+func clearChat(_ chat: Chat) async {
+    chat.chatItems.removeAll()
+    ChatModel.shared.clearCalls += 1
+    ChatModel.shared.result = "Cleared \(chat.id) \(ChatModel.shared.clearCalls) time(s)"
 }
 
 @main struct HomeChatHarness: App {
@@ -124,7 +156,12 @@ func deleteContactChat(_ chat: Chat, chatDeleteMode: ChatDeleteMode) async -> Al
         if !args.contains("preserve-store") {
             UserDefaults.standard.removeObject(forKey: "fixture.deleted")
         }
-        ChatModel.shared.chats = UserDefaults.standard.bool(forKey: "fixture.deleted") ? [] : [Chat(status)]
+        let contact = Chat(chatInfo: .direct(contact: Contact(contactStatus: status)))
+        if args.contains("group-and-contact") {
+            ChatModel.shared.chats = [Chat(chatInfo: .group), contact]
+        } else {
+            ChatModel.shared.chats = UserDefaults.standard.bool(forKey: "fixture.deleted") ? [] : [contact]
+        }
         ChatModel.shared.failOnce = args.contains("fail-once")
         ChatModel.shared.result = "No deletion"
         ChatModel.shared.opens = 0
@@ -144,8 +181,18 @@ func deleteContactChat(_ chat: Chat, chatDeleteMode: ChatDeleteMode) async -> Al
                 }
                 Text(model.result).accessibilityIdentifier("delete.result")
                 Text("Opened \(model.opens)").accessibilityIdentifier("open.result")
+                if ProcessInfo.processInfo.arguments.contains("group-and-contact") {
+                    Button("Check contact-only API") {
+                        guard let group = model.chats.first(where: { $0.chatInfo.contact == nil }) else { return }
+                        Task {
+                            if await deleteContactChat(group) != nil {
+                                model.result = "Rejected group before \(model.deleteCalls) contact requests"
+                            }
+                        }
+                    }
+                }
                 Button("Receive deletion event") {
-                    model.chats.first?.chatInfo = .direct(Contact(contactStatus: .deleted))
+                    model.chats.first?.chatInfo = .direct(contact: Contact(contactStatus: .deleted))
                 }
             }
             .background(XauXatPalette(.light).background)

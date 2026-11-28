@@ -37,6 +37,7 @@ assert '@State private var notificationMode: NotificationsMode?' in welcome
 assert 'ForEach(0..<4' in welcome and 'of 4' in welcome
 assert 'notificationsStep(geometry)' in welcome
 assert 'action: advanceToNotifications' in welcome
+assert 'SecureField("", text: Binding(get: { pin }, set: { pin = Self.onboardingPIN($0) }))' in welcome
 assert 'enabled: notificationMode != nil && !isCompleting' in welcome
 assert 'guard validName, validPIN, notificationMode != nil, !isCompleting' in welcome
 assert '.sheet(item: $proposedNotificationMode)' in welcome
@@ -123,12 +124,17 @@ actions = '\n'.join(declaration(welcome, marker).replace('private func ', 'func 
     'private func acceptNotificationMode(',
     'private func applySelectedNotificationMode(',
 ))
+actions += '\n' + declaration(welcome, 'private static func onboardingPIN(').replace('private static', 'static', 1)
 shared = '@MainActor\n' + declaration(api, 'func xauXatApplyNotificationMode(')
 assert 'NtfManager.shared.requestAuthorization(' in shared
 tests = r'''
 }
 @main struct Runner {
     @MainActor static func main() async {
+        expect(Harness.onboardingPIN("012345") == "012345", "Existing ASCII input keeps leading zeros")
+        expect(Harness.onboardingPIN("٠१２৩۴٥") == "012345", "Localized decimal keyboards produce a PIN the unlock keypad can enter")
+        expect(Harness.onboardingPIN("Ⅳ²½*9") == "9", "Other numeric characters cannot become PIN digits")
+        expect(Harness.onboardingPIN("a012345678") == "012345", "Pasted input stays limited to six digits")
         let h = Harness()
         expect(h.notificationMode == nil, "No onboarding mode is preselected")
         var completions = 0

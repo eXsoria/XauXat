@@ -401,18 +401,12 @@ struct XauXatWelcomeView: View {
                 }
                 .accessibilityHidden(true)
 
-                TextField("", text: $pin)
+                SecureField("", text: Binding(get: { pin }, set: { pin = Self.onboardingPIN($0) }))
                     .keyboardType(.numberPad)
-                    .textContentType(.oneTimeCode)
                     .focused($focusedField, equals: .pin)
-                    .frame(width: 1, height: 1)
-                    .opacity(0.01)
-                    .onChange(of: pin) { newValue in
-                        let sanitized = String(newValue.filter(\.isNumber).prefix(6))
-                        if pin != sanitized {
-                            pin = sanitized
-                        }
-                    }
+                    .foregroundColor(.clear)
+                    .tint(.clear)
+                    .frame(height: 44)
                     .accessibilityLabel("Six digit PIN")
             }
             .contentShape(Rectangle())
@@ -508,6 +502,15 @@ struct XauXatWelcomeView: View {
             .padding(.top, geometry.size.height < 700 ? 24 : 48)
             .padding(.bottom, 32)
         }
+    }
+
+    private static func onboardingPIN(_ input: String) -> String {
+        // The unlock keypad emits ASCII even when the setup keyboard uses local digits.
+        input.unicodeScalars.lazy.compactMap { scalar -> String? in
+            guard scalar.properties.numericType == .decimal,
+                  let digit = scalar.properties.numericValue else { return nil }
+            return String(Int(digit))
+        }.prefix(6).joined()
     }
 
     private func advanceToNotifications() {
@@ -963,7 +966,12 @@ private struct XauXatChatsView: View {
                 }
                 .simultaneousGesture(pullGesture)
                 .refreshable {
-                    try? await reconnectAllServers()
+                    do {
+                        try await reconnectAllServers()
+                    } catch {
+                        let message = (error as? LocalizedError)?.errorDescription ?? responseError(error)
+                        AlertManager.shared.showAlertMsg(title: "Error reconnecting servers", message: "\(message)")
+                    }
                 }
             }
         }
@@ -1294,18 +1302,24 @@ private struct XauXatChatDestination: View {
         } else {
             swipeableRow
                 .confirmationDialog(
-                    "Delete chat?",
+                    chat.chatInfo.contact == nil ? "Clear conversation?" : "Delete chat?",
                     isPresented: $showDeleteConfirmation,
                     titleVisibility: .visible
                 ) {
-                    Button("Delete chat", role: .destructive) {
+                    Button(chat.chatInfo.contact == nil ? "Clear" : "Delete chat", role: .destructive) {
                         closeSwipe()
-                        deleteConversation()
+                        if chat.chatInfo.contact == nil {
+                            Task { await clearChat(chat) }
+                        } else {
+                            deleteConversation()
+                        }
                     }
 
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    if inactiveContact {
+                    if chat.chatInfo.contact == nil {
+                        Text("All messages will be deleted - this cannot be undone! The messages will be deleted ONLY for you.")
+                    } else if inactiveContact {
                         Text("This contact and its conversation will be permanently deleted.")
                     } else {
                         Text("The conversation will be deleted. The contact will remain in Contacts.")
@@ -1398,6 +1412,8 @@ private struct XauXatChatDestination: View {
     private var swipeableRow: some View {
         ZStack(alignment: .trailing) {
             swipeActions
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
                 .zIndex(0)
 
             rowButton
@@ -1405,6 +1421,7 @@ private struct XauXatChatDestination: View {
                 .offset(x: swipeOffset)
                 .contentShape(Rectangle())
                 .highPriorityGesture(horizontalSwipeGesture)
+                .accessibilityAction(named: Text("More")) { showMoreActions = true }
                 .zIndex(1)
         }
         .overlay(alignment: .trailing) {
@@ -1481,7 +1498,7 @@ private struct XauXatChatDestination: View {
             }
 
             swipeAction(
-                title: "Delete",
+                title: chat.chatInfo.contact == nil ? "Clear" : "Delete",
                 systemImage: "trash.fill",
                 foreground: .white,
                 background: .red
@@ -1700,25 +1717,27 @@ private struct XauXatChatMoreSheet: View {
                 onDeleteChat()
             } label: {
                 moreRow(
-                    title: "Delete chat",
+                    title: chat.chatInfo.contact == nil ? "Clear conversation" : "Delete chat",
                     systemImage: "bubble.left",
                     destructive: true
                 )
             }
             .buttonStyle(.plain)
 
-            insetDivider
+            if chat.chatInfo.contact != nil {
+                insetDivider
 
-            Button {
-                onDeleteContact()
-            } label: {
-                moreRow(
-                    title: "Delete contact",
-                    systemImage: "person.crop.circle.badge.xmark",
-                    destructive: true
-                )
+                Button {
+                    onDeleteContact()
+                } label: {
+                    moreRow(
+                        title: "Delete contact",
+                        systemImage: "person.crop.circle.badge.xmark",
+                        destructive: true
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             Spacer(minLength: 8)
 

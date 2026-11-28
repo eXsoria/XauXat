@@ -46,6 +46,12 @@ struct ChatView: View {
     @StateObject private var connectProgressManager = ConnectProgressManager.shared
     @StateObject private var connectionRecovery = XauXatConnectionRecoveryManager.shared
     @State var revealedItems: Set<Int64> = Set()
+    private struct AccessibleDirectChat {
+        let chatId: ChatId
+        let userId: Int64
+    }
+
+    @State private var accessibleDirectChat: AccessibleDirectChat?
     @State var theme: AppTheme = buildTheme()
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
@@ -454,11 +460,22 @@ struct ChatView: View {
                 dismiss()
             }
         }
+        .onChange(of: chatModel.currentUser?.userId) { _ in
+            accessibleDirectChat = nil
+        }
+        .onChange(of: chatModel.users.first { $0.user.userId == chatModel.currentUser?.userId }?.user.hidden) { hidden in
+            if hidden == true { accessibleDirectChat = nil }
+        }
         .onChange(of: chatModel.chatSubStatus) { status in
             updateSubscriptionRecovery(status)
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .active { retryMessageHistoryIfNeeded() }
+            if phase == .active {
+                if let authorized = accessibleDirectChat, authorized.userId == chatModel.currentUser?.userId {
+                    refreshAccessibleDirectChat()
+                }
+                retryMessageHistoryIfNeeded()
+            }
         }
         .onChange(of: chatModel.secondaryPendingInviteeChatOpened) { opened in
             if im.secondaryIMFilter != nil && !opened {
@@ -804,8 +821,20 @@ struct ChatView: View {
         }
     }
 
+    private func refreshAccessibleDirectChat() {
+        if case .direct = chat.chatInfo, let user = chatModel.currentUser,
+           !user.hidden, xauXatStorageScope() == .primary,
+           !chatModel.xauXatIsProtectedProfile(user.userId),
+           !xauXatIsChatLocked(chat.id), !xauXatIsChatHidden(chat.id) {
+            accessibleDirectChat = AccessibleDirectChat(chatId: chat.id, userId: user.userId)
+        } else {
+            accessibleDirectChat = nil
+        }
+    }
+
     // Spec: spec/client/chat-view.md#initChatView
     private func initChatView() {
+        refreshAccessibleDirectChat()
         let cInfo = chat.chatInfo
         // This check prevents the call to apiContactInfo after the app is suspended, and the database is closed.
         if case .active = scenePhase {
@@ -1021,6 +1050,7 @@ struct ChatView: View {
                         ChatItemWithMenu(
                             im: im,
                             chat: $chat,
+                            accessibleDirectChat: $accessibleDirectChat,
                             index: index,
                             isLastItem: index == mergedItems.boxedValue.items.count - 1,
                             chatItem: ci,
@@ -1755,6 +1785,7 @@ struct ChatView: View {
         @EnvironmentObject var theme: AppTheme
         @AppStorage(DEFAULT_PROFILE_IMAGE_CORNER_RADIUS) private var profileRadius = defaultProfileImageCorner
         @Binding @ObservedObject var chat: Chat
+        @Binding var accessibleDirectChat: AccessibleDirectChat?
         @ObservedObject var dummyModel: ChatItemDummyModel = .shared
         let index: Int
         let isLastItem: Bool
@@ -2177,6 +2208,17 @@ struct ChatView: View {
             }
         }
 
+        private func usesReceivedTextLabel(_ ci: ChatItem) -> Bool {
+            guard let authorized = accessibleDirectChat, authorized.chatId == chat.id, m.chatId == chat.id,
+                  let user = m.currentUser, authorized.userId == user.userId, !user.hidden,
+                  case .directRcv = ci.chatDir,
+                  case let .text(body)? = ci.content.msgContent, ci.file == nil,
+                  ci.meta.itemDeleted == nil, ci.meta.itemTimed == nil, !ci.meta.isLive,
+                  ci.quotedItem == nil, ci.meta.itemForwarded == nil,
+                  ci.formattedText?.contains(where: { $0.format != nil }) != true else { return false }
+            return !xauXatIsAnyCodeLockedContent(body)
+        }
+
         func chatItemWithMenu(_ ci: ChatItem, _ range: ClosedRange<Int>?, _ maxWidth: CGFloat, _ itemSeparation: ItemSeparation) -> some View {
             let alignment: Alignment = ci.chatDir.sent ? .trailing : .leading
             let live = composeState.liveMessage != nil
@@ -2223,7 +2265,7 @@ struct ChatView: View {
                                         }
                                 )
                         }
-                        .accessibilityLabel("")
+                        .if(!usesReceivedTextLabel(ci)) { $0.accessibilityLabel("") }
                         if !ci.chatDir.sent {
                             goToItemButton(false)
                         }

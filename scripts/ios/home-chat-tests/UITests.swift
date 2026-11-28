@@ -23,14 +23,15 @@ final class HomeChatTests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed, file: file, line: line)
     }
 
-    private func revealActions() {
+    private func revealActions(for target: XCUIElement? = nil, expected: String = "Delete") {
         XCTAssertFalse(app.staticTexts["legacy.row"].exists, "Deleted contacts must use the ScrollView-compatible row")
+        let row = target ?? self.row
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        waitUntil { self.row.isHittable }
+        waitUntil { row.isHittable }
         let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
         let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
         start.press(forDuration: 0.1, thenDragTo: end)
-        waitUntil { self.action("Delete").isHittable }
+        waitUntil { self.action(expected).isHittable }
     }
 
     private func requestDeletion() {
@@ -79,6 +80,33 @@ final class HomeChatTests: XCTestCase {
         XCTAssertFalse(row.exists)
     }
 
+    func testGroupCanClearItsHistoryWithoutDeletingContactWithSameNumericID() {
+        app.launchArguments.append("group-and-contact")
+        app.launch()
+        let group = app.buttons["xauxat.chat.#7"]
+        revealActions(for: group, expected: "Clear")
+        action("More").tap()
+        XCTAssertTrue(app.buttons["Clear conversation"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["Delete contact"].exists)
+        app.buttons["Clear conversation"].tap()
+        XCTAssertTrue(app.staticTexts["Clear conversation?"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["All messages will be deleted - this cannot be undone! The messages will be deleted ONLY for you."].exists)
+        proof("clear-group-history-confirmation")
+        action("Clear").doubleTap()
+        assertResult("Cleared #7 1 time(s)")
+        XCTAssertTrue(group.exists)
+        XCTAssertTrue(row.exists)
+    }
+
+    func testContactOnlyDeletionRejectsGroupWithSameNumericID() {
+        app.launchArguments.append("group-and-contact")
+        app.launch()
+        app.buttons["Check contact-only API"].tap()
+        assertResult("Rejected group before 0 contact requests")
+        XCTAssertTrue(app.buttons["xauxat.chat.#7"].exists)
+        XCTAssertTrue(row.exists)
+    }
+
     func testLocallyDeletedContactCanBeRemoved() {
         app.launchArguments.append("deleted-by-user")
         app.launch()
@@ -94,7 +122,7 @@ final class HomeChatTests: XCTestCase {
         requestDeletion()
         app.buttons["Delete chat"].tap()
         XCTAssertTrue(app.alerts["Error deleting chat!"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Local store unavailable"].exists)
+        XCTAssertTrue(app.staticTexts["Error: Local store unavailable"].exists)
         proof("deletion-error-retains-contact")
         app.alerts.buttons.firstMatch.tap()
         waitUntil { !self.app.alerts.firstMatch.exists }
