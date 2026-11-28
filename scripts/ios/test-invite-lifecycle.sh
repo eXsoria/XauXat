@@ -12,3 +12,7 @@ swiftc -swift-version 5 -parse-as-library \
 swiftc -swift-version 5 -parse-as-library \
   "$temp/InvitePolicy.swift" "$tests/InvitePolicyTests.swift" -o "$temp/invite-policy-tests"
 "$temp/invite-policy-tests"
+{ echo 'import Foundation'; sed -n '/^func showRetryAlert(/,/^}/p' "$root/apps/ios/Shared/Model/SimpleXAPI.swift"; } > "$temp/InviteRetry.swift"
+swiftc -swift-version 5 -parse-as-library \
+  "$temp/InviteRetry.swift" "$tests/InviteRetryTests.swift" -o "$temp/invite-retry-tests"
+"$temp/invite-retry-tests"

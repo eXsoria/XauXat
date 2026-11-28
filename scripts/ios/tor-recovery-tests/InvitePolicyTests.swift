@@ -121,8 +121,10 @@ func apiDeleteChat(type: ChatType, id: Int64) async throws {
     case .direct: deletedDirectConnections.append(id)
     }
 }
-func apiConnectResponseAlert<R>(_ result: APIResult<R>) async {}
-func contactAlreadyExistsAlert(_ contact: Contact) async {}
+var connectionErrors = 0
+var informedKnownContact: Int64?
+func apiConnectResponseAlert<R>(_ result: APIResult<R>) async { connectionErrors += 1 }
+func contactAlreadyExistsAlert(_ contact: Contact) async { informedKnownContact = contact.contactId }
 func connReqSentAlert(_ type: ConnReqType) -> Int { 0 }
 func planToConnReqType(_ plan: ConnectionPlan) -> ConnReqType? { nil }
 func dismissAllSheets(animated: Bool, completion: (() -> Void)? = nil) { completion?() }
@@ -269,7 +271,11 @@ func dismissAllSheets(animated: Bool, completion: (() -> Void)? = nil) { complet
         _ = xauXatSaveContactInvitePolicy(existingPolicy)
         ChatModel.shared.preparedContact = nextPreparedContact
         knownContact = nextPreparedContact
-        _ = await apiConnectPreparedContact(contactId: 99, incognito: false, msg: nil)
+        let beforeKnownErrors = connectionErrors
+        informedKnownContact = nil
+        let repeated = await apiConnectPreparedContact(contactId: 99, incognito: false, msg: MsgContent())
+        require(repeated == nil && connectionErrors == beforeKnownErrors && informedKnownContact == 99,
+                "An already-connected retry should identify the existing contact and keep the unsent draft")
         require(xauXatObserveContactInvitePolicy(connectionId: 7) == existingPolicy,
                 "The core's already-connected response keeps the connection's own expiry and permissions")
         knownContact = nil

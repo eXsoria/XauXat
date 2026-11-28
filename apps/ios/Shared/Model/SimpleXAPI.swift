@@ -449,7 +449,7 @@ func chatApiSendCmdWithRetry<R: ChatAPIResult>(_ cmd: ChatCommand, bgTask: Bool 
         return await withCheckedContinuation { cont in
             showRetryAlert(
                 alert,
-                onCancel: { _ in
+                onCancel: {
                     cont.resume(returning: nil)
                 },
                 onRetry: {
@@ -464,8 +464,10 @@ func chatApiSendCmdWithRetry<R: ChatAPIResult>(_ cmd: ChatCommand, bgTask: Bool 
 }
 
 @inline(__always)
-func showRetryAlert(_ alert: (title: String, message: String), onCancel: @escaping (UIAlertAction) -> Void, onRetry: @escaping () async -> Void) {
+func showRetryAlert(_ alert: (title: String, message: String), onCancel: @escaping () -> Void, onRetry: @escaping () async -> Void) {
     DispatchQueue.main.async {
+        // A network error can arrive after the app backgrounds, leaving no button to resume the caller.
+        guard getTopViewController() != nil else { onCancel(); return }
         showAlert(
             alert.title,
             message: alert.message,
@@ -473,7 +475,7 @@ func showRetryAlert(_ alert: (title: String, message: String), onCancel: @escapi
                 UIAlertAction(
                     title: NSLocalizedString("Cancel", comment: "alert action"),
                     style: .cancel,
-                    handler: onCancel
+                    handler: { _ in onCancel() }
                 ),
                 UIAlertAction(
                     title: NSLocalizedString("Retry", comment: "alert action"),
@@ -1857,10 +1859,14 @@ func apiConnectPreparedContact(contactId: Int64, incognito: Bool, msg: MsgConten
     }
     guard let (userId, storageScope) = context else { return nil }
     let r: APIResult<ChatResponse1>? = await chatApiSendCmdWithRetry(.apiConnectPreparedContact(contactId: contactId, incognito: incognito, msg: msg))
+    guard await MainActor.run(body: {
+        ChatModel.shared.currentUser?.userId == userId && xauXatStorageScope() == storageScope
+    }) else { return nil }
+    if case let .result(.contactAlreadyExists(_, contact)) = r {
+        await contactAlreadyExistsAlert(contact)
+        return nil // The core did not send the optional introduction. Keep the draft.
+    }
     if case let .result(.startedConnectionToContact(_, contact)) = r {
-        guard await MainActor.run(body: {
-            ChatModel.shared.currentUser?.userId == userId && xauXatStorageScope() == storageScope
-        }) else { return nil }
         // The core emits startedConnectionToContact only after joining a new
         // or prepared connection. Already-connected contacts return a different
         // response. A retry after a failed join needs the same initialization,
@@ -3382,8 +3388,9 @@ func processReceivedMsg(_ res: ChatEvent) async {
                 _ = await MainActor.run { m.upsertChatItem(cInfo, cItem) }
             }
             switch cItem.meta.itemStatus {
-            case .sndNew: ()
-            case .sndSent, .sndRcvd, .sndErrorAuth, .sndError, .sndWarning:
+            // MWARN is retried by the agent. Success or a final send error ends tracking.
+            case .sndNew, .sndWarning: ()
+            case .sndSent, .sndRcvd, .sndErrorAuth, .sndError:
                 OutboundDeliveryManager.shared.statusReachedTerminalState(itemId: cItem.id)
             case .rcvNew, .rcvRead, .invalid: ()
             }

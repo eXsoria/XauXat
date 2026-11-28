@@ -502,7 +502,10 @@ final class ChatModel: ObservableObject {
     @Published var migrationState: MigrationToState? = MigrationToDeviceState.makeMigrationState()
     // audio recording and playback
     @Published var stopPreviousRecPlay: URL? = nil // coordinates currently playing source
-    @Published var draft: ComposeState?
+    private(set) var draftRevision: UInt64 = 0
+    @Published var draft: ComposeState? {
+        didSet { draftRevision &+= 1 }
+    }
     // chat id with chat scope, see draftChatId() - group chat and its support chats have the same chat id
     @Published var draftChatId: String?
     @Published var networkInfo = UserNetworkInfo(networkType: .other, online: true)
