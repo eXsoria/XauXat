@@ -1,0 +1,94 @@
+{-# LANGUAGE LambdaCase, NamedFieldPuns, FlexibleContexts #-}
+module Main where
+import qualified Control.Concurrent.STM as STM
+import Control.Monad
+import Control.Monad.Trans.Except
+import Control.Monad.IO.Class
+import Data.Functor (($>))
+import Data.IORef
+import qualified Data.List.NonEmpty as L
+import qualified Data.Map.Strict as M
+import Data.Maybe
+import qualified Data.Set as S
+import System.Exit
+import qualified TM
+
+data Err = Timeout | Host | Denied | Other | ForwardError deriving (Eq,Show)
+data Mode = SMAlways | SMOther deriving Eq
+data Net = Net { socksProxy :: Maybe (), socksMode :: Mode }
+data Proxy = ProtoServerWithAuth String () deriving (Eq,Show)
+type Dest = (Int,String,Int)
+type AM a = ExceptT Err IO a
+type Setup = Either Err (String, Either Err Int)
+data AgentClient = AgentClient
+  { active :: STM.TVar Bool, smpProxiedRelays :: STM.TVar (M.Map Dest Proxy)
+  , net :: Net, available :: L.NonEmpty Proxy, outcomes :: IORef [Setup], calls :: IORef [(String,String)]
+  }
+temporaryOrHostError e = e == Timeout || e == Host
+getNetworkConfig = pure . net
+getUserServers_ c _ _ = pure $ available c
+proxySrvs = ()
+getNextServer_ alternatives _ = pure ((),L.head alternatives)
+usedOperatorsHosts _ _ = ()
+serverHosts = S.singleton
+isUnusedServer used (ProtoServerWithAuth s _) = S.notMember s used
+tryAllErrors :: AM a -> AM (Either Err a)
+tryAllErrors action = ExceptT $ Right <$> runExceptT action
+catchAllErrors = catchE
+atomically = liftIO . STM.atomically
+stage :: AgentClient -> Maybe Proxy -> Dest -> AM (String, Either Err Int)
+stage c proxySrv_ destSess@(userId,destSrv,_) = do
+  let smpProxiedRelays = Main.smpProxiedRelays c
+      selected@(ProtoServerWithAuth srv _) = ProtoServerWithAuth "first" ()
+      connectProxy (ProtoServerWithAuth name _) = do
+        liftIO $ modifyIORef' (calls c) (++[(name,destSrv)])
+        result <- liftIO $ atomicModifyIORef' (outcomes c) $ \case
+          x:xs -> (xs,x)
+          [] -> error "unexpected extra attempt"
+        either throwE pure result
+-- ACTUAL_POLICY
+
+-- Pin the native dispatch after the setup has finished, including send error propagation.
+forward :: AgentClient -> Maybe Proxy -> AM () -> AM ()
+forward c explicit action' = do
+  (cl,sess_) <- stage c explicit (1,"destination",5)
+  let action _ = action'
+      logServer _ _ _ _ _ = pure ()
+      proxySrv = id
+      destSrv = ""
+      entId = ""
+      logServerError _ = throwE
+-- ACTUAL_DISPATCH
+
+main = do
+  let a=ProtoServerWithAuth "first" (); b=ProtoServerWithAuth "other" (); dest=ProtoServerWithAuth "destination" ()
+      auto=Net (Just ()) SMAlways
+      good=Right ("first",Right 1); alt=Right ("other",Right 2); inner e=Right ("first",Left e)
+      test name net explicit servers inputs pfwd expected setups forwarded = do
+        ready <- STM.newTVarIO True
+        selected <- STM.newTVarIO (M.singleton (1,"destination",5) a)
+        stages <- newIORef []; answers <- newIORef inputs; sends <- newIORef (0::Int)
+        let c=AgentClient ready selected net servers answers stages
+        result <- runExceptT $ forward c explicit $ do
+          liftIO $ modifyIORef' sends (+1)
+          either throwE pure pfwd
+        actual <- readIORef stages; n <- readIORef sends
+        let ok=result==expected && actual==[(s,"destination") | s<-setups] && n==forwarded
+        putStrLn $ (if ok then "PASS " else "FAIL ") ++ name
+        pure ok
+      servers=a L.:| [dest,b]; only=a L.:| [dest]
+  results <- sequence [
+      test "inner PRXY timeout on a newly negotiated relay" auto Nothing servers [inner Timeout,alt] (Right ()) (Right ()) ["first","other"] 1,
+      test "cached PRXY wait returned host error" auto Nothing servers [inner Host,alt] (Right ()) (Right ()) ["first","other"] 1,
+      test "outer socket exception before PFWD" auto Nothing servers [Left Timeout,alt] (Right ()) (Right ()) ["first","other"] 1,
+      test "inner first error survives failed alternative" auto Nothing servers [inner Timeout,Left Other] (Right ()) (Left Timeout) ["first","other"] 0,
+      test "outer first error survives failed alternative" auto Nothing servers [Left Host,Left Other] (Right ()) (Left Host) ["first","other"] 0,
+      test "alternative PRXY failure preserves first error" auto Nothing servers [inner Timeout,Right ("other",Left Denied)] (Right ()) (Left Timeout) ["first","other"] 0,
+      test "explicit proxy is fixed" auto (Just a) servers [inner Timeout] (Right ()) (Left Timeout) ["first"] 0,
+      test "SOCKS proxy absent" (Net Nothing SMAlways) Nothing servers [inner Timeout] (Right ()) (Left Timeout) ["first"] 0,
+      test "SOCKS not required" (Net (Just ()) SMOther) Nothing servers [inner Timeout] (Right ()) (Left Timeout) ["first"] 0,
+      test "permanent PRXY error" auto Nothing servers [inner Denied] (Right ()) (Left Denied) ["first"] 0,
+      test "no disjoint alternative" auto Nothing only [inner Timeout] (Right ()) (Left Timeout) ["first"] 0,
+      test "PFWD failure never enters setup retry" auto Nothing servers [good] (Left ForwardError) (Left ForwardError) ["first"] 1,
+      test "successful first attempt forwards once" auto Nothing servers [good] (Right ()) (Right ()) ["first"] 1]
+  unless (and results) exitFailure

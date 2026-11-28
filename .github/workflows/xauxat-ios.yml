@@ -229,7 +229,10 @@ jobs:
           git clone --filter=blob:none --no-checkout https://github.com/simplex-chat/simplexmq.git "$RUNNER_TEMP/simplexmq"
           git -C "$RUNNER_TEMP/simplexmq" checkout --detach "$ref"
           git -C "$RUNNER_TEMP/simplexmq" submodule update --init --recursive
-          git -C "$RUNNER_TEMP/simplexmq" apply "$GITHUB_WORKSPACE/scripts/nix/simplexmq-smp-proxy-failover.patch" "$GITHUB_WORKSPACE/scripts/nix/simplexmq-redundant-contact-relays.patch"
+          git -C "$RUNNER_TEMP/simplexmq" apply \
+            "$GITHUB_WORKSPACE/scripts/nix/simplexmq-smp-proxy-failover.patch" \
+            "$GITHUB_WORKSPACE/scripts/nix/simplexmq-smp-proxy-setup-result.patch" \
+            "$GITHUB_WORKSPACE/scripts/nix/simplexmq-redundant-contact-relays.patch"
       - name: Run relay outage and deduplication tests
         run: |
           set -euo pipefail
